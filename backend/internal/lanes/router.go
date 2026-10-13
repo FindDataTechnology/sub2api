@@ -10,11 +10,13 @@ package lanes
 import (
 	"net/http"
 
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+
 	"github.com/gin-gonic/gin"
 )
 
-// notImplemented 统一 501 占位：骨架期（tasks 2.2）只定路由形状与鉴权链，
-// 业务实现按切片填入（2.3 计量通道 / 3.x 三车道 v1）。错误体带 lane 标识，
+// notImplemented 统一 501 占位：无适配器时车道只到达路由+鉴权+计费准入层，
+// 业务实现由 3.x 适配器接管（本占位保留为无适配器形状）。错误体带 lane 标识，
 // 与 3.4 的车道统一错误体同构。
 func notImplemented(c *gin.Context, lane string) {
 	c.JSON(http.StatusNotImplemented, gin.H{
@@ -28,9 +30,35 @@ func notImplemented(c *gin.Context, lane string) {
 
 // RegisterGatewayLanes 把三车道路由挂进已带 apiKeyAuth 的 /v1 组。
 // group = routes/gateway.go 的 gateway 组（apiKeyAuth 已挂、组门之前）。
-func RegisterGatewayLanes(group *gin.RouterGroup) {
-	group.POST("/rerank", func(c *gin.Context) { notImplemented(c, "rerank") })
-	group.POST("/search", func(c *gin.Context) { notImplemented(c, "websearch") })
-	group.POST("/audio/transcriptions", func(c *gin.Context) { notImplemented(c, "audio") })
-	group.POST("/audio/speech", func(c *gin.Context) { notImplemented(c, "audio") })
+// meter 可为 nil（未装配计费服务时退化为纯 501 骨架；生产装配后先过计费
+// 准入——窗口耗尽/余额不足在此拒绝，不触上游（tasks 2.3））。
+func RegisterGatewayLanes(group *gin.RouterGroup, meter *Meter) {
+	serve := func(lane string) gin.HandlerFunc {
+		return func(c *gin.Context) { serveLane(c, lane, meter) }
+	}
+	group.POST("/rerank", serve("rerank"))
+	group.POST("/search", serve("websearch"))
+	group.POST("/audio/transcriptions", serve("audio"))
+	group.POST("/audio/speech", serve("audio"))
+}
+
+func serveLane(c *gin.Context, lane string, meter *Meter) {
+	if meter != nil && meter.billing != nil {
+		apiKey, ok := middleware.GetAPIKeyFromContext(c)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": gin.H{
+					"type":    "unauthorized",
+					"message": "missing api key",
+					"lane":    lane,
+				},
+			})
+			return
+		}
+		if err := meter.CheckEligibility(c, apiKey); err != nil {
+			laneBillingError(c, lane, err)
+			return
+		}
+	}
+	notImplemented(c, lane)
 }
