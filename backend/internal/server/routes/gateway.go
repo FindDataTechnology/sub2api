@@ -177,10 +177,11 @@ func RegisterGatewayRoutes(
 		}
 	}
 
-	// 词元三车道（rerank/websearch/audio）计量通道（tasks 2.3，ADR-0024）：
-	// 计费准入 + 用量写回原生账本；服务取 OpenAI 网关 handler 只读访问器
-	//（缝点台账§二「路由注册」「handler 服务访问器」；实现全在 internal/lanes）。
-	lanesMeter := lanes.NewMeterFromOpenAIHandler(h.OpenAIGateway, apiKeyService, cfg)
+	// 词元三车道（rerank/websearch/audio）应用装配（tasks 2.3/2.4，ADR-0024）：
+	// 计量通道（准入+原生账本写入）+ 上游账号池（ListSchedulableByPlatform）；
+	// 服务取 OpenAI 网关 handler / service 只读访问器（缝点台账§二；实现全在
+	// internal/lanes，只增）。
+	lanesApp := lanes.NewFromOpenAIHandler(h.OpenAIGateway, apiKeyService, cfg)
 
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
@@ -191,7 +192,7 @@ func RegisterGatewayRoutes(
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
 	// 车道挂组门之前（不绑 chat 分组语义），与 /v1/sub2api/billing 同位。
-	lanes.RegisterGatewayLanes(gateway, lanesMeter)
+	lanes.RegisterGatewayLanes(gateway, lanesApp)
 	gateway.Use(groupModelAllowlist)
 	gateway.Use(compositeTarget)
 	gateway.Use(requireGroupAnthropic)

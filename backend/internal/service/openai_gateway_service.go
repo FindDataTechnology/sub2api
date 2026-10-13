@@ -1276,3 +1276,9 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 		return "", "", fmt.Errorf("unsupported account type: %s", account.Type)
 	}
 }
+
+// LanesAccountRepo 词元车道（internal/lanes）上游池取数访问器（缝点台账§二
+// 「service 账号仓储访问器」，只增）。
+func (s *OpenAIGatewayService) LanesAccountRepo() AccountRepository {
+	return s.accountRepo
+}

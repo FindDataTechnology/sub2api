@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/handler"
 	pkgerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -42,20 +41,6 @@ func NewMeter(billing *service.BillingCacheService, apiKeyQuota service.APIKeyQu
 		recordUsage: recordUsage,
 		pool:        service.NewUsageRecordWorkerPool(cfg),
 	}
-}
-
-// NewMeterFromOpenAIHandler 从 OpenAI 网关 handler 取计费/计量服务装配（只读
-// 访问器，缝点台账§二「handler 服务访问器」）。handler 未装配网关服务（测试
-// 骨架）时返回 nil——RegisterGatewayLanes 对 nil Meter 退化为纯 501 骨架。
-func NewMeterFromOpenAIHandler(openAI *handler.OpenAIGatewayHandler, apiKeyService *service.APIKeyService, cfg *config.Config) *Meter {
-	if openAI == nil {
-		return nil
-	}
-	gatewayService := openAI.LanesGatewayService()
-	if gatewayService == nil {
-		return nil
-	}
-	return NewMeter(openAI.LanesBillingCacheService(), apiKeyService, gatewayService.RecordUsage, cfg)
 }
 
 // Stop 停用量记录池（进程退出时调用；未停则随进程回收）。

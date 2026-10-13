@@ -32,7 +32,31 @@ func (c *lanesMeterBillingCache) GetUserBalance(context.Context, int64) (float64
 	return c.balance, nil
 }
 
-func newLanesMeterRouteTestRouter(t *testing.T, minBalanceReserve float64, balance float64) (*gin.Engine, string) {
+// lanesMeterAccountRepo 池取数面（第 0 参注入 NewOpenAIGatewayService）：
+// seedAccounts 空 → 池空 → 车道 503；有账号 → 过池停 501 适配器占位。
+type lanesMeterAccountRepo struct {
+	service.AccountRepository
+	seedAccounts []service.Account
+}
+
+func (r *lanesMeterAccountRepo) ListSchedulableByPlatform(_ context.Context, platform string) ([]service.Account, error) {
+	var out []service.Account
+	for _, a := range r.seedAccounts {
+		if a.Platform == platform {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func lanePoolSeedAccounts() []service.Account {
+	return []service.Account{
+		{ID: 11, Platform: "siliconflow", Status: service.StatusActive, Priority: 1},
+		{ID: 12, Platform: "serpapi", Status: service.StatusActive, Priority: 1},
+	}
+}
+
+func newLanesMeterRouteTestRouter(t *testing.T, minBalanceReserve float64, balance float64, seedAccounts []service.Account) (*gin.Engine, string) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{
 		ID:               42,
@@ -64,7 +88,7 @@ func newLanesMeterRouteTestRouter(t *testing.T, minBalanceReserve float64, balan
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	openAIGatewayService := service.NewOpenAIGatewayService(
-		nil, nil, nil, nil, nil, rateRepo, nil, cfg, nil, nil, nil,
+		&lanesMeterAccountRepo{seedAccounts: seedAccounts}, nil, nil, nil, nil, rateRepo, nil, cfg, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	billing := service.NewBillingCacheService(
@@ -96,13 +120,13 @@ func newLanesMeterRouteTestRouter(t *testing.T, minBalanceReserve float64, balan
 
 func TestLanesMeterEligibilityGate(t *testing.T) {
 	t.Run("insufficient balance rejected before lane adapter slot", func(t *testing.T) {
-		router, key := newLanesMeterRouteTestRouter(t, 0.01, 0.005)
+		router, key := newLanesMeterRouteTestRouter(t, 0.01, 0.005, lanePoolSeedAccounts())
 		req := httptest.NewRequest(http.MethodPost, "/v1/search", nil)
 		req.Header.Set("Authorization", "Bearer "+key)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
-		// 403 计费拒付 ≠ 501 占位：证明请求未越过准入层（未触上游）。
+		// 403 计费拒付 ≠ 501 占位 ≠ 503 池空：证明请求未越过准入层（未触上游）。
 		require.Equal(t, http.StatusForbidden, w.Code)
 		var body struct {
 			Error struct {
@@ -117,15 +141,15 @@ func TestLanesMeterEligibilityGate(t *testing.T) {
 		require.NotEmpty(t, body.Error.Message)
 	})
 
-	t.Run("healthy balance passes gate and stops at adapter placeholder", func(t *testing.T) {
-		router, key := newLanesMeterRouteTestRouter(t, 0.01, 10)
+	t.Run("healthy balance passes gates and stops at adapter placeholder", func(t *testing.T) {
+		router, key := newLanesMeterRouteTestRouter(t, 0.01, 10, lanePoolSeedAccounts())
 		for _, path := range []string{"/v1/search", "/v1/rerank", "/v1/audio/transcriptions", "/v1/audio/speech"} {
 			req := httptest.NewRequest(http.MethodPost, path, nil)
 			req.Header.Set("Authorization", "Bearer "+key)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 
-			// 501 = 过准入后停在无适配器占位（3.x 适配器接管此位）。
+			// 501 = 过准入+过池后停在无适配器占位（3.x 适配器接管此位）。
 			require.Equalf(t, http.StatusNotImplemented, w.Code, path)
 			var body struct {
 				Error struct {
@@ -138,8 +162,28 @@ func TestLanesMeterEligibilityGate(t *testing.T) {
 		}
 	})
 
+	t.Run("empty upstream pool yields 503 distinct from 501", func(t *testing.T) {
+		router, key := newLanesMeterRouteTestRouter(t, 0.01, 10, nil)
+		for _, path := range []string{"/v1/search", "/v1/rerank"} {
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			req.Header.Set("Authorization", "Bearer "+key)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			require.Equalf(t, http.StatusServiceUnavailable, w.Code, path)
+			var body struct {
+				Error struct {
+					Type string `json:"type"`
+					Lane string `json:"lane"`
+				} `json:"error"`
+			}
+			require.NoErrorf(t, json.Unmarshal(w.Body.Bytes(), &body), path)
+			require.Equalf(t, "lane_upstream_unavailable", body.Error.Type, path)
+		}
+	})
+
 	t.Run("missing key still 401 before billing", func(t *testing.T) {
-		router, _ := newLanesMeterRouteTestRouter(t, 0.01, 0.005)
+		router, _ := newLanesMeterRouteTestRouter(t, 0.01, 0.005, lanePoolSeedAccounts())
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/search", nil))
 		require.Equal(t, http.StatusUnauthorized, w.Code)
