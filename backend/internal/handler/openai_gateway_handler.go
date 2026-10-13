@@ -4507,3 +4507,13 @@ func summarizeWSCloseErrorForLog(err error) (string, string) {
 	}
 	return closeStatus, closeReason
 }
+
+// ── 词元车道（internal/lanes）只读访问器（缝点台账§二「handler 服务访问器」，只增）──
+// 车道计量需要计费准入与原生账本写入；不走 wire 重排装配，由路由注册层取现成服务实例。
+func (h *OpenAIGatewayHandler) LanesBillingCacheService() *service.BillingCacheService {
+	return h.billingCacheService
+}
+
+func (h *OpenAIGatewayHandler) LanesGatewayService() *service.OpenAIGatewayService {
+	return h.gatewayService
+}
