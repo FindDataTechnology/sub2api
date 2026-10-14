@@ -89,7 +89,7 @@ func newAudioFakeUpstream(t *testing.T, capture *audioUpstreamCapture) *httptest
 
 func newAudioTestApp(upstream *httptest.Server, recorded chan *service.OpenAIRecordUsageInput) *Lanes {
 	lister := &fakeLaneAccountLister{accounts: []service.Account{
-		{ID: 41, Platform: domain.PlatformSiliconFlow, Status: service.StatusActive, Priority: 1,
+		{ID: 41, Platform: domain.PlatformOpenAINext, Status: service.StatusActive, Priority: 1,
 			Credentials: map[string]any{
 				"api_key":  "sk-audio-test",
 				"base_url": upstream.URL,

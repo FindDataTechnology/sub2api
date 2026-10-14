@@ -41,7 +41,7 @@ func (f *fakeLaneAccountLister) ListSchedulableByPlatform(_ context.Context, pla
 }
 
 func TestLanePlatformMapping(t *testing.T) {
-	require.Equal(t, domain.PlatformSiliconFlow, LanePlatform(LaneAudio))
+	require.Equal(t, domain.PlatformOpenAINext, LanePlatform(LaneAudio))
 	require.Equal(t, domain.PlatformSiliconFlow, LanePlatform(LaneRerank))
 	require.Equal(t, domain.PlatformSerpAPI, LanePlatform(LaneWebsearch))
 	require.Equal(t, "", LanePlatform("unknown"))
@@ -50,7 +50,7 @@ func TestLanePlatformMapping(t *testing.T) {
 // 车道上游平台必须走 platformList 登记（台账§二「平台清单」）：账号管理面
 // 下拉即达、IsConcretePlatform/分组校验等派生面一致生效。
 func TestLanePlatformsRegistered(t *testing.T) {
-	for _, id := range []string{domain.PlatformSiliconFlow, domain.PlatformSerpAPI} {
+	for _, id := range []string{domain.PlatformSiliconFlow, domain.PlatformSerpAPI, domain.PlatformOpenAINext} {
 		require.Truef(t, domain.IsConcretePlatform(id), "%s should be registered in platformList", id)
 		spec, ok := domain.LookupPlatform(id)
 		require.Truef(t, ok, "%s should be lookup-able", id)

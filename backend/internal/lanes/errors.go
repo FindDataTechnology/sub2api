@@ -120,8 +120,10 @@ func notImplemented(c *gin.Context, lane string) {
 // 后续一车道多上游时按实际选中的适配器/账号覆盖。
 func LaneEngine(lane string) string {
 	switch lane {
-	case LaneRerank, LaneAudio:
+	case LaneRerank:
 		return laneEngineSiliconFlow
+	case LaneAudio:
+		return laneEngineOpenAINext
 	case LaneWebsearch:
 		return websearchEngineSerpAPI
 	default:
@@ -129,5 +131,8 @@ func LaneEngine(lane string) string {
 	}
 }
 
-// laneEngineSiliconFlow 与 LanePlatform 同义登记（避免 pool 包常量反向依赖）。
-const laneEngineSiliconFlow = "siliconflow"
+// 与 LanePlatform 同义登记（避免 pool 包常量反向依赖）。
+const (
+	laneEngineSiliconFlow = "siliconflow"
+	laneEngineOpenAINext  = "openainext"
+)

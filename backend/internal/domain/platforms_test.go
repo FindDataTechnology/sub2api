@@ -18,6 +18,7 @@ var (
 		// OpenAI 网关族与 CN 供应商清单。
 		PlatformSiliconFlow,
 		PlatformSerpAPI,
+		PlatformOpenAINext,
 	}
 	legacyCompositePrecedence = []string{
 		PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok,
@@ -26,6 +27,7 @@ var (
 		PlatformCline,
 		PlatformSiliconFlow,
 		PlatformSerpAPI,
+		PlatformOpenAINext,
 	}
 	legacyOpenAIGateway = []string{
 		PlatformOpenAI, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo,

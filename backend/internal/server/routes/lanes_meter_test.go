@@ -52,6 +52,7 @@ func (r *lanesMeterAccountRepo) ListSchedulableByPlatform(_ context.Context, pla
 func lanePoolSeedAccounts() []service.Account {
 	return []service.Account{
 		{ID: 11, Platform: "siliconflow", Status: service.StatusActive, Priority: 1},
+		{ID: 13, Platform: "openainext", Status: service.StatusActive, Priority: 1},
 		{ID: 12, Platform: "serpapi", Status: service.StatusActive, Priority: 1},
 	}
 }

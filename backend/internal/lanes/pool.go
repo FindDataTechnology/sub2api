@@ -15,12 +15,15 @@ const (
 	LaneAudio     = "audio"
 )
 
-// LanePlatform 车道 v1 上游平台映射：audio/rerank=硅基（原生 ASR/TTS/rerank，
-// 一平台供两车道）、websearch=SerpAPI（search-relay 既有 key 池可播种，运营连续）。
+// LanePlatform 车道 v1 上游平台映射：rerank=硅基（原生 /v1/rerank）、
+// audio=openai-next 聚合（OpenAI 形状 whisper/tts 系；运营分工：rerank=硅基、
+// audio/image/video=openai-next）、websearch=SerpAPI（search-relay 既有 key 池）。
 func LanePlatform(lane string) string {
 	switch lane {
-	case LaneAudio, LaneRerank:
+	case LaneRerank:
 		return domain.PlatformSiliconFlow
+	case LaneAudio:
+		return domain.PlatformOpenAINext
 	case LaneWebsearch:
 		return domain.PlatformSerpAPI
 	default:

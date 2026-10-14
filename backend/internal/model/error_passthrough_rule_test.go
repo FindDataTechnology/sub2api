@@ -23,5 +23,6 @@ func TestAllPlatformsIncludesEveryConcretePlatform(t *testing.T) {
 		"cline",
 		"siliconflow",
 		"serpapi",
+		"openainext",
 	}, AllPlatforms())
 }

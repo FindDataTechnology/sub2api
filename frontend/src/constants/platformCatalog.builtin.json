@@ -290,6 +290,12 @@
       "display_name": "SerpAPI 搜索",
       "gateway": "lane",
       "cn_provider": false
+    },
+    {
+      "id": "openainext",
+      "display_name": "OpenAI-Next 聚合",
+      "gateway": "lane",
+      "cn_provider": false
     }
   ],
   "composite_precedence": [
@@ -307,6 +313,7 @@
     "command_code",
     "cline",
     "siliconflow",
-    "serpapi"
+    "serpapi",
+    "openainext"
   ]
 }
