@@ -143,8 +143,8 @@ func TestLanesMeterEligibilityGate(t *testing.T) {
 
 	t.Run("healthy balance passes gates; unimplemented lanes stop at 501", func(t *testing.T) {
 		router, key := newLanesMeterRouteTestRouter(t, 0.01, 10, lanePoolSeedAccounts())
-		// audio/websearch 适配器未落地（3.2/3.3）：过准入+过池后停在 501 占位。
-		for _, path := range []string{"/v1/search", "/v1/audio/transcriptions", "/v1/audio/speech"} {
+		// audio 适配器未落地（3.2）：过准入+过池后停在 501 占位。
+		for _, path := range []string{"/v1/audio/transcriptions", "/v1/audio/speech"} {
 			req := httptest.NewRequest(http.MethodPost, path, nil)
 			req.Header.Set("Authorization", "Bearer "+key)
 			w := httptest.NewRecorder()
@@ -160,13 +160,16 @@ func TestLanesMeterEligibilityGate(t *testing.T) {
 			require.NoErrorf(t, json.Unmarshal(w.Body.Bytes(), &body), path)
 			require.Equalf(t, "lane_not_implemented", body.Error.Type, path)
 		}
-		// rerank 已有适配器（3.1）：nil body 命中形状校验 400（契约见 lanes/rerank_test.go）。
-		req := httptest.NewRequest(http.MethodPost, "/v1/rerank", nil)
-		req.Header.Set("Authorization", "Bearer "+key)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-		require.Equal(t, http.StatusBadRequest, w.Code)
-		require.Contains(t, w.Body.String(), "invalid_request_error")
+		// rerank（3.1）/websearch（3.3）已有适配器：nil body 命中形状校验 400
+		//（契约见 lanes/rerank_test.go、lanes/websearch_test.go）。
+		for _, path := range []string{"/v1/rerank", "/v1/search"} {
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			req.Header.Set("Authorization", "Bearer "+key)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			require.Equalf(t, http.StatusBadRequest, w.Code, path)
+			require.Contains(t, w.Body.String(), "invalid_request_error")
+		}
 	})
 
 	t.Run("empty upstream pool yields 503 distinct from 501", func(t *testing.T) {

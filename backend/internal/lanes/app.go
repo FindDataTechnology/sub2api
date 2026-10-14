@@ -17,7 +17,7 @@ type Lanes struct {
 }
 
 // NewFromOpenAIHandler 从 OpenAI 网关 handler 装配车道应用。
-// 适配器注册表=车道 v1 落地进度：3.1 rerank 已接；audio/websearch 未接（501）。
+// 适配器注册表=车道 v1 落地进度：3.1 rerank、3.3 websearch 已接；audio 未接（501）。
 func NewFromOpenAIHandler(openAI *handler.OpenAIGatewayHandler, apiKeyService *service.APIKeyService, cfg *config.Config) *Lanes {
 	if openAI == nil {
 		return nil
@@ -30,7 +30,8 @@ func NewFromOpenAIHandler(openAI *handler.OpenAIGatewayHandler, apiKeyService *s
 		Meter: NewMeter(openAI.LanesBillingCacheService(), apiKeyService, gatewayService.RecordUsage, cfg),
 		Pool:  NewPool(gatewayService.LanesAccountRepo()),
 		adapters: map[string]LaneAdapter{
-			LaneRerank: NewRerankAdapter(),
+			LaneRerank:    NewRerankAdapter(),
+			LaneWebsearch: NewWebsearchAdapter(),
 		},
 	}
 }
