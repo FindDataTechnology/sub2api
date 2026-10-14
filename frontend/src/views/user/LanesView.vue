@@ -103,6 +103,6 @@ const examples = computed(() =>
     `curl -X POST {base}/v1/audio/speech \\`,
     `  -H "Authorization: Bearer {apiKey}" -H "Content-Type: application/json" \\`,
     `  -d '{"input":"你好，壹座","voice":"FunAudioLLM/CosyVoice2-0.5B:alex"}' --output out.mp3`,
-  ].join('\n').replaceAll('{base}', 'https://token.finddatatech.cloud').replaceAll('{apiKey}', 'ciyuan-...')
+  ].join('\n').split('{base}').join('https://token.finddatatech.cloud').split('{apiKey}').join('ciyuan-...')
 )
 </script>
