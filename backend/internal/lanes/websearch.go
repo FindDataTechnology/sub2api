@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -194,14 +193,16 @@ func (a *WebsearchAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account
 				a.respond(c, engine, results, websearchSourceUser, started)
 				if meter != nil {
 					// BYOK 笔计量 0 费（4.2，成本分支=台账缝点「分组价目」）：
-					// 用量行保留归因（UpstreamModel=byok:<hash8>），账号位合成
-					// serpapi 空行（AccountID=0=无池账号，上游费用在用户侧）。
+					// 用量行保留归因（UpstreamModel=byok:<hash8>）。账号位锚定池
+					// 首号——usage_logs.account_id 是 NOT NULL+外键（v0.2.16-5 线上
+					// 实证：合成 ID=0 账号被 fkey 拒、行丢失）；归因真相在前缀字段，
+					// 费率为 0 故账号侧统计零影响。
 					meter.WriteUsage(c, apiKey, UsageInput{
 						Lane:             LaneWebsearch,
 						Model:            "websearch:" + engine,
 						UpstreamModel:    websearchBYOKMarker + tag,
 						RequestID:        laneRequestID(c),
-						Account:          &service.Account{ID: 0, Platform: domain.PlatformSerpAPI},
+						Account:          accounts[0],
 						WebSearchCalls:   1,
 						Duration:         time.Since(started),
 						UpstreamEndpoint: serpAPISearchPath,

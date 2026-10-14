@@ -357,7 +357,9 @@ func TestWebsearchBYOKUserKeyServes(t *testing.T) {
 	select {
 	case input := <-recorded:
 		require.Equal(t, 1, input.Result.WebSearchCalls)
-		require.Equal(t, int64(0), input.Account.ID, "BYOK 笔不归因池账号")
+		// 账号位锚定池首号（usage_logs.account_id 外键约束，v0.2.16-5 线上实证）；
+		// 归因真相在 UpstreamModel 前缀。
+		require.Equal(t, int64(31), input.Account.ID)
 		require.True(t, strings.HasPrefix(input.Result.UpstreamModel, websearchBYOKMarker), "归因=byok:<hash8>")
 	case <-time.After(2 * time.Second):
 		t.Fatal("byok usage was not recorded")
