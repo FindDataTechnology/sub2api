@@ -598,6 +598,20 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		//（用户专属 > 分组 rate_multiplier > 系统默认），与分组表单的价格预览承诺一致。
 		return s.billingService.CalculateWebSearchCost(result.WebSearchCalls, webSearchPricePerCallFromAPIKey(apiKey), webSearchMultiplier), nil
 	}
+	if result != nil && result.RerankRequests > 0 {
+		// 词元 rerank 车道按请求计费（fork 缝点，台账§二「分组价目」）：单价取
+		// 分组 rerank_price_per_request；nil=未配置→0 计费并告警（开放前须配置）。
+		// 倍率口径同 web search：基础倍率（用户专属 > 分组 > 默认），无高峰因子。
+		if price := rerankPricePerRequestFromAPIKey(apiKey); price == nil {
+			logger.L().With(
+				zap.String("component", "service.openai_gateway.rerank_lane"),
+				zap.String("model", billingModel),
+				zap.Int64("api_key_id", apiKey.ID),
+				zap.Any("group_id", apiKey.GroupID),
+			).Warn("rerank_lane.price_missing_bill_zero")
+		}
+		return s.billingService.CalculateRerankCost(result.RerankRequests, rerankPricePerRequestFromAPIKey(apiKey), webSearchMultiplier), nil
+	}
 	if isGrokVideoUsageResult(result, billingModels) {
 		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
 			return s.calculateOpenAIVideoCost(ctx, billingModel, apiKey, result, videoMultiplier), nil

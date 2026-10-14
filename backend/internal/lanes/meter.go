@@ -72,6 +72,7 @@ type UsageInput struct {
 	RequestID        string
 	Account          *service.Account // 车道上游池账号（2.4 落地；测试可注入桩）
 	WebSearchCalls   int
+	RerankRequests   int // rerank 车道成功请求数（按请求计费，单价=分组 rerank_price_per_request）
 	Audio            *service.AudioUsage
 	Duration         time.Duration
 	UpstreamEndpoint string
@@ -91,6 +92,7 @@ func (m *Meter) WriteUsage(c *gin.Context, apiKey *service.APIKey, in UsageInput
 			Model:          in.Model,
 			UpstreamModel:  in.UpstreamModel,
 			WebSearchCalls: in.WebSearchCalls,
+			RerankRequests: in.RerankRequests,
 			AudioUsage:     in.Audio,
 			Duration:       in.Duration,
 		},

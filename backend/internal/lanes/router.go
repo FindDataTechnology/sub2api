@@ -82,7 +82,11 @@ func serveLane(c *gin.Context, lane string, app *Lanes) {
 			laneUpstreamUnavailable(c, lane)
 			return
 		}
-		_ = account // 3.x 适配器在此接管：携带 account 调上游 + WriteUsage 计量
+		if adapter := app.Adapter(lane); adapter != nil {
+			adapter.Serve(c, apiKey, account, app.Meter)
+			return
+		}
+		_ = account // 未落地车道：501 占位（适配器 3.x 逐车道接管）
 	}
 	notImplemented(c, lane)
 }

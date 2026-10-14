@@ -510,6 +510,20 @@ func (_c *GroupCreate) SetNillableWebSearchPricePerCall(v *float64) *GroupCreate
 	return _c
 }
 
+// SetRerankPricePerRequest sets the "rerank_price_per_request" field.
+func (_c *GroupCreate) SetRerankPricePerRequest(v float64) *GroupCreate {
+	_c.mutation.SetRerankPricePerRequest(v)
+	return _c
+}
+
+// SetNillableRerankPricePerRequest sets the "rerank_price_per_request" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableRerankPricePerRequest(v *float64) *GroupCreate {
+	if v != nil {
+		_c.SetRerankPricePerRequest(*v)
+	}
+	return _c
+}
+
 // SetSearchPricePer1k sets the "search_price_per_1k" field.
 func (_c *GroupCreate) SetSearchPricePer1k(v float64) *GroupCreate {
 	_c.mutation.SetSearchPricePer1k(v)
@@ -1327,6 +1341,11 @@ func (_c *GroupCreate) check() error {
 	if _, ok := _c.mutation.VideoRateMultiplier(); !ok {
 		return &ValidationError{Name: "video_rate_multiplier", err: errors.New(`ent: missing required field "Group.video_rate_multiplier"`)}
 	}
+	if v, ok := _c.mutation.RerankPricePerRequest(); ok {
+		if err := group.RerankPricePerRequestValidator(v); err != nil {
+			return &ValidationError{Name: "rerank_price_per_request", err: fmt.Errorf(`ent: validator failed for field "Group.rerank_price_per_request": %w`, err)}
+		}
+	}
 	if v, ok := _c.mutation.SearchPricePer1k(); ok {
 		if err := group.SearchPricePer1kValidator(v); err != nil {
 			return &ValidationError{Name: "search_price_per_1k", err: fmt.Errorf(`ent: validator failed for field "Group.search_price_per_1k": %w`, err)}
@@ -1601,6 +1620,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.WebSearchPricePerCall(); ok {
 		_spec.SetField(group.FieldWebSearchPricePerCall, field.TypeFloat64, value)
 		_node.WebSearchPricePerCall = &value
+	}
+	if value, ok := _c.mutation.RerankPricePerRequest(); ok {
+		_spec.SetField(group.FieldRerankPricePerRequest, field.TypeFloat64, value)
+		_node.RerankPricePerRequest = &value
 	}
 	if value, ok := _c.mutation.SearchPricePer1k(); ok {
 		_spec.SetField(group.FieldSearchPricePer1k, field.TypeFloat64, value)
@@ -2467,6 +2490,30 @@ func (u *GroupUpsert) AddWebSearchPricePerCall(v float64) *GroupUpsert {
 // ClearWebSearchPricePerCall clears the value of the "web_search_price_per_call" field.
 func (u *GroupUpsert) ClearWebSearchPricePerCall() *GroupUpsert {
 	u.SetNull(group.FieldWebSearchPricePerCall)
+	return u
+}
+
+// SetRerankPricePerRequest sets the "rerank_price_per_request" field.
+func (u *GroupUpsert) SetRerankPricePerRequest(v float64) *GroupUpsert {
+	u.Set(group.FieldRerankPricePerRequest, v)
+	return u
+}
+
+// UpdateRerankPricePerRequest sets the "rerank_price_per_request" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateRerankPricePerRequest() *GroupUpsert {
+	u.SetExcluded(group.FieldRerankPricePerRequest)
+	return u
+}
+
+// AddRerankPricePerRequest adds v to the "rerank_price_per_request" field.
+func (u *GroupUpsert) AddRerankPricePerRequest(v float64) *GroupUpsert {
+	u.Add(group.FieldRerankPricePerRequest, v)
+	return u
+}
+
+// ClearRerankPricePerRequest clears the value of the "rerank_price_per_request" field.
+func (u *GroupUpsert) ClearRerankPricePerRequest() *GroupUpsert {
+	u.SetNull(group.FieldRerankPricePerRequest)
 	return u
 }
 
@@ -3681,6 +3728,34 @@ func (u *GroupUpsertOne) UpdateWebSearchPricePerCall() *GroupUpsertOne {
 func (u *GroupUpsertOne) ClearWebSearchPricePerCall() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearWebSearchPricePerCall()
+	})
+}
+
+// SetRerankPricePerRequest sets the "rerank_price_per_request" field.
+func (u *GroupUpsertOne) SetRerankPricePerRequest(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetRerankPricePerRequest(v)
+	})
+}
+
+// AddRerankPricePerRequest adds v to the "rerank_price_per_request" field.
+func (u *GroupUpsertOne) AddRerankPricePerRequest(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddRerankPricePerRequest(v)
+	})
+}
+
+// UpdateRerankPricePerRequest sets the "rerank_price_per_request" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateRerankPricePerRequest() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateRerankPricePerRequest()
+	})
+}
+
+// ClearRerankPricePerRequest clears the value of the "rerank_price_per_request" field.
+func (u *GroupUpsertOne) ClearRerankPricePerRequest() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearRerankPricePerRequest()
 	})
 }
 
@@ -5141,6 +5216,34 @@ func (u *GroupUpsertBulk) UpdateWebSearchPricePerCall() *GroupUpsertBulk {
 func (u *GroupUpsertBulk) ClearWebSearchPricePerCall() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearWebSearchPricePerCall()
+	})
+}
+
+// SetRerankPricePerRequest sets the "rerank_price_per_request" field.
+func (u *GroupUpsertBulk) SetRerankPricePerRequest(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetRerankPricePerRequest(v)
+	})
+}
+
+// AddRerankPricePerRequest adds v to the "rerank_price_per_request" field.
+func (u *GroupUpsertBulk) AddRerankPricePerRequest(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddRerankPricePerRequest(v)
+	})
+}
+
+// UpdateRerankPricePerRequest sets the "rerank_price_per_request" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateRerankPricePerRequest() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateRerankPricePerRequest()
+	})
+}
+
+// ClearRerankPricePerRequest clears the value of the "rerank_price_per_request" field.
+func (u *GroupUpsertBulk) ClearRerankPricePerRequest() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearRerankPricePerRequest()
 	})
 }
 
