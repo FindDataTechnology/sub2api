@@ -141,40 +141,26 @@ func TestLanesMeterEligibilityGate(t *testing.T) {
 		require.NotEmpty(t, body.Error.Message)
 	})
 
-	t.Run("healthy balance passes gates; unimplemented lanes stop at 501", func(t *testing.T) {
+	t.Run("healthy balance passes gates; all four lane routes reach their adapters", func(t *testing.T) {
 		router, key := newLanesMeterRouteTestRouter(t, 0.01, 10, lanePoolSeedAccounts())
-		// audio 适配器未落地（3.2）：过准入+过池后停在 501 占位。
-		for _, path := range []string{"/v1/audio/transcriptions", "/v1/audio/speech"} {
+		// 三车道 v1 全接（3.1 rerank / 3.2 audio / 3.3 websearch）：501 占位位不再
+		// 出现于任一路经——nil body 命中各适配器形状校验 400
+		//（契约见 lanes/rerank_test.go、websearch_test.go、audio_test.go）。
+		for _, path := range []string{"/v1/rerank", "/v1/search", "/v1/audio/transcriptions", "/v1/audio/speech"} {
 			req := httptest.NewRequest(http.MethodPost, path, nil)
 			req.Header.Set("Authorization", "Bearer "+key)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 
-			require.Equalf(t, http.StatusNotImplemented, w.Code, path)
-			var body struct {
-				Error struct {
-					Type string `json:"type"`
-					Lane string `json:"lane"`
-				} `json:"error"`
-			}
-			require.NoErrorf(t, json.Unmarshal(w.Body.Bytes(), &body), path)
-			require.Equalf(t, "lane_not_implemented", body.Error.Type, path)
-		}
-		// rerank（3.1）/websearch（3.3）已有适配器：nil body 命中形状校验 400
-		//（契约见 lanes/rerank_test.go、lanes/websearch_test.go）。
-		for _, path := range []string{"/v1/rerank", "/v1/search"} {
-			req := httptest.NewRequest(http.MethodPost, path, nil)
-			req.Header.Set("Authorization", "Bearer "+key)
-			w := httptest.NewRecorder()
-			router.ServeHTTP(w, req)
 			require.Equalf(t, http.StatusBadRequest, w.Code, path)
-			require.Contains(t, w.Body.String(), "invalid_request_error")
+			require.Containsf(t, w.Body.String(), "invalid_request_error", path)
 		}
 	})
 
-	t.Run("empty upstream pool yields 503 distinct from 501", func(t *testing.T) {
+	t.Run("empty upstream pool yields 503 distinct from adapter slot", func(t *testing.T) {
 		router, key := newLanesMeterRouteTestRouter(t, 0.01, 10, nil)
-		for _, path := range []string{"/v1/search", "/v1/rerank"} {
+		// 池空先于适配器：四条路由全部 503（不与 400/501 混淆）。
+		for _, path := range []string{"/v1/rerank", "/v1/search", "/v1/audio/transcriptions", "/v1/audio/speech"} {
 			req := httptest.NewRequest(http.MethodPost, path, nil)
 			req.Header.Set("Authorization", "Bearer "+key)
 			w := httptest.NewRecorder()
