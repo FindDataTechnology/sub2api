@@ -1009,7 +1009,15 @@ func decodeUpstreamBillingProbeSnapshot(extra map[string]any) *UpstreamBillingPr
 // type=apikey by the admin form, so only pre-existing type=upstream rows
 // cannot turn the probe on.
 func IsUpstreamBillingProbeIdentity(platform, accountType string) bool {
-	return accountType == AccountTypeAPIKey && domain.IsConcretePlatform(platform)
+	if accountType != AccountTypeAPIKey {
+		return false
+	}
+	// 词元车道平台（Gateway=lane，fork 缝点）不是 chat 上游：不向其 base_url
+	// 发 /v1/sub2api/billing 探测（无意义且白白外发账号 key）。
+	if spec, ok := domain.LookupPlatform(platform); ok && spec.Gateway == domain.PlatformGatewayLane {
+		return false
+	}
+	return domain.IsConcretePlatform(platform)
 }
 
 func isUpstreamBillingProbeAccount(account *Account) bool {
