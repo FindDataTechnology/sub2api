@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -39,28 +38,6 @@ type RerankAdapter struct {
 
 func NewRerankAdapter() *RerankAdapter {
 	return &RerankAdapter{client: &http.Client{Timeout: 30 * time.Second}}
-}
-
-// laneUpstreamError 上游失败统一 5xx（3.4 全家桶的雏形）：lane 标识、不泄露
-// 上游响应体、不计费（WriteUsage 只在成功路径调用）。
-func laneUpstreamError(c *gin.Context, lane string, upstreamStatus int) {
-	c.JSON(http.StatusBadGateway, gin.H{
-		"error": gin.H{
-			"type":    "lane_upstream_error",
-			"message": fmt.Sprintf("%s lane upstream request failed (status %d)", lane, upstreamStatus),
-			"lane":    lane,
-		},
-	})
-}
-
-func laneBadRequest(c *gin.Context, lane, message string) {
-	c.JSON(http.StatusBadRequest, gin.H{
-		"error": gin.H{
-			"type":    "invalid_request_error",
-			"message": message,
-			"lane":    lane,
-		},
-	})
 }
 
 // laneRequestID 用量行关联：优先客户端 X-Request-Id，缺省生成。
@@ -110,8 +87,8 @@ func (a *RerankAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account *s
 
 	apiKeyStr, _ := account.Credentials["api_key"].(string)
 	if apiKeyStr == "" {
-		// 池里进了无凭据账号：视为车道侧配置错误（5xx 家族、不计费）。
-		laneUpstreamError(c, LaneRerank, 0)
+		// 池里进了无凭据账号：车道侧配置错误（502、不计费、不暴露账号细节）。
+		laneUpstreamMisconfigured(c, LaneRerank)
 		return
 	}
 	baseURL, _ := account.Credentials["base_url"].(string)
@@ -140,11 +117,11 @@ func (a *RerankAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account *s
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		laneUpstreamError(c, LaneRerank, resp.StatusCode)
+		laneUpstreamHTTPError(c, LaneRerank, resp.StatusCode)
 		return
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		laneUpstreamError(c, LaneRerank, resp.StatusCode)
+		laneUpstreamHTTPError(c, LaneRerank, resp.StatusCode)
 		return
 	}
 

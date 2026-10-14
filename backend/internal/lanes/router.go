@@ -8,37 +8,14 @@
 package lanes
 
 import (
-	"net/http"
-
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
-// notImplemented 统一 501 占位：过准入、有上游账号后停在无适配器位（3.x 适配器
-// 接管此位：携带 account 调上游 + Meter.WriteUsage 计量）。错误体带 lane 标识，
-// 与 3.4 的车道统一错误体同构。
-func notImplemented(c *gin.Context, lane string) {
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error": gin.H{
-			"type":    "lane_not_implemented",
-			"message": lane + " lane is not implemented yet (ciyuan lanes skeleton)",
-			"lane":    lane,
-		},
-	})
-}
-
-// laneUpstreamUnavailable 池空（tasks 2.4）：车道暂无可用上游，503 与 501 占位
-// 可区分——上游未配置/全部停用是一回事，适配器缺失是另一回事。
-func laneUpstreamUnavailable(c *gin.Context, lane string) {
-	c.JSON(http.StatusServiceUnavailable, gin.H{
-		"error": gin.H{
-			"type":    "lane_upstream_unavailable",
-			"message": lane + " lane has no available upstream account (configure one in admin accounts)",
-			"lane":    lane,
-		},
-	})
-}
+// 车道错误面统一构造函数见 errors.go（tasks 3.4）：notImplemented /
+// laneUpstreamUnavailable / laneBadRequest / laneUpstreamError /
+// laneUpstreamHTTPError / laneUpstreamMisconfigured 三车道共用同一形状与判据。
 
 // RegisterGatewayLanes 把三车道路由挂进已带 apiKeyAuth 的 /v1 组。
 // group = routes/gateway.go 的 gateway 组（apiKeyAuth 已挂、组门之前）。
@@ -61,13 +38,9 @@ func serveLane(c *gin.Context, lane string, app *Lanes) {
 	}
 	apiKey, ok := middleware.GetAPIKeyFromContext(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": gin.H{
-				"type":    "unauthorized",
-				"message": "missing api key",
-				"lane":    lane,
-			},
-		})
+		// 正常路径由 apiKeyAuth 中间件先拦（401）；此分支仅在中间件未装配
+		// （如测试裸挂载）时出现，保持同一错误形状。
+		laneUnauthorized(c, lane)
 		return
 	}
 	if app.Meter != nil && app.Meter.billing != nil {
