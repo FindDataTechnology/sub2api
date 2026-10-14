@@ -27,10 +27,13 @@ const (
 
 // 词元车道上游平台标识（ADR-0024，tasks 2.4）：车道池与 3.x 适配器按此取账号。
 const (
-	// PlatformSiliconFlow 硅基流动：audio（ASR/TTS）+ rerank 双车道上游（原生 /v1/rerank）。
+	// PlatformSiliconFlow 硅基流动：rerank 车道上游（原生 /v1/rerank）。
 	PlatformSiliconFlow = "siliconflow"
 	// PlatformSerpAPI SerpAPI：websearch 车道上游（平台 search-relay 既有 key 池可播种）。
 	PlatformSerpAPI = "serpapi"
+	// PlatformOpenAINext openai-next 聚合渠道：audio 车道上游（OpenAI 形状
+	// whisper/tts 系，运营指定 rerank=硅基、audio=本渠道的分工）。
+	PlatformOpenAINext = "openainext"
 )
 
 // PlatformSpec 描述一个具体（非 composite）平台。
@@ -66,6 +69,7 @@ var platformList = []PlatformSpec{
 	//（词元单管理员，风险受控）；车道池取数=ListSchedulableByPlatform。
 	{ID: PlatformSiliconFlow, DisplayName: "SiliconFlow 硅基流动", Gateway: PlatformGatewayLane},
 	{ID: PlatformSerpAPI, DisplayName: "SerpAPI 搜索", Gateway: PlatformGatewayLane},
+	{ID: PlatformOpenAINext, DisplayName: "OpenAI-Next 聚合", Gateway: PlatformGatewayLane},
 }
 
 var platformIndex = func() map[string]int {

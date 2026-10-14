@@ -42,7 +42,7 @@ func laneCases() []laneCase {
 			content: "application/json", body: []byte(`{"q":"q"}`),
 		},
 		{
-			lane: LaneAudio, platform: domain.PlatformSiliconFlow, path: "/v1/audio/speech",
+			lane: LaneAudio, platform: domain.PlatformOpenAINext, path: "/v1/audio/speech",
 			content: "application/json", body: []byte(`{"input":"x"}`), isTTS: true,
 		},
 	}
