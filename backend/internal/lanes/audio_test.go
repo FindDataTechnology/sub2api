@@ -101,7 +101,7 @@ func newAudioTestApp(upstream *httptest.Server, recorded chan *service.OpenAIRec
 	}}
 	return &Lanes{
 		Meter: meter,
-		Pool:  NewPool(lister),
+		Pool:  NewPool(lister, nil),
 		adapters: map[string]LaneAdapter{
 			LaneAudio: NewAudioAdapter(),
 		},
@@ -380,6 +380,98 @@ func TestAudioLaneUpstreamFailureNotBilled(t *testing.T) {
 	select {
 	case <-recorded:
 		t.Fatal("failed upstream calls must not be billed")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// 轮转（ciyuan-lane-pool-failover 3.2）：TTS 首号 402 → 换二号线成功并计量归因。
+func TestAudioTTSFailoverToSecondAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var mu sync.Mutex
+	served := []string{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		mu.Lock()
+		served = append(served, auth)
+		mu.Unlock()
+		if strings.HasSuffix(auth, "sk-a") {
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = w.Write([]byte(`{"error":{"message":"Insufficient balance"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("fake-mp3"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	writer := newFakeCooldownWriter()
+	lister := &fakeLaneAccountLister{accounts: []service.Account{
+		{ID: 1, Platform: domain.PlatformOpenAINext, Status: service.StatusActive, Priority: 1,
+			Credentials: map[string]any{"api_key": "sk-a", "base_url": upstream.URL}},
+		{ID: 2, Platform: domain.PlatformOpenAINext, Status: service.StatusActive, Priority: 2,
+			Credentials: map[string]any{"api_key": "sk-b", "base_url": upstream.URL}},
+	}}
+	recorded := make(chan *service.OpenAIRecordUsageInput, 1)
+	app := &Lanes{
+		Meter: &Meter{recordUsage: func(_ context.Context, input *service.OpenAIRecordUsageInput) error {
+			recorded <- input
+			return nil
+		}},
+		Pool: NewPool(lister, writer),
+		adapters: map[string]LaneAdapter{
+			LaneAudio: NewAudioAdapter(),
+		},
+	}
+
+	w := serveAudio(t, app, "/v1/audio/speech", []byte(`{"input":"你好"}`), "application/json")
+	require.Equal(t, http.StatusOK, w.Code)
+	mu.Lock()
+	require.Len(t, served, 2)
+	mu.Unlock()
+	require.Len(t, writer.writes[1], 1, "首号落额度类冷却")
+	select {
+	case input := <-recorded:
+		require.Equal(t, int64(2), input.Account.ID, "计量归因二号线")
+	case <-time.After(2 * time.Second):
+		t.Fatal("usage was not recorded")
+	}
+}
+
+// 全池尽（两号都 500）→ 502 不计费，两号都落瞬态冷却。
+func TestAudioTTSAllExhausted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(upstream.Close)
+
+	writer := newFakeCooldownWriter()
+	lister := &fakeLaneAccountLister{accounts: []service.Account{
+		{ID: 1, Platform: domain.PlatformOpenAINext, Status: service.StatusActive, Priority: 1,
+			Credentials: map[string]any{"api_key": "sk-a", "base_url": upstream.URL}},
+		{ID: 2, Platform: domain.PlatformOpenAINext, Status: service.StatusActive, Priority: 2,
+			Credentials: map[string]any{"api_key": "sk-b", "base_url": upstream.URL}},
+	}}
+	recorded := make(chan *service.OpenAIRecordUsageInput, 1)
+	app := &Lanes{
+		Meter: &Meter{recordUsage: func(_ context.Context, input *service.OpenAIRecordUsageInput) error {
+			recorded <- input
+			return nil
+		}},
+		Pool: NewPool(lister, writer),
+		adapters: map[string]LaneAdapter{
+			LaneAudio: NewAudioAdapter(),
+		},
+	}
+
+	w := serveAudio(t, app, "/v1/audio/speech", []byte(`{"input":"你好"}`), "application/json")
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.Contains(t, w.Body.String(), "lane_upstream_error")
+	require.Len(t, writer.writes[1], 1)
+	require.Len(t, writer.writes[2], 1)
+	select {
+	case <-recorded:
+		t.Fatal("exhausted pool must not be billed")
 	case <-time.After(200 * time.Millisecond):
 	}
 }

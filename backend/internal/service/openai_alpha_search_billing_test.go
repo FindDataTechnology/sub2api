@@ -100,3 +100,25 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesWebSearchPricePerCall(t *testi
 	require.NotNil(t, roundTrip.Group.WebSearchPricePerCall)
 	require.InDelta(t, 0.008, *roundTrip.Group.WebSearchPricePerCall, 1e-12)
 }
+
+// 词元 websearch BYOK 笔（ciyuan-lane-pool-failover 4.2，fork 缝点「分组价目」）：
+// UpstreamModel=byok:<hash8> 前缀 → 费率恒 0（分组价/倍率均不影响），计量保留。
+func TestCalculateOpenAIRecordUsageCostWebSearchBYOKZeroCost(t *testing.T) {
+	t.Parallel()
+	svc := &OpenAIGatewayService{billingService: &BillingService{}}
+	groupID := int64(11)
+	apiKey := &APIKey{ID: 1, GroupID: &groupID, Group: &Group{ID: groupID, Platform: PlatformOpenAI, WebSearchPricePerCall: float64Ptr(0.02)}}
+
+	// BYOK 笔：即使分组价 0.02 + 倍率 5.0，也恒 0 费。
+	byok := &OpenAIForwardResult{Model: "websearch:serpapi", UpstreamModel: "byok:1a2b3c4d", WebSearchCalls: 1}
+	cost, err := svc.calculateOpenAIRecordUsageCost(context.Background(), byok, apiKey, []string{"websearch:serpapi"}, 1.0, 1.0, 1.0, 5.0, UsageTokens{}, "", boolPtr(false), false, time.Time{})
+	require.NoError(t, err)
+	require.Zero(t, cost.TotalCost)
+	require.Zero(t, cost.ActualCost)
+
+	// 同形状非 BYOK（无前缀）照常计费——分支判据只认 byok: 前缀。
+	pool := &OpenAIForwardResult{Model: "websearch:serpapi", UpstreamModel: "serpapi:google_light", WebSearchCalls: 1}
+	cost, err = svc.calculateOpenAIRecordUsageCost(context.Background(), pool, apiKey, []string{"websearch:serpapi"}, 1.0, 1.0, 1.0, 1.0, UsageTokens{}, "", boolPtr(false), false, time.Time{})
+	require.NoError(t, err)
+	require.InDelta(t, 0.02, cost.TotalCost, 1e-12)
+}

@@ -68,7 +68,7 @@ func newWebsearchTestApp(upstream *httptest.Server, recorded chan *service.OpenA
 	}}
 	return &Lanes{
 		Meter: meter,
-		Pool:  NewPool(lister),
+		Pool:  NewPool(lister, nil),
 		adapters: map[string]LaneAdapter{
 			LaneWebsearch: NewWebsearchAdapter(),
 		},
@@ -274,4 +274,158 @@ func TestWebsearchLanePassthroughWhitelist(t *testing.T) {
 	// 调用者不能覆盖 api_key 控制参数（白名单外）。
 	require.Equal(t, "serpapi-test-key", capture.query.Get("api_key"))
 	capture.mu.Unlock()
+}
+
+// ── BYOK 三态（ciyuan-lane-pool-failover 4.1/4.2）────────────────────────────
+// 按 api_key 分流的上游桩：user-key 成功/user-key 失败/pool-key 正常 三路。
+func newWebsearchBYOKUpstream(t *testing.T) (*httptest.Server, *[]string) {
+	t.Helper()
+	var mu sync.Mutex
+	seen := &[]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.URL.Query().Get("api_key")
+		mu.Lock()
+		*seen = append(*seen, key)
+		mu.Unlock()
+		switch key {
+		case "user-good-key":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"organic_results":[{"title":"用户key结果","link":"https://u.example/1","snippet":"来自用户 key"}]}`))
+		case "user-bad-key":
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"Invalid API key. Please check your account."}`))
+		default: // 池账号 key
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"organic_results":[{"title":"池结果","link":"https://p.example/1","snippet":"来自池"}]}`))
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server, seen
+}
+
+func newWebsearchBYOKApp(upstream *httptest.Server, recorded chan *service.OpenAIRecordUsageInput, writer *fakeCooldownWriter) *Lanes {
+	lister := &fakeLaneAccountLister{accounts: []service.Account{
+		{ID: 31, Platform: domain.PlatformSerpAPI, Status: service.StatusActive, Priority: 1,
+			Credentials: map[string]any{"api_key": "pool-key", "base_url": upstream.URL}},
+	}}
+	return &Lanes{
+		Meter: &Meter{recordUsage: func(_ context.Context, input *service.OpenAIRecordUsageInput) error {
+			recorded <- input
+			return nil
+		}},
+		Pool: NewPool(lister, writer),
+		adapters: map[string]LaneAdapter{
+			LaneWebsearch: NewWebsearchAdapter(),
+		},
+	}
+}
+
+func serveWebsearchWithBYOK(t *testing.T, app *Lanes, userKey string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/search", strings.NewReader(`{"engine":"serpapi","q":"测试","num":3}`))
+	req.Header.Set("Content-Type", "application/json")
+	if userKey != "" {
+		req.Header.Set(websearchBYOKHeader, userKey)
+	}
+	router := gin.New()
+	group := router.Group("/v1")
+	group.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+			ID: 100, User: &service.User{ID: 7}, Group: &service.Group{ID: 42, Platform: service.PlatformOpenAI},
+		})
+		c.Next()
+	})
+	RegisterGatewayLanes(group, app)
+	router.ServeHTTP(w, req)
+	return w
+}
+
+// 状态①用户 key 优先：user 来源标注 + 0 费计量（byok: 归因 + WebSearchCalls=1 + AccountID=0）。
+func TestWebsearchBYOKUserKeyServes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream, seen := newWebsearchBYOKUpstream(t)
+	recorded := make(chan *service.OpenAIRecordUsageInput, 1)
+	writer := newFakeCooldownWriter()
+	app := newWebsearchBYOKApp(upstream, recorded, writer)
+
+	w := serveWebsearchWithBYOK(t, app, "user-good-key")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, websearchSourceUser, w.Header().Get("x-search-source"))
+	require.Contains(t, w.Body.String(), "用户key结果")
+
+	select {
+	case input := <-recorded:
+		require.Equal(t, 1, input.Result.WebSearchCalls)
+		require.Equal(t, int64(0), input.Account.ID, "BYOK 笔不归因池账号")
+		require.True(t, strings.HasPrefix(input.Result.UpstreamModel, websearchBYOKMarker), "归因=byok:<hash8>")
+	case <-time.After(2 * time.Second):
+		t.Fatal("byok usage was not recorded")
+	}
+	// 池 key 不被消耗。
+	for _, k := range *seen {
+		require.Equal(t, "user-good-key", k)
+	}
+}
+
+// 状态②用户 key 失败回退池：pool-after-user-failure 如实标注 + 正常计费 + hash8 冷却。
+func TestWebsearchBYOKFallbackToPool(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream, _ := newWebsearchBYOKUpstream(t)
+	recorded := make(chan *service.OpenAIRecordUsageInput, 1)
+	writer := newFakeCooldownWriter()
+	app := newWebsearchBYOKApp(upstream, recorded, writer)
+
+	w := serveWebsearchWithBYOK(t, app, "user-bad-key")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, websearchSourcePoolAfterUserFailure, w.Header().Get("x-search-source"))
+	require.Contains(t, w.Body.String(), "池结果")
+
+	// 用户 key（401=额度/auth 类）进 12h 冷却。
+	require.True(t, byokCooling(byokTagOf("user-bad-key")))
+
+	select {
+	case input := <-recorded:
+		require.Equal(t, int64(31), input.Account.ID, "回退池笔归因池账号")
+		require.Equal(t, 1, input.Result.WebSearchCalls)
+		require.Equal(t, "serpapi:google_light", input.Result.UpstreamModel)
+	case <-time.After(2 * time.Second):
+		t.Fatal("fallback usage was not recorded")
+	}
+}
+
+// 状态③冷却中的用户 key 直接走池（不再打用户 key），来源仍如实标注。
+func TestWebsearchBYOKCoolingSkipsUserKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream, seen := newWebsearchBYOKUpstream(t)
+	recorded := make(chan *service.OpenAIRecordUsageInput, 1)
+	writer := newFakeCooldownWriter()
+	app := newWebsearchBYOKApp(upstream, recorded, writer)
+
+	byokSetCooldown(byokTagOf("user-good-key"), laneCooldownExhausting) // 预置冷却
+	w := serveWebsearchWithBYOK(t, app, "user-good-key")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, websearchSourcePoolAfterUserFailure, w.Header().Get("x-search-source"))
+	require.Contains(t, w.Body.String(), "池结果")
+	for _, k := range *seen {
+		require.Equal(t, "pool-key", k, "cooling user key must not be tried")
+	}
+}
+
+// key 值不泄露：错误体/响应不含用户 key 原文；归因仅 hash8。
+func TestWebsearchBYOKKeyNeverLeaked(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream, _ := newWebsearchBYOKUpstream(t)
+	recorded := make(chan *service.OpenAIRecordUsageInput, 1)
+	writer := newFakeCooldownWriter()
+	app := newWebsearchBYOKApp(upstream, recorded, writer)
+
+	w := serveWebsearchWithBYOK(t, app, "user-bad-key")
+	require.NotContains(t, w.Body.String(), "user-bad-key")
+	select {
+	case input := <-recorded:
+		require.NotContains(t, input.Result.UpstreamModel, "user-bad-key")
+	case <-time.After(2 * time.Second):
+	}
+	require.Equal(t, 8, len(byokTagOf("user-bad-key")), "归因=8 hex 字符 hash 前缀")
 }

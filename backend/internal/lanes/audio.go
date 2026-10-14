@@ -50,12 +50,12 @@ func NewAudioAdapter() *AudioAdapter {
 	return &AudioAdapter{client: &http.Client{Timeout: 120 * time.Second}}
 }
 
-func (a *AudioAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account *service.Account, meter *Meter) {
+func (a *AudioAdapter) Serve(c *gin.Context, apiKey *service.APIKey, accounts []*service.Account, pool *Pool, meter *Meter) {
 	switch c.FullPath() {
 	case "/v1/audio/transcriptions":
-		a.serveTranscriptions(c, apiKey, account, meter)
+		a.serveTranscriptions(c, apiKey, accounts, pool, meter)
 	case "/v1/audio/speech":
-		a.serveSpeech(c, apiKey, account, meter)
+		a.serveSpeech(c, apiKey, accounts, pool, meter)
 	default:
 		notImplemented(c, LaneAudio)
 	}
@@ -223,7 +223,7 @@ func writeASRResponse(c *gin.Context, form *asrFormData, raw []byte, verbose asr
 	}
 }
 
-func (a *AudioAdapter) serveTranscriptions(c *gin.Context, apiKey *service.APIKey, account *service.Account, meter *Meter) {
+func (a *AudioAdapter) serveTranscriptions(c *gin.Context, apiKey *service.APIKey, accounts []*service.Account, pool *Pool, meter *Meter) {
 	started := time.Now()
 	body, err := io.ReadAll(io.LimitReader(c.Request.Body, audioMaxUploadBytes+1))
 	if err != nil {
@@ -256,82 +256,89 @@ func (a *AudioAdapter) serveTranscriptions(c *gin.Context, apiKey *service.APIKe
 		laneBadRequest(c, LaneAudio, fmt.Sprintf("unsupported response_format %q; supported: %s", form.responseFormat, strings.Join(audioSupportedASRFormats, ", ")))
 		return
 	}
-	apiKeyStr, _ := account.Credentials["api_key"].(string)
-	if apiKeyStr == "" {
-		laneUpstreamMisconfigured(c, LaneAudio)
-		return
-	}
 
 	upstreamBody, contentType, err := buildASRUpstreamBody(form)
 	if err != nil {
 		laneBadRequest(c, LaneAudio, "failed to serialize upstream request")
 		return
 	}
-	httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, laneUpstreamBaseURL(account)+siliconflowAudioTranscriptionsPath, bytes.NewReader(upstreamBody))
-	if err != nil {
-		laneUpstreamError(c, LaneAudio, 0)
-		return
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+apiKeyStr)
-	httpReq.Header.Set("Content-Type", contentType)
 
-	resp, err := a.client.Do(httpReq)
-	if err != nil {
-		laneUpstreamError(c, LaneAudio, 0)
-		return
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, audioASRResponseLimit))
-	if err != nil {
-		laneUpstreamError(c, LaneAudio, resp.StatusCode)
-		return
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		laneUpstreamHTTPError(c, LaneAudio, resp.StatusCode)
-		return
-	}
-	var verbose asrVerboseResponse
-	if err := json.Unmarshal(respBody, &verbose); err != nil {
-		laneUpstreamError(c, LaneAudio, resp.StatusCode)
-		return
-	}
-	// 时长=计费依据：上游 verbose_json.duration 优先；缺则 wav 头兜底；再缺
-	// 记 0 并告警（宁少勿虚计，观测位）。
-	durationSeconds := verbose.Duration
-	if durationSeconds <= 0 {
-		if d := wavDurationSeconds(form.fileBytes); d > 0 {
-			durationSeconds = d
-		} else {
-			logger.L().With(
-				zap.String("component", "lanes.audio.stt"),
-				zap.String("engine", "siliconflow"),
-			).Warn("lanes.audio.stt_duration_unavailable_bill_zero")
+	serveWithFailover(c, LaneAudio, pool, accounts, func(account *service.Account) (bool, *upstreamFailure) {
+		apiKeyStr, _ := account.Credentials["api_key"].(string)
+		if apiKeyStr == "" {
+			return false, &upstreamFailure{misconfigured: true}
 		}
-	}
-
-	writeASRResponse(c, form, respBody, verbose)
-
-	if meter != nil {
-		model := form.model
-		if model == "" {
-			model = audioDefaultSTTModel
+		httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, laneUpstreamBaseURL(account)+siliconflowAudioTranscriptionsPath, bytes.NewReader(upstreamBody))
+		if err != nil {
+			return false, &upstreamFailure{status: 0}
 		}
-		meter.WriteUsage(c, apiKey, UsageInput{
-			Lane:             LaneAudio,
-			Model:            "audio:stt",
-			UpstreamModel:    "siliconflow:" + model,
-			RequestID:        laneRequestID(c),
-			Account:          account,
-			Audio:            &service.AudioUsage{Mode: "stt", DurationOrUnits: durationSeconds / 3600},
-			Duration:         time.Since(started),
-			UpstreamEndpoint: siliconflowAudioTranscriptionsPath,
-		})
-	}
+		httpReq.Header.Set("Authorization", "Bearer "+apiKeyStr)
+		httpReq.Header.Set("Content-Type", contentType)
+
+		resp, err := a.client.Do(httpReq)
+		if err != nil {
+			return false, &upstreamFailure{status: 0}
+		}
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, audioASRResponseLimit))
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity {
+				// 调用者上传内容问题（编码/超长等）换号无意义 → 终态。
+				laneUpstreamHTTPError(c, LaneAudio, resp.StatusCode)
+				return true, nil
+			}
+			failure := &upstreamFailure{status: resp.StatusCode}
+			if readErr == nil {
+				failure.bodyExcerpt = string(respBody)
+			}
+			return false, failure
+		}
+		if readErr != nil {
+			return false, &upstreamFailure{status: resp.StatusCode}
+		}
+		var verbose asrVerboseResponse
+		if err := json.Unmarshal(respBody, &verbose); err != nil {
+			return false, &upstreamFailure{status: resp.StatusCode}
+		}
+		// 时长=计费依据：上游 verbose_json.duration 优先；缺则 wav 头兜底；再缺
+		// 记 0 并告警（宁少勿虚计，观测位）。
+		durationSeconds := verbose.Duration
+		if durationSeconds <= 0 {
+			if d := wavDurationSeconds(form.fileBytes); d > 0 {
+				durationSeconds = d
+			} else {
+				logger.L().With(
+					zap.String("component", "lanes.audio.stt"),
+					zap.String("engine", "siliconflow"),
+				).Warn("lanes.audio.stt_duration_unavailable_bill_zero")
+			}
+		}
+
+		writeASRResponse(c, form, respBody, verbose)
+
+		if meter != nil {
+			model := form.model
+			if model == "" {
+				model = audioDefaultSTTModel
+			}
+			meter.WriteUsage(c, apiKey, UsageInput{
+				Lane:             LaneAudio,
+				Model:            "audio:stt",
+				UpstreamModel:    "siliconflow:" + model,
+				RequestID:        laneRequestID(c),
+				Account:          account,
+				Audio:            &service.AudioUsage{Mode: "stt", DurationOrUnits: durationSeconds / 3600},
+				Duration:         time.Since(started),
+				UpstreamEndpoint: siliconflowAudioTranscriptionsPath,
+			})
+		}
+		return true, nil
+	})
 }
 
 // ── TTS：/v1/audio/speech ─────────────────────────────────────────────────────
 
-func (a *AudioAdapter) serveSpeech(c *gin.Context, apiKey *service.APIKey, account *service.Account, meter *Meter) {
+func (a *AudioAdapter) serveSpeech(c *gin.Context, apiKey *service.APIKey, accounts []*service.Account, pool *Pool, meter *Meter) {
 	started := time.Now()
 	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 4<<20))
 	if err != nil {
@@ -361,57 +368,61 @@ func (a *AudioAdapter) serveSpeech(c *gin.Context, apiKey *service.APIKey, accou
 	if _, ok := req["response_format"]; !ok {
 		req["response_format"] = "mp3"
 	}
-	apiKeyStr, _ := account.Credentials["api_key"].(string)
-	if apiKeyStr == "" {
-		laneUpstreamMisconfigured(c, LaneAudio)
-		return
-	}
 	upstreamBody, err := json.Marshal(req)
 	if err != nil {
 		laneBadRequest(c, LaneAudio, "failed to serialize request")
 		return
 	}
-	httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, laneUpstreamBaseURL(account)+siliconflowAudioSpeechPath, bytes.NewReader(upstreamBody))
-	if err != nil {
-		laneUpstreamError(c, LaneAudio, 0)
-		return
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+apiKeyStr)
-	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := a.client.Do(httpReq)
-	if err != nil {
-		laneUpstreamError(c, LaneAudio, 0)
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10)) // 排空不计费
-		laneUpstreamHTTPError(c, LaneAudio, resp.StatusCode)
-		return
-	}
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "audio/mpeg"
-	}
-	audioBytes, err := io.ReadAll(io.LimitReader(resp.Body, audioMaxUploadBytes))
-	if err != nil {
-		laneUpstreamError(c, LaneAudio, resp.StatusCode)
-		return
-	}
-	c.Data(http.StatusOK, contentType, audioBytes)
+	serveWithFailover(c, LaneAudio, pool, accounts, func(account *service.Account) (bool, *upstreamFailure) {
+		apiKeyStr, _ := account.Credentials["api_key"].(string)
+		if apiKeyStr == "" {
+			return false, &upstreamFailure{misconfigured: true}
+		}
+		httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, laneUpstreamBaseURL(account)+siliconflowAudioSpeechPath, bytes.NewReader(upstreamBody))
+		if err != nil {
+			return false, &upstreamFailure{status: 0}
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+apiKeyStr)
+		httpReq.Header.Set("Content-Type", "application/json")
 
-	if meter != nil {
-		chars := utf8.RuneCountInString(input)
-		meter.WriteUsage(c, apiKey, UsageInput{
-			Lane:             LaneAudio,
-			Model:            "audio:tts",
-			UpstreamModel:    "siliconflow:" + model,
-			RequestID:        laneRequestID(c),
-			Account:          account,
-			Audio:            &service.AudioUsage{Mode: "tts", DurationOrUnits: float64(chars) / 1_000_000},
-			Duration:         time.Since(started),
-			UpstreamEndpoint: siliconflowAudioSpeechPath,
-		})
-	}
+		resp, err := a.client.Do(httpReq)
+		if err != nil {
+			return false, &upstreamFailure{status: 0}
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			failure := laneUpstreamFailureFromResponse(resp)
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity {
+				laneUpstreamHTTPError(c, LaneAudio, resp.StatusCode)
+				return true, nil
+			}
+			return false, failure
+		}
+		contentType := resp.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = "audio/mpeg"
+		}
+		audioBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, audioMaxUploadBytes))
+		resp.Body.Close()
+		if readErr != nil {
+			return false, &upstreamFailure{status: resp.StatusCode}
+		}
+		c.Data(http.StatusOK, contentType, audioBytes)
+
+		if meter != nil {
+			chars := utf8.RuneCountInString(input)
+			meter.WriteUsage(c, apiKey, UsageInput{
+				Lane:             LaneAudio,
+				Model:            "audio:tts",
+				UpstreamModel:    "siliconflow:" + model,
+				RequestID:        laneRequestID(c),
+				Account:          account,
+				Audio:            &service.AudioUsage{Mode: "tts", DurationOrUnits: float64(chars) / 1_000_000},
+				Duration:         time.Since(started),
+				UpstreamEndpoint: siliconflowAudioSpeechPath,
+			})
+		}
+		return true, nil
+	})
 }

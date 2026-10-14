@@ -50,16 +50,15 @@ func serveLane(c *gin.Context, lane string, app *Lanes) {
 		}
 	}
 	if app.Pool != nil {
-		account, err := app.Pool.Pick(c.Request.Context(), LanePlatform(lane))
-		if err != nil {
+		accounts, err := app.Pool.Candidates(c.Request.Context(), LanePlatform(lane))
+		if err != nil || len(accounts) == 0 {
 			laneUpstreamUnavailable(c, lane)
 			return
 		}
 		if adapter := app.Adapter(lane); adapter != nil {
-			adapter.Serve(c, apiKey, account, app.Meter)
+			adapter.Serve(c, apiKey, accounts, app.Pool, app.Meter)
 			return
 		}
-		_ = account // 未落地车道：501 占位（适配器 3.x 逐车道接管）
 	}
 	notImplemented(c, lane)
 }

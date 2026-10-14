@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -12,8 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 池单测（tasks 2.4）：lane→平台映射、登记面、选择语义（priority ASC 首个
-// active；非 active 跳过；空池/nil 池=ErrNoLaneAccount）。
+// 池单测：lane→平台映射、登记面、候选语义（v1.1 Candidates 全列表 priority
+// ASC）、冷却写（分级时长+节流+best-effort）。
 type fakeLaneAccountLister struct {
 	service.AccountRepository
 	accounts []service.Account
@@ -26,7 +28,9 @@ func (f *fakeLaneAccountLister) ListSchedulableByPlatform(_ context.Context, pla
 	}
 	var out []service.Account
 	for _, a := range f.accounts {
-		if a.Platform == platform {
+		// 镜像 repo 谓词：status=active（schedulable/冷却过滤由真 repo 承担，
+		// Candidates 不重复过滤——冷却生效=账号从列表消失，见 Candidates 注释）。
+		if a.Platform == platform && a.Status == service.StatusActive {
 			out = append(out, a)
 		}
 	}
@@ -38,6 +42,25 @@ func (f *fakeLaneAccountLister) ListSchedulableByPlatform(_ context.Context, pla
 		return out[i].ID < out[j].ID
 	})
 	return out, nil
+}
+
+// fakeCooldownWriter 冷却写桩：记录 (id, until, reason) 供断言。
+type fakeCooldownWriter struct {
+	mu      sync.Mutex
+	writes  map[int64][]time.Duration // id -> durations（相对写入时刻）
+	reasons map[int64]string
+}
+
+func newFakeCooldownWriter() *fakeCooldownWriter {
+	return &fakeCooldownWriter{writes: map[int64][]time.Duration{}, reasons: map[int64]string{}}
+}
+
+func (f *fakeCooldownWriter) SetTempUnschedulable(_ context.Context, id int64, until time.Time, reason string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.writes[id] = append(f.writes[id], time.Until(until))
+	f.reasons[id] = reason
+	return nil
 }
 
 func TestLanePlatformMapping(t *testing.T) {
@@ -60,7 +83,7 @@ func TestLanePlatformsRegistered(t *testing.T) {
 	}
 }
 
-func TestPoolPick(t *testing.T) {
+func TestPoolCandidates(t *testing.T) {
 	lister := &fakeLaneAccountLister{accounts: []service.Account{
 		{ID: 2, Platform: domain.PlatformSerpAPI, Status: service.StatusActive, Priority: 10},
 		// priority 更小者先调度（repo ORDER BY priority ASC，fake 保持同序）
@@ -68,35 +91,63 @@ func TestPoolPick(t *testing.T) {
 		{ID: 3, Platform: domain.PlatformSerpAPI, Status: service.StatusDisabled, Priority: 0},
 		{ID: 4, Platform: domain.PlatformSiliconFlow, Status: service.StatusActive},
 	}}
-	pool := NewPool(lister)
+	pool := NewPool(lister, nil)
 
-	acc, err := pool.Pick(context.Background(), domain.PlatformSerpAPI)
+	// v1.1：全候选列表（轮转循环在适配器层），序=priority ASC。
+	accs, err := pool.Candidates(context.Background(), domain.PlatformSerpAPI)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), acc.ID) // 首个 active（paused 的 priority=0 被跳过）
+	require.Len(t, accs, 2)
+	require.Equal(t, int64(1), accs[0].ID)
+	require.Equal(t, int64(2), accs[1].ID)
 
-	acc, err = pool.Pick(context.Background(), domain.PlatformSiliconFlow)
+	accs, err = pool.Candidates(context.Background(), domain.PlatformSiliconFlow)
 	require.NoError(t, err)
-	require.Equal(t, int64(4), acc.ID)
+	require.Len(t, accs, 1)
+	require.Equal(t, int64(4), accs[0].ID)
 }
 
-func TestPoolPickEmptyAndErrors(t *testing.T) {
+func TestPoolCandidatesEmptyAndErrors(t *testing.T) {
 	var nilPool *Pool
-	_, err := nilPool.Pick(context.Background(), domain.PlatformSerpAPI)
+	_, err := nilPool.Candidates(context.Background(), domain.PlatformSerpAPI)
 	require.ErrorIs(t, err, ErrNoLaneAccount)
 
 	emptyLister := &fakeLaneAccountLister{}
-	_, err = NewPool(emptyLister).Pick(context.Background(), domain.PlatformSerpAPI)
+	_, err = NewPool(emptyLister, nil).Candidates(context.Background(), domain.PlatformSerpAPI)
 	require.ErrorIs(t, err, ErrNoLaneAccount)
 
-	_, err = NewPool(nil).Pick(context.Background(), domain.PlatformSerpAPI)
+	_, err = NewPool(nil, nil).Candidates(context.Background(), domain.PlatformSerpAPI)
 	require.ErrorIs(t, err, ErrNoLaneAccount)
 
 	dbErr := errors.New("db down")
-	_, err = NewPool(&fakeLaneAccountLister{err: dbErr}).Pick(context.Background(), domain.PlatformSerpAPI)
+	_, err = NewPool(&fakeLaneAccountLister{err: dbErr}, nil).Candidates(context.Background(), domain.PlatformSerpAPI)
 	require.ErrorIs(t, err, dbErr)
 
 	_, err = NewPool(&fakeLaneAccountLister{accounts: []service.Account{
 		{ID: 9, Platform: domain.PlatformSerpAPI, Status: service.StatusDisabled},
-	}}).Pick(context.Background(), domain.PlatformSerpAPI)
+	}}, nil).Candidates(context.Background(), domain.PlatformSerpAPI)
 	require.ErrorIs(t, err, ErrNoLaneAccount) // 全停用=池空
+}
+
+// 冷却写：时长透传 + 同账号 60s 节流（第二笔被吞）+ 不同账号互不影响。
+func TestPoolCooldownThrottle(t *testing.T) {
+	writer := newFakeCooldownWriter()
+	pool := NewPool(nil, writer)
+
+	pool.CooldownAccount(1, laneCooldownExhausting, "quota")
+	pool.CooldownAccount(1, laneCooldownTransient, "transient-soon") // 节流窗内：被吞
+	pool.CooldownAccount(2, laneCooldownTransient, "transient")
+
+	require.Len(t, writer.writes[1], 1)
+	require.Len(t, writer.writes[2], 1)
+	require.InDelta(t, laneCooldownExhausting.Seconds(), writer.writes[1][0].Seconds(), 1.0)
+	require.InDelta(t, laneCooldownTransient.Seconds(), writer.writes[2][0].Seconds(), 1.0)
+	require.Contains(t, writer.reasons[1], "quota")
+
+	// 非法入参直接忽略。
+	pool.CooldownAccount(0, laneCooldownTransient, "bad-id")
+	pool.CooldownAccount(1, 0, "bad-duration")
+	var nilPool *Pool
+	nilPool.CooldownAccount(1, laneCooldownTransient, "nil-pool")
+	require.Len(t, writer.writes[0], 0)
+	require.Len(t, writer.writes[1], 1) // 仍是 1：后两笔没生效
 }

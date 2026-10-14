@@ -60,7 +60,7 @@ func newFaultRouter(lane, platform, upstreamURL string, recorded chan *service.O
 	}}
 	app := &Lanes{
 		Meter: meter,
-		Pool:  NewPool(lister),
+		Pool:  NewPool(lister, nil),
 		adapters: map[string]LaneAdapter{
 			LaneRerank:    NewRerankAdapter(),
 			LaneWebsearch: NewWebsearchAdapter(),
@@ -199,7 +199,7 @@ func TestLanePoolEmptyIsDistinctFromUpstreamFault(t *testing.T) {
 			recorded <- input
 			return nil
 		}}
-		app := &Lanes{Meter: meter, Pool: NewPool(lister), adapters: map[string]LaneAdapter{
+		app := &Lanes{Meter: meter, Pool: NewPool(lister, nil), adapters: map[string]LaneAdapter{
 			LaneRerank: NewRerankAdapter(), LaneWebsearch: NewWebsearchAdapter(), LaneAudio: NewAudioAdapter(),
 		}}
 		router := gin.New()
@@ -233,7 +233,7 @@ func TestLaneUpstreamMissingCredentialsIsNotLeaked(t *testing.T) {
 			recorded <- input
 			return nil
 		}}
-		app := &Lanes{Meter: meter, Pool: NewPool(lister), adapters: map[string]LaneAdapter{
+		app := &Lanes{Meter: meter, Pool: NewPool(lister, nil), adapters: map[string]LaneAdapter{
 			LaneRerank: NewRerankAdapter(), LaneWebsearch: NewWebsearchAdapter(), LaneAudio: NewAudioAdapter(),
 		}}
 		router := gin.New()

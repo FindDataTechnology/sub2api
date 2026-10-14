@@ -23,9 +23,9 @@ const (
 )
 
 // LaneAdapter 车道适配器：准入与池取号之后的业务位——调上游、回响应、
-// 经 Meter 计量。3.x 每车道一个实现；未实现的车道保持 501 占位。
+// 经 Meter 计量。v1.1 起接收全候选列表，适配器内跑轮转循环（failover.go）。
 type LaneAdapter interface {
-	Serve(c *gin.Context, apiKey *service.APIKey, account *service.Account, meter *Meter)
+	Serve(c *gin.Context, apiKey *service.APIKey, accounts []*service.Account, pool *Pool, meter *Meter)
 }
 
 // RerankAdapter 硅基 /v1/rerank（Cohere/Jina 形状透传：query+documents+top_n，
@@ -50,7 +50,7 @@ func laneRequestID(c *gin.Context) string {
 	return "lane-" + hex.EncodeToString(buf)
 }
 
-func (a *RerankAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account *service.Account, meter *Meter) {
+func (a *RerankAdapter) Serve(c *gin.Context, apiKey *service.APIKey, accounts []*service.Account, pool *Pool, meter *Meter) {
 	started := time.Now()
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -85,58 +85,67 @@ func (a *RerankAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account *s
 		req["model"] = model
 	}
 
-	apiKeyStr, _ := account.Credentials["api_key"].(string)
-	if apiKeyStr == "" {
-		// 池里进了无凭据账号：车道侧配置错误（502、不计费、不暴露账号细节）。
-		laneUpstreamMisconfigured(c, LaneRerank)
-		return
-	}
-	baseURL, _ := account.Credentials["base_url"].(string)
-	if strings.TrimSpace(baseURL) == "" {
-		baseURL = siliconflowDefaultBaseURL
-	}
-
 	upstreamBody, err := json.Marshal(req)
 	if err != nil {
 		laneBadRequest(c, LaneRerank, "failed to serialize request")
 		return
 	}
-	httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, strings.TrimRight(baseURL, "/")+siliconflowRerankPath, bytes.NewReader(upstreamBody))
-	if err != nil {
-		laneUpstreamError(c, LaneRerank, 0)
-		return
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+apiKeyStr)
-	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := a.client.Do(httpReq)
-	if err != nil {
-		laneUpstreamError(c, LaneRerank, 0)
-		return
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		laneUpstreamHTTPError(c, LaneRerank, resp.StatusCode)
-		return
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		laneUpstreamHTTPError(c, LaneRerank, resp.StatusCode)
-		return
-	}
+	// 轮转循环（failover.go）：单账号失败分级冷却+换下一候选；成功路径与
+	// v1 完全一致（原样透传+计量）。
+	serveWithFailover(c, LaneRerank, pool, accounts, func(account *service.Account) (bool, *upstreamFailure) {
+		apiKeyStr, _ := account.Credentials["api_key"].(string)
+		if apiKeyStr == "" {
+			// 池里进了无凭据账号：车道侧配置错误（换号+长冷却，全尽才 502）。
+			return false, &upstreamFailure{misconfigured: true}
+		}
+		baseURL, _ := account.Credentials["base_url"].(string)
+		if strings.TrimSpace(baseURL) == "" {
+			baseURL = siliconflowDefaultBaseURL
+		}
+		httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, strings.TrimRight(baseURL, "/")+siliconflowRerankPath, bytes.NewReader(upstreamBody))
+		if err != nil {
+			return false, &upstreamFailure{status: 0}
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+apiKeyStr)
+		httpReq.Header.Set("Content-Type", "application/json")
 
-	c.Data(http.StatusOK, "application/json", respBody)
+		resp, err := a.client.Do(httpReq)
+		if err != nil {
+			return false, &upstreamFailure{status: 0}
+		}
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			// 400/422=调用者内容问题（换号无意义）→ 直接终态；其余进轮转。
+			if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity {
+				laneUpstreamHTTPError(c, LaneRerank, resp.StatusCode)
+				return true, nil
+			}
+			failure := &upstreamFailure{status: resp.StatusCode}
+			if readErr == nil {
+				failure.bodyExcerpt = string(respBody)
+			}
+			return false, failure
+		}
+		if readErr != nil {
+			return false, &upstreamFailure{status: resp.StatusCode}
+		}
 
-	if meter != nil {
-		meter.WriteUsage(c, apiKey, UsageInput{
-			Lane:             LaneRerank,
-			Model:            model,
-			UpstreamModel:    model,
-			RequestID:        laneRequestID(c),
-			Account:          account,
-			RerankRequests:   1,
-			Duration:         time.Since(started),
-			UpstreamEndpoint: siliconflowRerankPath,
-		})
-	}
+		c.Data(http.StatusOK, "application/json", respBody)
+
+		if meter != nil {
+			meter.WriteUsage(c, apiKey, UsageInput{
+				Lane:             LaneRerank,
+				Model:            model,
+				UpstreamModel:    model,
+				RequestID:        laneRequestID(c),
+				Account:          account,
+				RerankRequests:   1,
+				Duration:         time.Since(started),
+				UpstreamEndpoint: siliconflowRerankPath,
+			})
+		}
+		return true, nil
+	})
 }
