@@ -195,6 +195,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldVideoPrice1080p,
 				group.FieldVideoModelPrices,
 				group.FieldWebSearchPricePerCall,
+				group.FieldRerankPricePerRequest,
 				group.FieldSearchPricePer1k,
 				group.FieldAudioRealtimePricePerMin,
 				group.FieldAudioTtsPricePerMillionChars,
