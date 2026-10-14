@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 24 // v24: group model_allowlist field (renamed from models_list_config, enforcing semantics)
+const apiKeyAuthSnapshotVersion = 25 // v25: group rerank_price_per_request field (ciyuan lanes, tasks 3.1; must bump when snapshot shape gains fields — stale v24 snapshots carried nil rerank price and billed zero)
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
