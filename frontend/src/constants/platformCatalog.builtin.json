@@ -278,6 +278,18 @@
           }
         ]
       }
+    },
+    {
+      "id": "siliconflow",
+      "display_name": "SiliconFlow 硅基流动",
+      "gateway": "lane",
+      "cn_provider": false
+    },
+    {
+      "id": "serpapi",
+      "display_name": "SerpAPI 搜索",
+      "gateway": "lane",
+      "cn_provider": false
     }
   ],
   "composite_precedence": [
@@ -293,6 +305,8 @@
     "opencode_go",
     "typesafe",
     "command_code",
-    "cline"
+    "cline",
+    "siliconflow",
+    "serpapi"
   ]
 }
