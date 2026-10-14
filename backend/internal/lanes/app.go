@@ -26,9 +26,12 @@ func NewFromOpenAIHandler(openAI *handler.OpenAIGatewayHandler, apiKeyService *s
 	if gatewayService == nil {
 		return nil
 	}
+	// 池=同一 accountRepo 双面（取数+冷却写，ciyuan-lane-pool-failover D1：
+	// 冷却复用 SetTempUnschedulable，零新增缝点）。
+	repo := gatewayService.LanesAccountRepo()
 	return &Lanes{
 		Meter: NewMeter(openAI.LanesBillingCacheService(), apiKeyService, gatewayService.RecordUsage, cfg),
-		Pool:  NewPool(gatewayService.LanesAccountRepo()),
+		Pool:  NewPool(repo, repo),
 		adapters: map[string]LaneAdapter{
 			LaneRerank:    NewRerankAdapter(),
 			LaneWebsearch: NewWebsearchAdapter(),

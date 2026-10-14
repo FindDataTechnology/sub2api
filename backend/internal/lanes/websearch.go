@@ -1,6 +1,8 @@
 package lanes
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,8 +11,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -100,7 +104,42 @@ func websearchNum(raw any) (int, bool) {
 	return n, true
 }
 
-func (a *WebsearchAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account *service.Account, meter *Meter) {
+// ── 请求级 BYOK 覆盖（ciyuan-lane-pool-failover 4.1）─────────────────────────
+// 调用者可在请求头带自己的 SerpAPI key（X-Serpapi-Key）：优先直连上游（不经
+// 池），失败按 hash8 进程内冷却并回退池；来源三态经 x-search-source 如实标注
+// （语义对齐 search-relay add-search-byok）。key 值绝不入日志/响应/错误文本。
+const (
+	websearchBYOKHeader  = "X-Serpapi-Key"
+	websearchBYOKMarker  = "byok:" // 用量行归因前缀（UpstreamModel=byok:<hash8>）
+	websearchSourceUser  = "user"
+	websearchSourcePool  = "pool"
+	websearchSourcePoolAfterUserFailure = "pool-after-user-failure"
+)
+
+var (
+	byokMu       sync.Mutex
+	byokCooldown = map[string]time.Time{} // hash8 -> 冷却截止
+)
+
+func byokTagOf(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:4]) // 前 8 个 hex 字符
+}
+
+func byokCooling(tag string) bool {
+	byokMu.Lock()
+	defer byokMu.Unlock()
+	until, ok := byokCooldown[tag]
+	return ok && time.Now().Before(until)
+}
+
+func byokSetCooldown(tag string, d time.Duration) {
+	byokMu.Lock()
+	defer byokMu.Unlock()
+	byokCooldown[tag] = time.Now().Add(d)
+}
+
+func (a *WebsearchAdapter) Serve(c *gin.Context, apiKey *service.APIKey, accounts []*service.Account, pool *Pool, meter *Meter) {
 	started := time.Now()
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -132,18 +171,87 @@ func (a *WebsearchAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account
 		laneBadRequest(c, LaneWebsearch, "field `num` must be an integer")
 		return
 	}
-
-	apiKeyStr, _ := account.Credentials["api_key"].(string)
-	if apiKeyStr == "" {
-		// 池里进了无凭据账号：车道侧配置错误（502、不计费、不暴露账号细节）。
-		laneUpstreamMisconfigured(c, LaneWebsearch)
+	if len(accounts) == 0 {
+		// 防御：serveLane 已拦空池；BYOK 路径要取 accounts[0] 端点，先挡。
+		laneUpstreamUnavailable(c, LaneWebsearch)
 		return
 	}
-	baseURL, _ := account.Credentials["base_url"].(string)
-	if strings.TrimSpace(baseURL) == "" {
-		baseURL = serpAPIDefaultBaseURL
+
+	// BYOK 优先（4.1）：用户 key 直连成功即应答（0 费计量）；失败按分级冷却
+	// 该 hash8 并回退池（来源如实标 pool-after-user-failure，不静默）。
+	// BYOK 端点=平台所配 SerpAPI 端点（首候选 base_url，缺省 serpapi.com）——
+	// 平台自定义端点/代理对用户 key 同样生效，测试也因此可注入。
+	source := websearchSourcePool
+	if userKey := strings.TrimSpace(c.GetHeader(websearchBYOKHeader)); userKey != "" {
+		byokBaseURL := serpAPIDefaultBaseURL
+		if b, _ := accounts[0].Credentials["base_url"].(string); strings.TrimSpace(b) != "" {
+			byokBaseURL = b
+		}
+		tag := byokTagOf(userKey)
+		if !byokCooling(tag) {
+			results, failure := a.serpAPISearch(c, byokBaseURL, userKey, q, num, req)
+			if failure == nil {
+				a.respond(c, engine, results, websearchSourceUser, started)
+				if meter != nil {
+					// BYOK 笔计量 0 费（4.2，成本分支=台账缝点「分组价目」）：
+					// 用量行保留归因（UpstreamModel=byok:<hash8>），账号位合成
+					// serpapi 空行（AccountID=0=无池账号，上游费用在用户侧）。
+					meter.WriteUsage(c, apiKey, UsageInput{
+						Lane:             LaneWebsearch,
+						Model:            "websearch:" + engine,
+						UpstreamModel:    websearchBYOKMarker + tag,
+						RequestID:        laneRequestID(c),
+						Account:          &service.Account{ID: 0, Platform: domain.PlatformSerpAPI},
+						WebSearchCalls:   1,
+						Duration:         time.Since(started),
+						UpstreamEndpoint: serpAPISearchPath,
+					})
+				}
+				return
+			}
+			d := laneCooldownTransient
+			if failure.misconfigured || classifyLaneUpstreamFailure(failure.status, failure.bodyExcerpt) {
+				d = laneCooldownExhausting
+			}
+			byokSetCooldown(tag, d)
+		}
+		source = websearchSourcePoolAfterUserFailure
 	}
 
+	// 池轮转（failover.go）：单账号失败分级冷却+换下一候选；成功照 v1 计费。
+	serveWithFailover(c, LaneWebsearch, pool, accounts, func(account *service.Account) (bool, *upstreamFailure) {
+		apiKeyStr, _ := account.Credentials["api_key"].(string)
+		if apiKeyStr == "" {
+			return false, &upstreamFailure{misconfigured: true}
+		}
+		baseURL, _ := account.Credentials["base_url"].(string)
+		if strings.TrimSpace(baseURL) == "" {
+			baseURL = serpAPIDefaultBaseURL
+		}
+		results, failure := a.serpAPISearch(c, baseURL, apiKeyStr, q, num, req)
+		if failure != nil {
+			return false, failure
+		}
+		a.respond(c, engine, results, source, started)
+		if meter != nil {
+			meter.WriteUsage(c, apiKey, UsageInput{
+				Lane:             LaneWebsearch,
+				Model:            "websearch:" + engine,
+				UpstreamModel:    "serpapi:" + serpAPILightEngine,
+				RequestID:        laneRequestID(c),
+				Account:          account,
+				WebSearchCalls:   1,
+				Duration:         time.Since(started),
+				UpstreamEndpoint: serpAPISearchPath,
+			})
+		}
+		return true, nil
+	})
+}
+
+// serpAPISearch 执行一次上游搜索（池账号与 BYOK key 共用）：归一化结果或
+// 失败事实。零结果=合法空集（对齐 v1/search-relay 口径，照常计费）。
+func (a *WebsearchAdapter) serpAPISearch(c *gin.Context, baseURL, apiKeyStr, q string, num int, req map[string]any) ([]websearchResult, *upstreamFailure) {
 	params := url.Values{}
 	params.Set("engine", serpAPILightEngine)
 	params.Set("q", q)
@@ -156,24 +264,24 @@ func (a *WebsearchAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account
 	}
 	httpReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, strings.TrimRight(baseURL, "/")+serpAPISearchPath+"?"+params.Encode(), nil)
 	if err != nil {
-		laneUpstreamError(c, LaneWebsearch, 0)
-		return
+		return nil, &upstreamFailure{status: 0}
 	}
 
 	resp, err := a.client.Do(httpReq)
 	if err != nil {
-		laneUpstreamError(c, LaneWebsearch, 0)
-		return
+		return nil, &upstreamFailure{status: 0}
 	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		laneUpstreamHTTPError(c, LaneWebsearch, resp.StatusCode)
-		return
-	}
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		laneUpstreamHTTPError(c, LaneWebsearch, resp.StatusCode)
-		return
+		failure := &upstreamFailure{status: resp.StatusCode}
+		if readErr == nil {
+			failure.bodyExcerpt = string(respBody)
+		}
+		return nil, failure
+	}
+	if readErr != nil {
+		return nil, &upstreamFailure{status: resp.StatusCode}
 	}
 	var parsed struct {
 		Error          string `json:"error"`
@@ -184,44 +292,34 @@ func (a *WebsearchAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account
 		} `json:"organic_results"`
 	}
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		laneUpstreamHTTPError(c, LaneWebsearch, resp.StatusCode)
-		return
+		return nil, &upstreamFailure{status: resp.StatusCode}
 	}
 	if parsed.Error != "" && !serpAPIZeroResultRe.MatchString(parsed.Error) {
-		// 上游业务错误（无效 key/额度耗尽等）：不外泄错误文本（可能含账户信息）。
-		laneUpstreamHTTPError(c, LaneWebsearch, resp.StatusCode)
-		return
+		// 上游业务错误（无效 key/额度耗尽等）：错误文本只进分级判据，不外泄。
+		return nil, &upstreamFailure{status: resp.StatusCode, bodyExcerpt: parsed.Error}
 	}
-	// 零结果=合法空集（对齐 search-relay 口径），照常成 200 并计费（上游额度已消耗）。
-
-	var env websearchEnvelope
-	env.Meta.Engine = engine
-	env.Meta.LatencyMs = time.Since(started).Milliseconds()
-	env.Results = make([]websearchResult, 0, num)
+	results := make([]websearchResult, 0, num)
 	for i, r := range parsed.OrganicResults {
 		if i >= num {
 			break
 		}
-		env.Results = append(env.Results, websearchResult{
+		results = append(results, websearchResult{
 			Title:    r.Title,
 			URL:      r.Link,
 			Snippet:  r.Snippet,
 			Position: i + 1,
 		})
 	}
-	env.Usage.Requests = 1
-	c.JSON(http.StatusOK, env)
+	return results, nil
+}
 
-	if meter != nil {
-		meter.WriteUsage(c, apiKey, UsageInput{
-			Lane:             LaneWebsearch,
-			Model:            "websearch:" + engine,
-			UpstreamModel:    "serpapi:" + serpAPILightEngine,
-			RequestID:        laneRequestID(c),
-			Account:          account,
-			WebSearchCalls:   1,
-			Duration:         time.Since(started),
-			UpstreamEndpoint: serpAPISearchPath,
-		})
-	}
+// respond 统一信封应答（含来源标注头；BYOK 与池路径共用）。
+func (a *WebsearchAdapter) respond(c *gin.Context, engine string, results []websearchResult, source string, started time.Time) {
+	var env websearchEnvelope
+	env.Meta.Engine = engine
+	env.Meta.LatencyMs = time.Since(started).Milliseconds()
+	env.Results = results
+	env.Usage.Requests = 1
+	c.Header("x-search-source", source)
+	c.JSON(http.StatusOK, env)
 }

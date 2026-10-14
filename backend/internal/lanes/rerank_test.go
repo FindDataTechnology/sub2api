@@ -67,7 +67,7 @@ func newRerankTestApp(t *testing.T, capture *rerankUpstreamCapture, upstream *ht
 	}}
 	return &Lanes{
 		Meter: meter,
-		Pool:  NewPool(lister),
+		Pool:  NewPool(lister, nil),
 		adapters: map[string]LaneAdapter{
 			LaneRerank: NewRerankAdapter(),
 		},
@@ -208,5 +208,101 @@ func TestRerankLaneModelPassthrough(t *testing.T) {
 		require.Equal(t, "Qwen/Qwen3-Reranker-8B", input.Result.Model)
 	case <-time.After(2 * time.Second):
 		t.Fatal("usage was not recorded")
+	}
+}
+
+// 轮转（ciyuan-lane-pool-failover 3.1）：首号 402 → 冷却+换二号线成功；
+// 单号 402 全池尽 → 502 不计费。
+func TestRerankLaneFailoverToSecondAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var mu sync.Mutex
+	servedKeys := []string{}
+	// 按 api_key 分流：sk-a 恒 402（硅基余额类），sk-b 正常回。
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		mu.Lock()
+		servedKeys = append(servedKeys, auth)
+		mu.Unlock()
+		if strings.HasSuffix(auth, "sk-a") {
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = w.Write([]byte(`{"error":{"message":"Insufficient balance"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"index":0,"relevance_score":0.9}]}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	writer := newFakeCooldownWriter()
+	lister := &fakeLaneAccountLister{accounts: []service.Account{
+		{ID: 1, Platform: domain.PlatformSiliconFlow, Status: service.StatusActive, Priority: 1,
+			Credentials: map[string]any{"api_key": "sk-a", "base_url": upstream.URL}},
+		{ID: 2, Platform: domain.PlatformSiliconFlow, Status: service.StatusActive, Priority: 2,
+			Credentials: map[string]any{"api_key": "sk-b", "base_url": upstream.URL}},
+	}}
+	recorded := make(chan *service.OpenAIRecordUsageInput, 1)
+	app := &Lanes{
+		Meter: &Meter{recordUsage: func(_ context.Context, input *service.OpenAIRecordUsageInput) error {
+			recorded <- input
+			return nil
+		}},
+		Pool: NewPool(lister, writer),
+		adapters: map[string]LaneAdapter{
+			LaneRerank: NewRerankAdapter(),
+		},
+	}
+
+	w := serveRerank(t, app, `{"query":"q","documents":["a"]}`)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	mu.Lock()
+	require.Len(t, servedKeys, 2, "both accounts must be tried in order")
+	mu.Unlock()
+	// 冷却只落首号（额度类 12h）。
+	require.Len(t, writer.writes[1], 1)
+	require.InDelta(t, laneCooldownExhausting.Seconds(), writer.writes[1][0].Seconds(), 1.0)
+	require.Empty(t, writer.writes[2])
+	// 计量归因二号线。
+	select {
+	case input := <-recorded:
+		require.Equal(t, int64(2), input.Account.ID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("usage was not recorded")
+	}
+}
+
+func TestRerankLaneExhaustedPoolNotBilled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"error":{"message":"Insufficient balance"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	writer := newFakeCooldownWriter()
+	lister := &fakeLaneAccountLister{accounts: []service.Account{
+		{ID: 1, Platform: domain.PlatformSiliconFlow, Status: service.StatusActive,
+			Credentials: map[string]any{"api_key": "sk-a", "base_url": upstream.URL}},
+	}}
+	recorded := make(chan *service.OpenAIRecordUsageInput, 1)
+	app := &Lanes{
+		Meter: &Meter{recordUsage: func(_ context.Context, input *service.OpenAIRecordUsageInput) error {
+			recorded <- input
+			return nil
+		}},
+		Pool: NewPool(lister, writer),
+		adapters: map[string]LaneAdapter{
+			LaneRerank: NewRerankAdapter(),
+		},
+	}
+
+	w := serveRerank(t, app, `{"query":"q","documents":["a"]}`)
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.Contains(t, w.Body.String(), "lane_upstream_error")
+	require.NotContains(t, w.Body.String(), "Insufficient")
+	select {
+	case <-recorded:
+		t.Fatal("exhausted pool must not be billed")
+	case <-time.After(200 * time.Millisecond):
 	}
 }

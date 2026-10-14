@@ -3,6 +3,8 @@ package lanes
 import (
 	"fmt"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -136,3 +138,22 @@ const (
 	laneEngineSiliconFlow = "siliconflow"
 	laneEngineOpenAINext  = "openainext"
 )
+
+// laneUpstreamFailureExhaustingRe 额度耗尽/鉴权失效类错误文本（判据对齐平台
+// search-relay isExhausting，另补 balance/quota：硅基 402 文本含 balance）。
+// 只做分级判据——上游错误文本仍不入响应与日志（不外泄纪律）。
+var laneUpstreamFailureExhaustingRe = regexp.MustCompile(
+	`run out of searches|account|api key|unauthorized|balance|insufficient|quota`,
+)
+
+// classifyLaneUpstreamFailure 上游失败分级（ciyuan-lane-pool-failover 2.1）：
+// true=额度耗尽/鉴权失效类（长冷却 laneCooldownExhausting），false=瞬态类
+// （短冷却 laneCooldownTransient）。口径对齐 search-relay isExhausting，差异
+// 一处：裸 429（无额度类文本）按并发限落短冷却——SerpAPI 额度尽会带
+// "run out of searches" 文本，裸 429 多为瞬时限流，12h 冷却会误伤。
+func classifyLaneUpstreamFailure(status int, upstreamBody string) bool {
+	if status == http.StatusUnauthorized || status == http.StatusPaymentRequired || status == http.StatusForbidden {
+		return true
+	}
+	return laneUpstreamFailureExhaustingRe.MatchString(strings.ToLower(upstreamBody))
+}

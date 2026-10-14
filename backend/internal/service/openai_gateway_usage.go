@@ -591,6 +591,12 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	pricingAt time.Time,
 ) (*CostBreakdown, error) {
 	billingModel := firstUsageBillingModel(billingModels)
+	if result != nil && result.WebSearchCalls > 0 && strings.HasPrefix(result.UpstreamModel, "byok:") {
+		// 词元 websearch BYOK 笔（fork 缝点，台账§二「分组价目」；ciyuan-lane-pool-failover 4.2）：
+		// 用户自带 key 服务，平台零成本——计量保留归因（UpstreamModel=byok:<hash8>），
+		// 费率恒 0，不产生平台计费。零费形状同 pricing_missing 回退。
+		return &CostBreakdown{BillingMode: string(BillingModeToken)}, nil
+	}
 	if result != nil && result.WebSearchCalls > 0 {
 		// Codex alpha/search 网页搜索按次计费：上游不返回 usage/token 字段，单价只取
 		// 分组覆盖价（nil 时默认 0.01 = 官方 $10/1000 次），不参与渠道级模型定价。
