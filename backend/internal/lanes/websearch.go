@@ -135,8 +135,8 @@ func (a *WebsearchAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account
 
 	apiKeyStr, _ := account.Credentials["api_key"].(string)
 	if apiKeyStr == "" {
-		// 池里进了无凭据账号：车道侧配置错误（5xx 家族、不计费）。
-		laneUpstreamError(c, LaneWebsearch, 0)
+		// 池里进了无凭据账号：车道侧配置错误（502、不计费、不暴露账号细节）。
+		laneUpstreamMisconfigured(c, LaneWebsearch)
 		return
 	}
 	baseURL, _ := account.Credentials["base_url"].(string)
@@ -168,11 +168,11 @@ func (a *WebsearchAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		laneUpstreamError(c, LaneWebsearch, resp.StatusCode)
+		laneUpstreamHTTPError(c, LaneWebsearch, resp.StatusCode)
 		return
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		laneUpstreamError(c, LaneWebsearch, resp.StatusCode)
+		laneUpstreamHTTPError(c, LaneWebsearch, resp.StatusCode)
 		return
 	}
 	var parsed struct {
@@ -184,12 +184,12 @@ func (a *WebsearchAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account
 		} `json:"organic_results"`
 	}
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		laneUpstreamError(c, LaneWebsearch, resp.StatusCode)
+		laneUpstreamHTTPError(c, LaneWebsearch, resp.StatusCode)
 		return
 	}
 	if parsed.Error != "" && !serpAPIZeroResultRe.MatchString(parsed.Error) {
 		// 上游业务错误（无效 key/额度耗尽等）：不外泄错误文本（可能含账户信息）。
-		laneUpstreamError(c, LaneWebsearch, resp.StatusCode)
+		laneUpstreamHTTPError(c, LaneWebsearch, resp.StatusCode)
 		return
 	}
 	// 零结果=合法空集（对齐 search-relay 口径），照常成 200 并计费（上游额度已消耗）。

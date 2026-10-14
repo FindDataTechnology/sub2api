@@ -61,16 +61,7 @@ func (a *AudioAdapter) Serve(c *gin.Context, apiKey *service.APIKey, account *se
 	}
 }
 
-// laneUpstreamHTTPError 上游非 2xx 分级：4xx（400/422=内容/参数问题，多半是
-// 调用者上传内容）→ 400；其余（401/403/429/5xx=上游侧故障）→ 502。
-// 均不外泄上游响应文本（可能含账户信息）、不计费。
-func laneUpstreamHTTPError(c *gin.Context, lane string, upstreamStatus int) {
-	if upstreamStatus == http.StatusBadRequest || upstreamStatus == http.StatusUnprocessableEntity {
-		laneBadRequest(c, lane, fmt.Sprintf("%s lane upstream rejected the request content (status %d)", lane, upstreamStatus))
-		return
-	}
-	laneUpstreamError(c, lane, upstreamStatus)
-}
+// 上游非 2xx 分级见 errors.go laneUpstreamHTTPError（三车道统一判据）。
 
 func laneUpstreamBaseURL(account *service.Account) string {
 	baseURL, _ := account.Credentials["base_url"].(string)
@@ -267,7 +258,7 @@ func (a *AudioAdapter) serveTranscriptions(c *gin.Context, apiKey *service.APIKe
 	}
 	apiKeyStr, _ := account.Credentials["api_key"].(string)
 	if apiKeyStr == "" {
-		laneUpstreamError(c, LaneAudio, 0)
+		laneUpstreamMisconfigured(c, LaneAudio)
 		return
 	}
 
@@ -372,7 +363,7 @@ func (a *AudioAdapter) serveSpeech(c *gin.Context, apiKey *service.APIKey, accou
 	}
 	apiKeyStr, _ := account.Credentials["api_key"].(string)
 	if apiKeyStr == "" {
-		laneUpstreamError(c, LaneAudio, 0)
+		laneUpstreamMisconfigured(c, LaneAudio)
 		return
 	}
 	upstreamBody, err := json.Marshal(req)
