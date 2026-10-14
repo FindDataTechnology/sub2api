@@ -229,6 +229,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/lanes',
+    name: 'Lanes',
+    component: () => import('@/views/user/LanesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Model Lanes',
+      titleKey: 'lanes.title',
+      descriptionKey: 'lanes.subtitle'
+    }
+  },
+  {
     path: '/usage',
     name: 'Usage',
     component: () => import('@/views/user/UsageView.vue'),
