@@ -13,7 +13,8 @@ import { platformLabel } from '@/utils/platformColors'
 import { normalizePlatformQuotasMap, sanitizePlatformQuotasMap } from '@/api/admin/settings'
 import { platformQuotaPlatforms } from '@/api/admin/users'
 
-// 改为读取平台清单之前的平台字面量，加上之后内置登记的 Command Code。
+// 改为读取平台清单之前的平台字面量，加上之后内置登记的 Command Code；
+// 词元 fork 追加车道上游平台 siliconflow/serpapi/openainext（§二 平台清单缝点按位补入）。
 const concretePlatforms = [
   'anthropic',
   'openai',
@@ -27,7 +28,10 @@ const concretePlatforms = [
   'opencode_go',
   'typesafe',
   'command_code',
-  'cline'
+  'cline',
+  'siliconflow',
+  'serpapi',
+  'openainext'
 ]
 
 describe('platform option catalogs', () => {
@@ -60,11 +64,13 @@ describe('platform catalog with a newly registered platform', () => {
     expect(listPlatformIds()).toEqual(concretePlatforms)
     expect(compositePrecedencePlatformIds()).toEqual([
       'anthropic', 'gemini', 'openai', 'antigravity', 'grok',
-      'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'typesafe', 'command_code', 'cline'
+      'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'typesafe', 'command_code', 'cline',
+      'siliconflow', 'serpapi', 'openainext'
     ])
     expect(CONCRETE_PLATFORM_OPTIONS.map((option) => option.label)).toEqual([
       'Anthropic', 'OpenAI', 'Gemini', 'Antigravity', 'Grok',
-      'Kimi', 'Zhipu GLM', 'DeepSeek', 'MiniMax', 'OpenCode', 'TypeSafe / Jev', 'Command Code', 'Cline'
+      'Kimi', 'Zhipu GLM', 'DeepSeek', 'MiniMax', 'OpenCode', 'TypeSafe / Jev', 'Command Code', 'Cline',
+      'SiliconFlow 硅基流动', 'SerpAPI 搜索', 'OpenAI-Next 聚合'
     ])
     expect(platformLabel('zhipu')).toBe('Zhipu GLM')
     expect(platformLabel('composite')).toBe('Composite')
