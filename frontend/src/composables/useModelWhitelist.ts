@@ -1,4 +1,4 @@
-import { getProviderProfile } from '@/constants/platformCatalog'
+import { getProviderProfile, isLanePlatform } from '@/constants/platformCatalog'
 
 // =====================
 // 模型列表（硬编码，与 new-api 一致）
@@ -489,7 +489,8 @@ export function getModelsByPlatform(platform: string): string[] {
     default:
       // 平台清单中没有内置模型列表的多协议供应商（多为多模型聚合平台，模型多且常变）
       // 默认不预填白名单：预填 Claude 模型会让新账号只接受这些模型。
-      return getProviderProfile(platform) ? [] : claudeModels
+      // 车道上游平台同理（模型由车道端点侧决定，账号不该预填 Claude 白名单）。
+      return getProviderProfile(platform) || isLanePlatform(platform) ? [] : claudeModels
   }
 }
 

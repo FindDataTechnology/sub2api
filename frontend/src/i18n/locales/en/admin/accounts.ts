@@ -628,6 +628,11 @@ export default {
       setupTokenLongLived: 'Setup Token (Long-lived)',
       baseUrl: 'Base URL',
       baseUrlHint: 'Leave default for official Anthropic API',
+      laneProviders: {
+        hint: 'Lane upstream platforms are consumed only by the model-lane endpoints (rerank / search / audio): credentials need just an API key; leave Base URL empty to use the built-in upstream endpoint.',
+        baseUrlHint: 'Leave empty to use the lane built-in upstream endpoint; fill in to override the platform default.',
+        apiKeyHint: 'API Key issued by the lane upstream provider'
+      },
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',
       apiKeyHint: 'Your Claude Console API Key',
@@ -691,7 +696,7 @@ export default {
           'Only applies to non-streaming Images responses of OpenAI API Key accounts. When an upstream image item has a url but no b64_json, the gateway downloads the url and fills b64_json with its base64 content (url is kept) for clients built on the official API; the response is returned unchanged if the download fails.',
         endpointCapabilities: 'Endpoint capabilities',
         endpointCapabilitiesDesc:
-          'Used by account routing. The text endpoint follows the Responses API support setting above and is shown as Responses, Chat Completions, or auto mode; Embeddings independently controls /v1/embeddings.',
+          'Used by account routing. The text endpoint follows the Responses API support setting above and is shown as Responses, Chat Completions, or auto mode; Embeddings independently controls /v1/embeddings. Checking Seedance requires a video upstream endpoint in the Base URL above (e.g. https://api.openai-next.com/seedance); routing then filters candidates strictly by this capability set.',
         capabilityResponses: 'Responses',
         capabilityTextAuto: 'Responses / Chat Completions (Auto)',
         capabilityResponsesAuto: 'Responses (auto probe)',

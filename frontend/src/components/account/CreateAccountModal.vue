@@ -264,6 +264,33 @@
             {{ spec.display_name }}
           </button>
         </div>
+
+        <!-- 车道上游平台：仅车道网关消费（rerank/websearch/audio），凭据=api_key 必填、base_url 可选覆盖 -->
+        <div
+          v-if="lanePlatforms.length > 0"
+          class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700"
+          data-testid="platform-row-lanes"
+        >
+          <button
+            v-for="spec in lanePlatforms"
+            :key="spec.id"
+            type="button"
+            :data-testid="`platform-button-${spec.id}`"
+            @click="selectLanePlatform(spec.id)"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
+              form.platform === spec.id
+                ? 'bg-white text-primary-600 shadow-sm dark:bg-dark-600 dark:text-primary-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon :platform="spec.id" size="sm" />
+            {{ spec.display_name }}
+          </button>
+        </div>
+        <p v-if="isLanePlatform(form.platform)" class="input-hint">
+          {{ t('admin.accounts.laneProviders.hint') }}
+        </p>
       </div>
 
       <!-- Account Type Selection (Anthropic) -->
@@ -1507,6 +1534,7 @@
             v-model="apiKeyBaseUrl"
             type="text"
             class="input"
+            data-testid="api-key-base-url"
             :placeholder="apiKeyBaseUrlPlaceholder"
           />
           <p v-if="baseUrlHint" class="input-hint">{{ baseUrlHint }}</p>
@@ -4196,7 +4224,7 @@ import {
   type OpenCodeAccountMode,
   type OpenCodeGoProtocolRule
 } from '@/components/account/credentialsBuilder'
-import { listPlatforms } from '@/constants/platformCatalog'
+import { isLanePlatform, listPlatforms } from '@/constants/platformCatalog'
 import {
   formatDateTimeLocalInput,
   getBrowserTimeZone,
@@ -4253,6 +4281,7 @@ const withUpstreamRequestIdHeader = <T extends Record<string, unknown> | undefin
 }
 
 const baseUrlHint = computed(() => {
+  if (isLanePlatform(form.platform)) return t('admin.accounts.laneProviders.baseUrlHint')
   if (form.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
   if (form.platform === 'grok') return ''
@@ -4260,6 +4289,7 @@ const baseUrlHint = computed(() => {
 })
 
 const apiKeyHint = computed(() => {
+  if (isLanePlatform(form.platform)) return t('admin.accounts.laneProviders.apiKeyHint')
   if (form.platform === 'openai') return t('admin.accounts.openai.apiKeyHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.apiKeyHint')
   // Grok 与多协议供应商没有对应的说明文案；通用文案指 Claude Console Key。
@@ -4269,6 +4299,8 @@ const apiKeyHint = computed(() => {
 
 // Base URL / API Key 占位符：国产供应商随账号类型变化。
 const apiKeyBaseUrlPlaceholder = computed(() => {
+  // 车道平台：留空=车道内置端点，不设占位 URL 误导填写。
+  if (isLanePlatform(form.platform)) return ''
   if (isMultiProtocolPlatform.value) {
     const mode = form.platform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
     return defaultCNBaseUrl(form.platform, mode, apiProtocol.value) || 'https://api.example.com'
@@ -4288,6 +4320,7 @@ const apiKeyBaseUrlPlaceholder = computed(() => {
 })
 
 const apiKeyValuePlaceholder = computed(() => {
+  if (isLanePlatform(form.platform)) return 'sk-...'
   switch (form.platform) {
     case 'openai':
       return 'sk-proj-...'
@@ -4425,6 +4458,8 @@ const isGenericMultiProtocolPlatform = computed(
 const extraMultiProtocolPlatforms = computed(() =>
   listPlatforms().filter(spec => !!spec.multi_protocol && !isCNProviderPlatform(spec.id) && spec.id !== 'opencode_go')
 )
+// 车道上游平台（Gateway=lane）：仅车道网关消费，凭据只认 api_key（base_url 可选覆盖）。
+const lanePlatforms = computed(() => listPlatforms().filter(spec => spec.gateway === 'lane'))
 const genericAccountModes = computed(() => providerAccountModes(form.platform))
 // 按模型分流的供应商（OpenCode 等）：adaptive 账号携带 protocol_rules。
 const routesByModel = computed(() => providerRoutesByModel(form.platform))
@@ -4537,6 +4572,18 @@ function selectGenericMultiProtocolPlatform(platform: string) {
   apiKeyBaseUrl.value = defaultCNBaseUrl(platform, accountMode.value, apiProtocol.value)
   resetAdaptiveBaseUrls(platform, accountMode.value)
   openCodeGoProtocolRules.value = cloneOpenCodeGoProtocolRules(defaultProviderProtocolRules(platform, accountMode.value))
+}
+// 车道上游平台：通用 apikey 表单，base_url 留空走车道内置端点（填了则按平台覆盖）。
+// resetForm 会给所有平台预填 claude 白名单，而 whitelist 模式提交时会写成恒等
+// model_mapping——车道账号应不限模型，这里显式清空（须在 resetForm 之后执行，故放选择函数）。
+function selectLanePlatform(platform: string) {
+  form.platform = platform
+  form.type = 'apikey'
+  accountCategory.value = 'apikey'
+  apiKeyBaseUrl.value = ''
+  modelRestrictionMode.value = 'whitelist'
+  allowedModels.value = []
+  modelMappings.value = []
 }
 // 账号类型 / 协议变更时同步默认 base url。
 watch(openCodeAccountMode, (mode, previousMode) => {
@@ -5135,7 +5182,10 @@ watch(
   () => form.platform,
   (newPlatform) => {
     // Reset base URL based on platform
-    if (isMultiProtocolApiKeyPlatform(newPlatform)) {
+    if (isLanePlatform(newPlatform)) {
+      // 车道平台：留空=车道内置端点，不落其他平台的默认 URL（会被当上游基址转发）。
+      apiKeyBaseUrl.value = ''
+    } else if (isMultiProtocolApiKeyPlatform(newPlatform)) {
       const mode = newPlatform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
       apiKeyBaseUrl.value = defaultCNBaseUrl(newPlatform, mode, apiProtocol.value)
     } else {
@@ -6106,8 +6156,10 @@ const handleSubmit = async () => {
   }
 
   // Determine default base URL based on platform
-  const defaultBaseUrl =
-    form.platform === 'openai'
+  // 车道平台没有默认基址：base_url 留空时凭据不写该键，车道网关按平台走内置端点。
+  const defaultBaseUrl = isLanePlatform(form.platform)
+    ? ''
+    : form.platform === 'openai'
       ? 'https://api.openai.com'
       : form.platform === 'gemini'
         ? 'https://generativelanguage.googleapis.com'
@@ -6119,8 +6171,11 @@ const handleSubmit = async () => {
 
   // Build credentials with optional model mapping
   const credentials: Record<string, unknown> = {
-    base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
     api_key: apiKeyValue.value.trim()
+  }
+  const resolvedBaseUrl = apiKeyBaseUrl.value.trim() || defaultBaseUrl
+  if (resolvedBaseUrl) {
+    credentials.base_url = resolvedBaseUrl
   }
   if (form.platform === 'gemini' && isOfficialGeminiBaseUrl(apiKeyBaseUrl.value)) {
     credentials.tier_id = geminiTierAIStudio.value
