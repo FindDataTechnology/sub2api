@@ -181,7 +181,7 @@ func (h *AuthHandler) OIDCOAuthStart(c *gin.Context) {
 		oidcSetCookie(c, oidcOAuthNonceCookie, encodeCookieValue(nonce), oidcOAuthCookieMaxAgeSec, secureCookie)
 	}
 
-	redirectURI := strings.TrimSpace(cfg.RedirectURL)
+	redirectURI := oidcRedirectURLForRequest(c, cfg)
 	if redirectURI == "" {
 		response.ErrorFrom(c, infraerrors.InternalServer("OAUTH_CONFIG_INVALID", "oauth redirect url not configured"))
 		return
@@ -270,7 +270,7 @@ func (h *AuthHandler) OIDCOAuthCallback(c *gin.Context) {
 		}
 	}
 
-	redirectURI := strings.TrimSpace(cfg.RedirectURL)
+	redirectURI := oidcRedirectURLForRequest(c, cfg)
 	if redirectURI == "" {
 		redirectOAuthError(c, frontendCallback, "config_error", "oauth redirect url not configured", "")
 		return
@@ -1196,6 +1196,72 @@ func oidcFallbackUsername(subject string) string {
 	}
 	sum := sha256.Sum256([]byte(subject))
 	return "oidc_" + hex.EncodeToString(sum[:])[:12]
+}
+
+// oidcRedirectURLForRequest 返回本次请求应使用的 OIDC 回调地址。
+//
+// 词元（ciyuan）多宿主缝点：同一部署由多个公开宿主服务（token./router.），而 OIDC
+// 回调地址是单值、state cookie 又是 host-only——起点与回调不同主机时登录必然失败。
+// 因此当请求 Host 命中登记的别名回调集合时，直接返回该别名 URI 原文（与提供方后台
+// 登记的字符串逐字节一致）；未命中则回落既有单值配置。
+//
+// 只认白名单：Host 头可伪造，若按任意 Host 派生，攻击者能让授权码落到自有主机。
+func oidcRedirectURLForRequest(c *gin.Context, cfg config.OIDCConnectConfig) string {
+	fallback := strings.TrimSpace(cfg.RedirectURL)
+	if c == nil || c.Request == nil {
+		return fallback
+	}
+	requestHost := oidcRequestHost(c)
+	if requestHost == "" {
+		return fallback
+	}
+	for _, alias := range oidcRedirectURLAliases(cfg.RedirectURLAliases) {
+		parsed, err := url.Parse(alias)
+		if err != nil || parsed.Host == "" {
+			continue
+		}
+		if strings.EqualFold(oidcHostWithoutPort(parsed.Host), requestHost) {
+			return alias
+		}
+	}
+	return fallback
+}
+
+// oidcRequestHost 取请求的有效主机名（去端口），沿用仓内既有口径：
+// X-Forwarded-Host 优先（反代链），否则回落到 Host 头。
+func oidcRequestHost(c *gin.Context) string {
+	host := strings.TrimSpace(c.Request.Host)
+	if forwardedHost := strings.TrimSpace(c.GetHeader("X-Forwarded-Host")); forwardedHost != "" {
+		host = strings.TrimSpace(strings.Split(forwardedHost, ",")[0])
+	}
+	return oidcHostWithoutPort(host)
+}
+
+func oidcHostWithoutPort(host string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	if parsed, err := url.Parse("//" + host); err == nil && parsed.Hostname() != "" {
+		return parsed.Hostname()
+	}
+	if idx := strings.LastIndex(host, ":"); idx > 0 {
+		return host[:idx]
+	}
+	return host
+}
+
+func oidcRedirectURLAliases(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	out := make([]string, 0, 4)
+	for _, part := range strings.Split(raw, ",") {
+		if alias := strings.TrimSpace(part); alias != "" {
+			out = append(out, alias)
+		}
+	}
+	return out
 }
 
 func oidcSetCookie(c *gin.Context, name, value string, maxAgeSec int, secure bool) {
