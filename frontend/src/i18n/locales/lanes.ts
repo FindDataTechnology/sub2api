@@ -41,10 +41,10 @@ export const lanesZh = {
       },
     },
     shapes: {
-      rerank: '请求 {query, documents[], top_n}；响应 {results:[{index, relevance_score}]}',
-      websearch: '请求 {engine, q, num}；响应 {meta:{engine, latency_ms}, results:[{title, url, snippet, position}], usage:{requests}}',
+      rerank: "请求 {'{'}query, documents[], top_n{'}'}；响应 {'{'}results:[{'{'}index, relevance_score{'}'}]{'}'}",
+      websearch: "请求 {'{'}engine, q, num{'}'}；响应 {'{'}meta:{'{'}engine, latency_ms{'}'}, results:[{'{'}title, url, snippet, position{'}'}], usage:{'{'}requests{'}'}{'}'}",
       asr: 'multipart：file + model + response_format(json|text|verbose_json)',
-      tts: '请求 {input, voice, model, response_format}；响应为音频二进制流',
+      tts: "请求 {'{'}input, voice, model, response_format{'}'}；响应为音频二进制流",
     },
     billingNote: '单价在管理端按分组配置；余额/消费窗口耗尽时车道请求与 chat 同口径拒绝，不会触达上游。',
     errors: {
@@ -97,10 +97,10 @@ export const lanesEn = {
       },
     },
     shapes: {
-      rerank: 'Request {query, documents[], top_n}; response {results:[{index, relevance_score}]}',
-      websearch: 'Request {engine, q, num}; response {meta:{engine, latency_ms}, results:[{title, url, snippet, position}], usage:{requests}}',
+      rerank: "Request {'{'}query, documents[], top_n{'}'}; response {'{'}results:[{'{'}index, relevance_score{'}'}]{'}'}",
+      websearch: "Request {'{'}engine, q, num{'}'}; response {'{'}meta:{'{'}engine, latency_ms{'}'}, results:[{'{'}title, url, snippet, position{'}'}], usage:{'{'}requests{'}'}{'}'}",
       asr: 'multipart: file + model + response_format(json|text|verbose_json)',
-      tts: 'Request {input, voice, model, response_format}; response is an audio byte stream',
+      tts: "Request {'{'}input, voice, model, response_format{'}'}; response is an audio byte stream",
     },
     billingNote: 'Unit prices are configured per group in admin; exhausted balance/windows reject lane requests with the same semantics as chat, without touching upstreams.',
     errors: {
