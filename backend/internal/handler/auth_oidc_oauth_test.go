@@ -1308,3 +1308,85 @@ func newOIDCTestProvider(t *testing.T, fixture oidcProviderFixture) (config.OIDC
 	}
 	return cfg, server.Close
 }
+
+// 词元多宿主缝点（fix-ciyuan-oidc-login）：回调地址按请求 Host 派生，白名单制。
+func TestOIDCRedirectURLForRequestAliasWhitelist(t *testing.T) {
+	const (
+		tokenCallback  = "https://token.example.com/api/v1/auth/oauth/oidc/callback"
+		routerCallback = "https://router.example.com/api/v1/auth/oauth/oidc/callback"
+	)
+	newCtx := func(host string) *gin.Context {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/oidc/start", nil)
+		if host != "" {
+			req.Host = host
+		}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = req
+		return c
+	}
+	cfg := config.OIDCConnectConfig{
+		RedirectURL:        tokenCallback,
+		RedirectURLAliases: routerCallback + " , " + tokenCallback,
+	}
+
+	t.Run("命中别名返回该别名原文", func(t *testing.T) {
+		got := oidcRedirectURLForRequest(newCtx("router.example.com"), cfg)
+		require.Equal(t, routerCallback, got)
+	})
+
+	t.Run("原宿主同样命中别名", func(t *testing.T) {
+		got := oidcRedirectURLForRequest(newCtx("token.example.com"), cfg)
+		require.Equal(t, tokenCallback, got)
+	})
+
+	t.Run("未登记 Host 回落单值", func(t *testing.T) {
+		got := oidcRedirectURLForRequest(newCtx("evil.example.com"), cfg)
+		require.Equal(t, tokenCallback, got)
+	})
+
+	t.Run("空别名集合回落单值", func(t *testing.T) {
+		plain := config.OIDCConnectConfig{RedirectURL: tokenCallback}
+		got := oidcRedirectURLForRequest(newCtx("router.example.com"), plain)
+		require.Equal(t, tokenCallback, got)
+	})
+
+	t.Run("别名大小写不敏感但返回值原文", func(t *testing.T) {
+		got := oidcRedirectURLForRequest(newCtx("ROUTER.FindDataTech.Cloud"), cfg)
+		require.Equal(t, routerCallback, got)
+	})
+
+	t.Run("带端口的 Host 仍命中", func(t *testing.T) {
+		got := oidcRedirectURLForRequest(newCtx("router.example.com:443"), cfg)
+		require.Equal(t, routerCallback, got)
+	})
+
+	t.Run("X-Forwarded-Host 优先", func(t *testing.T) {
+		c := newCtx("internal.svc.local")
+		c.Request.Header.Set("X-Forwarded-Host", "router.example.com")
+		got := oidcRedirectURLForRequest(c, cfg)
+		require.Equal(t, routerCallback, got)
+	})
+
+	t.Run("X-Forwarded-Host 未登记则回落", func(t *testing.T) {
+		c := newCtx("token.example.com")
+		c.Request.Header.Set("X-Forwarded-Host", "evil.example.com")
+		got := oidcRedirectURLForRequest(c, cfg)
+		require.Equal(t, tokenCallback, got)
+	})
+
+	t.Run("畸形别名被跳过", func(t *testing.T) {
+		weird := config.OIDCConnectConfig{
+			RedirectURL:        tokenCallback,
+			RedirectURLAliases: "not-a-url,,/relative/path," + routerCallback,
+		}
+		got := oidcRedirectURLForRequest(newCtx("router.example.com"), weird)
+		require.Equal(t, routerCallback, got)
+	})
+
+	t.Run("无 Host 回落单值", func(t *testing.T) {
+		c := newCtx("")
+		c.Request.Host = ""
+		got := oidcRedirectURLForRequest(c, cfg)
+		require.Equal(t, tokenCallback, got)
+	})
+}
