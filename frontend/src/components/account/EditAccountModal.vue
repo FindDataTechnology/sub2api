@@ -34,6 +34,7 @@
             v-model="editBaseUrl"
             type="text"
             class="input"
+            data-testid="edit-base-url"
             :placeholder="
               account.platform === 'openai'
                 ? 'https://api.openai.com'
@@ -43,7 +44,9 @@
                     ? 'https://cloudcode-pa.googleapis.com'
                     : account.platform === 'grok'
                       ? 'https://api.x.ai/v1'
-                      : 'https://api.anthropic.com'
+                      : isLaneAccount
+                        ? ''
+                        : 'https://api.anthropic.com'
             "
           />
           <p v-if="baseUrlHint" class="input-hint">{{ baseUrlHint }}</p>
@@ -244,7 +247,9 @@
                     ? 'sk-...'
                     : account.platform === 'grok'
                       ? 'xai-...'
-                      : 'sk-ant-...'
+                      : isLaneAccount
+                        ? 'sk-...'
+                        : 'sk-ant-...'
             "
           />
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
@@ -3308,6 +3313,7 @@ import {
   type OpenCodeAccountMode,
   type OpenCodeGoProtocolRule
 } from '@/components/account/credentialsBuilder'
+import { isLanePlatform } from '@/constants/platformCatalog'
 import {
   formatDateTime,
   formatDateTimeLocalInput,
@@ -3462,11 +3468,15 @@ onMounted(() => {
 // Platform-specific hint for Base URL
 const baseUrlHint = computed(() => {
   if (!props.account) return t('admin.accounts.baseUrlHint')
+  if (isLaneAccount.value) return t('admin.accounts.laneProviders.baseUrlHint')
   if (props.account.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (props.account.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
   if (props.account.platform === 'grok') return ''
   return t('admin.accounts.baseUrlHint')
 })
+
+// 车道上游平台（Gateway=lane）：凭据只认 api_key，base_url 可选覆盖（留空=车道内置端点）。
+const isLaneAccount = computed(() => props.account?.type === 'apikey' && isLanePlatform(props.account.platform))
 
 const antigravityPresetMappings = computed(() => getPresetMappingsByPlatform('antigravity'))
 const bedrockPresets = computed(() => getPresetMappingsByPlatform('bedrock'))
@@ -4169,6 +4179,8 @@ const defaultBaseUrl = computed(() => {
   if (props.account?.platform === 'gemini') return 'https://generativelanguage.googleapis.com'
   if (props.account?.platform === 'grok') return 'https://api.x.ai/v1'
   if (props.account?.platform === 'typesafe') return 'https://api.typesafe.ai'
+  // 车道平台没有默认基址（留空=车道内置端点），不能落到 anthropic 默认值。
+  if (isLaneAccount.value) return ''
   // CN 供应商：按当前模式/协议回落到官方预设（清空输入框提交时使用），
   // 不能落到 anthropic 默认值（会被当 CC base 拼出错误端点）。
   if (props.account && isMultiProtocolApiKeyPlatform(props.account.platform)) {
@@ -4618,9 +4630,12 @@ const syncFormFromAccount = (newAccount: Account | null) => {
             ? 'https://api.x.ai/v1'
             : newAccount.platform === 'typesafe'
               ? 'https://api.typesafe.ai'
-            : isMultiProtocolApiKeyPlatform(newAccount.platform)
-              ? defaultCNBaseUrl(newAccount.platform, currentOpenCodeOrCNMode(), editApiProtocol.value)
-              : 'https://api.anthropic.com'
+            : isLanePlatform(newAccount.platform)
+              // 车道账号没有默认基址：无存储值时留空（车道网关按平台走内置端点）。
+              ? ''
+              : isMultiProtocolApiKeyPlatform(newAccount.platform)
+                ? defaultCNBaseUrl(newAccount.platform, currentOpenCodeOrCNMode(), editApiProtocol.value)
+                : 'https://api.anthropic.com'
     editBaseUrl.value = isCNApiKeyAccount.value && editApiProtocol.value === 'adaptive'
       ? editAdaptiveBaseUrls.value.chat_completions
       : (credentials.base_url as string) || platformDefaultUrl
@@ -5368,8 +5383,15 @@ const handleSubmit = async () => {
 
       // Always update credentials for apikey type to handle model mapping changes
       const newCredentials: Record<string, unknown> = {
-        ...currentCredentials,
-        base_url: newBaseUrl
+        ...currentCredentials
+      }
+      // 车道账号 base_url 留空=清除覆盖（走车道内置端点）；其余平台维持回退默认值。
+      if (newBaseUrl) {
+        newCredentials.base_url = newBaseUrl
+      } else if (isLaneAccount.value) {
+        delete newCredentials.base_url
+      } else {
+        newCredentials.base_url = newBaseUrl
       }
 
       // 国产供应商：模式与协议写入凭据（决定额度/余额探测与转发端点/格式）。
