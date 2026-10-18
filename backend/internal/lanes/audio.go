@@ -301,7 +301,7 @@ func (a *AudioAdapter) serveTranscriptions(c *gin.Context, apiKey *service.APIKe
 		}
 		// 豆包走异步任务式 ASR（上游只接受音频 URL），其余走 OpenAI 兼容 multipart。
 		if audioProtocolOf(account) == audioProtocolDoubao {
-			audioURL, err := publishAudioForUpstream(form)
+			audioURL, err := publishAudioForUpstream(form, mapString(account.Credentials, "audio_public_base_url"))
 			if err != nil {
 				// 本地音频可达化失败属车道侧配置问题：长冷却+换号。
 				return false, &upstreamFailure{misconfigured: true}
