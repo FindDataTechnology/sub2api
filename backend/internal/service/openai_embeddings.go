@@ -39,12 +39,16 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	if upstreamModel != originalModel {
 		upstreamBody = ReplaceModelInBody(body, upstreamModel)
 	}
+	// 账号级 provider 钉扎：聚合渠道多 provider 时保证向量一致性（只增）。
+	// 覆盖调用方自带的同名字段；未配置则不改写 body。
+	upstreamBody = applyEmbeddingProviderPin(upstreamBody, account)
 
 	logger.L().Debug("openai embeddings: forwarding",
 		zap.Int64("account_id", account.ID),
 		zap.String("original_model", originalModel),
 		zap.String("billing_model", billingModel),
 		zap.String("upstream_model", upstreamModel),
+		zap.Strings("provider_pin", embeddingProviderOnlyList(account)),
 	)
 
 	apiKey := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
