@@ -62,11 +62,3 @@ func TestDoubaoLIVE_ASR(t *testing.T) {
 	t.Logf("LIVE ASR OK: %d chars, duration=%.3fs, text=%q",
 		len([]rune(res.Text)), res.DurationSecond, firstN(res.Text, 60))
 }
-
-func firstN(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "..."
-}

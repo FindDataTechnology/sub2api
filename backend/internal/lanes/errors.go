@@ -157,3 +157,16 @@ func classifyLaneUpstreamFailure(status int, upstreamBody string) bool {
 	}
 	return laneUpstreamFailureExhaustingRe.MatchString(strings.ToLower(upstreamBody))
 }
+
+// firstN 截断字符串到 n 个**字符**（日志用：避免超长上游报文刷屏，且不切断
+// 多字节 UTF-8 字符）。注意必须定义在非 _test 文件里——测试文件不进生产构建。
+func firstN(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "..."
+}
