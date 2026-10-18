@@ -303,8 +303,15 @@ func (a *AudioAdapter) serveTranscriptions(c *gin.Context, apiKey *service.APIKe
 		if audioProtocolOf(account) == audioProtocolDoubao {
 			audioURL, err := publishAudioForUpstream(form, mapString(account.Credentials, "audio_public_base_url"))
 			if err != nil {
-				// 本地音频可达化失败属车道侧配置问题：长冷却+换号。
-				return false, &upstreamFailure{misconfigured: true}
+				// 音频可达化不可用是**部署配置缺失**，与账号凭据无关：不得记
+				// misconfigured——那会把该账号错误地长冷却 12h，并给出
+				// 「account missing credentials」这种误导性原因（2026-10-18 实测踩到）。
+				// 按瞬态失败换下一候选；全池尽时如实报上游不可用。
+				logger.L().With(
+					zap.String("component", "lanes.audio.spool"),
+					zap.Int64("account_id", account.ID),
+				).Warn("lanes.audio.spool_unavailable", zap.Error(err))
+				return false, &upstreamFailure{status: 0}
 			}
 			return a.serveDoubaoASR(c, apiKey, account, meter, started, form, audioURL)
 		}

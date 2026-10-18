@@ -12,6 +12,8 @@ var SensitiveCredentialKeys = []string{
 	// 云服务凭据
 	"aws_secret_access_key", "aws_session_token",
 	"service_account_json", "service_account", "private_key",
+	// 腾讯云云 API 3.0（audio 车道 tencent 上游；SecretKey 等同密码）
+	"secret_id", "secret_key",
 }
 
 var sensitiveCredentialKeySet = func() map[string]struct{} {
