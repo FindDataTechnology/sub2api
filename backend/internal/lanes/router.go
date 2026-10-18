@@ -9,6 +9,7 @@ package lanes
 
 import (
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -50,7 +51,15 @@ func serveLane(c *gin.Context, lane string, app *Lanes) {
 		}
 	}
 	if app.Pool != nil {
-		accounts, err := app.Pool.Candidates(c.Request.Context(), LanePlatform(lane))
+		// 跨协议车道（audio）按平台集合归并取候选；其余车道等价于单平台。
+		platforms := LanePlatforms(lane)
+		var accounts []*service.Account
+		var err error
+		if len(platforms) > 1 {
+			accounts, err = app.Pool.CandidatesForPlatforms(c.Request.Context(), platforms)
+		} else {
+			accounts, err = app.Pool.Candidates(c.Request.Context(), LanePlatform(lane))
+		}
 		if err != nil || len(accounts) == 0 {
 			laneUpstreamUnavailable(c, lane)
 			return

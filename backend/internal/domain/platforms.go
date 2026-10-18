@@ -34,6 +34,12 @@ const (
 	// PlatformOpenAINext openai-next 聚合渠道：audio 车道上游（OpenAI 形状
 	// whisper/tts 系，运营指定 rerank=硅基、audio=本渠道的分工）。
 	PlatformOpenAINext = "openainext"
+	// PlatformDoubao 豆包语音（火山引擎 openspeech）：audio 车道上游——TTS 走
+	// WebSocket V3 二进制帧，ASR 走录音文件识别异步任务。
+	PlatformDoubao = "doubao"
+	// PlatformTencent 腾讯云语音：audio 车道上游——云 API 3.0，
+	// TextToVoice 与一句话识别，凭据为 SecretId/SecretKey（TC3 签名）。
+	PlatformTencent = "tencent"
 )
 
 // PlatformSpec 描述一个具体（非 composite）平台。
@@ -70,6 +76,8 @@ var platformList = []PlatformSpec{
 	{ID: PlatformSiliconFlow, DisplayName: "SiliconFlow 硅基流动", Gateway: PlatformGatewayLane},
 	{ID: PlatformSerpAPI, DisplayName: "SerpAPI 搜索", Gateway: PlatformGatewayLane},
 	{ID: PlatformOpenAINext, DisplayName: "OpenAI-Next 聚合", Gateway: PlatformGatewayLane},
+	{ID: PlatformDoubao, DisplayName: "豆包语音 火山引擎", Gateway: PlatformGatewayLane},
+	{ID: PlatformTencent, DisplayName: "腾讯云语音", Gateway: PlatformGatewayLane},
 }
 
 var platformIndex = func() map[string]int {

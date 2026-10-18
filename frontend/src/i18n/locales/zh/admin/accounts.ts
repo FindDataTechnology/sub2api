@@ -749,7 +749,17 @@ export default {
       laneProviders: {
         hint: '车道上游平台仅供模型车道端点消费（重排 / 搜索 / 音频）：凭据只需 API Key，Base URL 留空即用内置上游端点。',
         baseUrlHint: '留空使用车道内置上游端点；填写则覆盖该平台的默认上游地址。',
-        apiKeyHint: '该车道上游服务商签发的 API Key'
+        apiKeyHint: '该车道上游服务商签发的 API Key',
+        tencent: {
+          secretId: 'SecretId',
+          secretIdHint: '腾讯云控制台 → 访问管理 → API 密钥管理中的 SecretId（AKID 开头）',
+          secretKey: 'SecretKey',
+          secretKeyHint: '与 SecretId 配对的 SecretKey，标准 32 位字符；请完整复制，缺失末尾字符会导致签名校验失败',
+          secretIdRequired: '请填写腾讯云 SecretId',
+          secretKeyRequired: '请填写腾讯云 SecretKey',
+          region: '地域（Region）',
+          regionHint: '语音合成支持 ap-beijing / ap-chengdu / ap-chongqing / ap-guangzhou / ap-nanjing / ap-shanghai，默认 ap-guangzhou'
+        }
       },
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',

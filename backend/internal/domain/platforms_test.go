@@ -19,6 +19,8 @@ var (
 		PlatformSiliconFlow,
 		PlatformSerpAPI,
 		PlatformOpenAINext,
+		PlatformDoubao,
+		PlatformTencent,
 	}
 	legacyCompositePrecedence = []string{
 		PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok,
@@ -28,6 +30,8 @@ var (
 		PlatformSiliconFlow,
 		PlatformSerpAPI,
 		PlatformOpenAINext,
+		PlatformDoubao,
+		PlatformTencent,
 	}
 	legacyOpenAIGateway = []string{
 		PlatformOpenAI, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo,

@@ -3,6 +3,7 @@ package lanes
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -20,9 +21,12 @@ const (
 	LaneAudio     = "audio"
 )
 
-// LanePlatform 车道 v1 上游平台映射：rerank=硅基（原生 /v1/rerank）、
-// audio=openai-next 聚合（OpenAI 形状 whisper/tts 系；运营分工：rerank=硅基、
-// audio/image/video=openai-next）、websearch=SerpAPI（search-relay 既有 key 池）。
+// LanePlatform 车道上游平台映射：rerank=硅基（原生 /v1/rerank）、
+// audio=多种上游（见 LanePlatforms）、websearch=SerpAPI（search-relay 既有 key 池）。
+//
+// audio 自 audio-lane-multi-upstream 起支持跨协议上游，单平台映射已不足以
+// 表达候选集合；本函数保留以兼容既有调用（返回 audio 的首选平台），
+// 取候选请用 LanePlatforms。
 func LanePlatform(lane string) string {
 	switch lane {
 	case LaneRerank:
@@ -36,9 +40,32 @@ func LanePlatform(lane string) string {
 	}
 }
 
+// LanePlatforms 该车道可取候选的**全部**平台（跨协议上游用）。
+// 返回顺序即候选归并时的平台优先序（同平台内仍按账号 priority 升序）。
+//
+// audio 的车道语义是「能完成 OpenAI 音频形状的上游」，与具体协议无关——
+// 协议由账号凭据 audio_protocol 决定（见 audio.go 的分派）。因此登记在此的
+// 平台都会进入 audio 候选池：账号建在哪个平台，就在哪个协议族里竞逐。
+func LanePlatforms(lane string) []string {
+	switch lane {
+	case LaneAudio:
+		return []string{
+			domain.PlatformOpenAINext,
+			domain.PlatformDoubao,
+			domain.PlatformTencent,
+		}
+	default:
+		if p := LanePlatform(lane); p != "" {
+			return []string{p}
+		}
+		return nil
+	}
+}
+
 // AccountLister 池取数面（生产=OpenAIGatewayService.accountRepo，经只读访问器）。
 type AccountLister interface {
 	ListSchedulableByPlatform(ctx context.Context, platform string) ([]service.Account, error)
+	ListSchedulableByPlatforms(ctx context.Context, platforms []string) ([]service.Account, error)
 }
 
 // AccountCooldownWriter 池冷却写面（ciyuan-lane-pool-failover D1）：复用上游
@@ -91,6 +118,47 @@ func (p *Pool) Candidates(ctx context.Context, platform string) ([]*service.Acco
 	for i := range list {
 		out = append(out, &list[i])
 	}
+	return out, nil
+}
+
+// CandidatesForPlatforms 取**多个平台**的候选并归并（跨协议上游用，如 audio）。
+//
+// 归并语义：按 platforms 给出的平台序做稳定分组（同平台内保持 priority ASC），
+// 使「首选平台优先、其内按账号优先级」成为确定序；失败轮转仍由适配器层的
+// serveWithFailover 逐个尝试。空列表=池空。
+func (p *Pool) CandidatesForPlatforms(ctx context.Context, platforms []string) ([]*service.Account, error) {
+	if p == nil || p.accounts == nil || len(platforms) == 0 {
+		return nil, ErrNoLaneAccount
+	}
+	list, err := p.accounts.ListSchedulableByPlatforms(ctx, platforms)
+	if err != nil {
+		return nil, err
+	}
+	if len(list) == 0 {
+		return nil, ErrNoLaneAccount
+	}
+	// 按平台序稳定归组（ListSchedulableByPlatforms 的返回序不保证跨平台次序）。
+	order := make(map[string]int, len(platforms))
+	for i, pl := range platforms {
+		if _, ok := order[pl]; !ok {
+			order[pl] = i
+		}
+	}
+	out := make([]*service.Account, 0, len(list))
+	for i := range list {
+		out = append(out, &list[i])
+	}
+	sort.SliceStable(out, func(a, b int) bool {
+		oa, okA := order[out[a].Platform]
+		ob, okB := order[out[b].Platform]
+		if !okA {
+			oa = len(platforms)
+		}
+		if !okB {
+			ob = len(platforms)
+		}
+		return oa < ob
+	})
 	return out, nil
 }
 
