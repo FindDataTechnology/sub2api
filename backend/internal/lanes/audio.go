@@ -39,15 +39,46 @@ const (
 // json={"text":...}（默认）、text=纯文本、verbose_json=上游原样。
 var audioSupportedASRFormats = []string{"json", "text", "verbose_json"}
 
+// audioProtocol* 账号级上游协议标注（credentials["audio_protocol"]）。
+// 缺省 = openai（既有行为不变）；多协议支持见 change audio-lane-multi-upstream。
+const (
+	audioProtocolOpenAI  = "openai"
+	audioProtocolDoubao  = "doubao"
+	audioProtocolTencent = "tencent"
+)
+
+// audioProtocolOf 取账号声明的上游协议；未标注或未知值回落 openai（向后兼容）。
+func audioProtocolOf(account *service.Account) string {
+	if account == nil {
+		return audioProtocolOpenAI
+	}
+	if v, ok := account.Credentials["audio_protocol"].(string); ok {
+		switch p := strings.ToLower(strings.TrimSpace(v)); p {
+		case audioProtocolDoubao, audioProtocolTencent:
+			return p
+		}
+	}
+	return audioProtocolOpenAI
+}
+
 // AudioAdapter 语音车道适配器：POST /v1/audio/transcriptions（ASR，multipart）
 // 与 POST /v1/audio/speech（TTS，JSON→二进制）。计量：ASR 按音频时长（小时）、
 // TTS 按合成字符数（百万字符）——复用 Group 既有音频三价字段。
+//
+// 上游协议按账号分派（audio-lane-multi-upstream）：openai=既有 OpenAI 兼容
+// HTTP；doubao=豆包 openspeech；tencent=腾讯云云 API。对外形状不变。
 type AudioAdapter struct {
-	client *http.Client
+	client  *http.Client
+	doubao  *doubaoAdapter
+	tencent *tencentAdapter
 }
 
 func NewAudioAdapter() *AudioAdapter {
-	return &AudioAdapter{client: &http.Client{Timeout: 120 * time.Second}}
+	return &AudioAdapter{
+		client:  &http.Client{Timeout: 120 * time.Second},
+		doubao:  newDoubaoAdapter(),
+		tencent: newTencentAdapter(),
+	}
 }
 
 func (a *AudioAdapter) Serve(c *gin.Context, apiKey *service.APIKey, accounts []*service.Account, pool *Pool, meter *Meter) {
@@ -264,6 +295,19 @@ func (a *AudioAdapter) serveTranscriptions(c *gin.Context, apiKey *service.APIKe
 	}
 
 	serveWithFailover(c, LaneAudio, pool, accounts, func(account *service.Account) (bool, *upstreamFailure) {
+		if protocol := audioProtocolOf(account); protocol == audioProtocolTencent {
+			// 腾讯云一句话识别：同步、直接收字节（无需可达化）。
+			return a.serveTencentASR(c, apiKey, account, meter, started, form)
+		}
+		// 豆包走异步任务式 ASR（上游只接受音频 URL），其余走 OpenAI 兼容 multipart。
+		if audioProtocolOf(account) == audioProtocolDoubao {
+			audioURL, err := publishAudioForUpstream(form)
+			if err != nil {
+				// 本地音频可达化失败属车道侧配置问题：长冷却+换号。
+				return false, &upstreamFailure{misconfigured: true}
+			}
+			return a.serveDoubaoASR(c, apiKey, account, meter, started, form, audioURL)
+		}
 		apiKeyStr, _ := account.Credentials["api_key"].(string)
 		if apiKeyStr == "" {
 			return false, &upstreamFailure{misconfigured: true}
@@ -374,7 +418,24 @@ func (a *AudioAdapter) serveSpeech(c *gin.Context, apiKey *service.APIKey, accou
 		return
 	}
 
+	// 豆包分支所需的音频参数（调用者未给时取上游默认）。
+	ttsFormat := "mp3"
+	if rf, ok := req["response_format"].(string); ok && strings.TrimSpace(rf) != "" {
+		ttsFormat = rf
+	}
+	ttsSampleRate := 24000
+	if sr, ok := req["sample_rate"].(float64); ok && sr > 0 {
+		ttsSampleRate = int(sr)
+	}
+
 	serveWithFailover(c, LaneAudio, pool, accounts, func(account *service.Account) (bool, *upstreamFailure) {
+		if protocol := audioProtocolOf(account); protocol == audioProtocolTencent {
+			return a.serveTencentTTS(c, apiKey, account, meter, started, input, voice, ttsFormat, ttsSampleRate)
+		}
+		// 豆包走 WebSocket 双向流（V3 二进制帧），其余走 OpenAI 兼容 HTTP。
+		if audioProtocolOf(account) == audioProtocolDoubao {
+			return a.serveDoubaoTTS(c, apiKey, account, meter, started, input, voice, ttsFormat, ttsSampleRate)
+		}
 		apiKeyStr, _ := account.Credentials["api_key"].(string)
 		if apiKeyStr == "" {
 			return false, &upstreamFailure{misconfigured: true}
