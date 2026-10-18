@@ -44,6 +44,31 @@ func (f *fakeLaneAccountLister) ListSchedulableByPlatform(_ context.Context, pla
 	return out, nil
 }
 
+// ListSchedulableByPlatforms 多平台取数（audio 跨协议候选）：与单平台同一过滤
+// 与排序口径，仅放宽平台条件。
+func (f *fakeLaneAccountLister) ListSchedulableByPlatforms(_ context.Context, platforms []string) ([]service.Account, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	want := make(map[string]struct{}, len(platforms))
+	for _, p := range platforms {
+		want[p] = struct{}{}
+	}
+	var out []service.Account
+	for _, a := range f.accounts {
+		if _, ok := want[a.Platform]; ok && a.Status == service.StatusActive {
+			out = append(out, a)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority < out[j].Priority
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
 // fakeCooldownWriter 冷却写桩：记录 (id, until, reason) 供断言。
 type fakeCooldownWriter struct {
 	mu      sync.Mutex
@@ -150,4 +175,41 @@ func TestPoolCooldownThrottle(t *testing.T) {
 	nilPool.CooldownAccount(1, laneCooldownTransient, "nil-pool")
 	require.Len(t, writer.writes[0], 0)
 	require.Len(t, writer.writes[1], 1) // 仍是 1：后两笔没生效
+}
+
+func TestCandidatesForPlatforms_MergesAcrossProtocolsInPlatformOrder(t *testing.T) {
+	// audio 跨协议取候选：按给定平台序归并（同平台内 priority ASC），
+	// 使「首选平台优先」成为确定序，失败轮转才有可预期行为。
+	lister := &fakeLaneAccountLister{accounts: []service.Account{
+		{ID: 3, Platform: "tencent", Status: service.StatusActive, Priority: 1},
+		{ID: 2, Platform: "doubao", Status: service.StatusActive, Priority: 5},
+		{ID: 1, Platform: "openainext", Status: service.StatusActive, Priority: 9},
+		{ID: 4, Platform: "doubao", Status: service.StatusActive, Priority: 1},
+	}}
+	pool := NewPool(lister, nil)
+	got, err := pool.CandidatesForPlatforms(context.Background(), []string{"openainext", "doubao", "tencent"})
+	if err != nil {
+		t.Fatalf("CandidatesForPlatforms: %v", err)
+	}
+	ids := make([]int64, len(got))
+	for i, a := range got {
+		ids[i] = a.ID
+	}
+	// openainext 先，然后 doubao（priority 1 先于 5），最后 tencent
+	want := []int64{1, 4, 2, 3}
+	if len(ids) != len(want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("ids = %v, want %v (platform order must dominate)", ids, want)
+		}
+	}
+}
+
+func TestCandidatesForPlatforms_EmptyWhenNoAccounts(t *testing.T) {
+	pool := NewPool(&fakeLaneAccountLister{}, nil)
+	if _, err := pool.CandidatesForPlatforms(context.Background(), []string{"doubao", "tencent"}); err == nil {
+		t.Fatal("expected ErrNoLaneAccount for empty pool")
+	}
 }

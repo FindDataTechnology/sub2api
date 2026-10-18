@@ -425,12 +425,15 @@ func (a *AudioAdapter) serveSpeech(c *gin.Context, apiKey *service.APIKey, accou
 		return
 	}
 
-	// 豆包分支所需的音频参数（调用者未给时取上游默认）。
+	// 音频参数：调用者未给时留空，由各协议适配器取自身平台默认。
 	ttsFormat := "mp3"
 	if rf, ok := req["response_format"].(string); ok && strings.TrimSpace(rf) != "" {
 		ttsFormat = rf
 	}
-	ttsSampleRate := 24000
+	// 采样率按平台各自取默认：调用者给了就尊重，没给时**不能**跨平台复用
+	// 同一个默认值——豆包默认 24000，而腾讯云音色的支持范围不同（实测
+	// VoiceType=101007 支持 16000 但不支持 24000，回 InvalidParameterValue.SampleRate）。
+	ttsSampleRate := 0 // 0 = 未指定，由各适配器按自身平台默认取值
 	if sr, ok := req["sample_rate"].(float64); ok && sr > 0 {
 		ttsSampleRate = int(sr)
 	}

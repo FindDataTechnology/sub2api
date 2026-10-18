@@ -163,3 +163,42 @@ func TestParsePositiveInt(t *testing.T) {
 		t.Error("zero should fail")
 	}
 }
+
+func TestTencentTTSSampleRate_DefaultsTo16000NotDoubao24000(t *testing.T) {
+	// 生产实测（2026-10-19）：调用者不传 sample_rate 时，车道曾把豆包的 24000
+	// 默认值直接传给腾讯云，VoiceType=101007 不支持 → InvalidParameterValue.SampleRate，
+	// TTS 全停。未指定时必须由腾讯云适配器取自己的默认（16000）。
+	if got := tencentDefaultSampleRate(0); got != 16000 {
+		t.Errorf("sample rate default = %d, want 16000", got)
+	}
+	if got := tencentDefaultSampleRate(24000); got != 24000 {
+		t.Errorf("explicit rate must be honoured, got %d", got)
+	}
+}
+
+func TestTencentErrorWithHTTP200IsClassifiedNotSwallowed(t *testing.T) {
+	// 云 API 业务错误常以 HTTP 200 + Response.Error 返回。若直接下发 status=200，
+	// 冷却原因会写成「status 200」（无判别力）且真实错误码被吞。
+	cases := []struct {
+		code       string
+		wantStatus int
+	}{
+		{"InvalidParameterValue.SampleRate", http.StatusBadRequest},
+		{"FailedOperation.ServiceNotOpened", http.StatusBadGateway},
+		{"AuthFailure.SignatureFailure", http.StatusForbidden},
+		{"RequestLimitExceeded", http.StatusTooManyRequests},
+	}
+	for _, c := range cases {
+		uf := tencentToUpstreamFailure(&tencentUpstreamError{status: http.StatusOK, code: c.code, message: "x"})
+		if uf.status != c.wantStatus {
+			t.Errorf("%s -> status %d, want %d", c.code, uf.status, c.wantStatus)
+		}
+		if uf.status == http.StatusOK {
+			t.Errorf("%s must never keep status 200", c.code)
+		}
+		// 错误码必须保留在分级/日志可见的位置
+		if !strings.Contains(uf.bodyExcerpt, c.code) {
+			t.Errorf("%s lost from bodyExcerpt: %q", c.code, uf.bodyExcerpt)
+		}
+	}
+}
