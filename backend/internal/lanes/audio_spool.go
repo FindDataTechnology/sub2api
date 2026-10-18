@@ -36,18 +36,23 @@ var (
 
 // publishAudioForUpstream 把上传字节发布为上游可取的 URL。
 //
-// 返回的 URL = audio_public_base_url + "/" + 随机文件名。调用者之外的账号
-// 元数据（audio_public_base_url）由部署提供，落账号 credentials。
-func publishAudioForUpstream(form *asrFormData) (string, error) {
+// 前缀来源优先级：账号凭据 audio_public_base_url > 环境变量
+// LANE_AUDIO_PUBLIC_BASE_URL。前者支持多部署/多租户各自不同的对外域；
+// 两者皆空时**明确报错**——上游要求公网可达 URL 无法满足，静默降级会导致
+// 「看起来成功、实际转写空音频」这类最坏缺陷。
+func publishAudioForUpstream(form *asrFormData, accountPublicBase string) (string, error) {
 	if form == nil || len(form.fileBytes) == 0 {
 		return "", fmt.Errorf("no audio bytes to publish")
 	}
 	if len(form.fileBytes) > audioSpoolMaxBytes {
 		return "", fmt.Errorf("audio exceeds upstream limit (%d bytes)", audioSpoolMaxBytes)
 	}
-	base := strings.TrimSpace(os.Getenv("LANE_AUDIO_PUBLIC_BASE_URL"))
+	base := strings.TrimSpace(accountPublicBase)
 	if base == "" {
-		return "", fmt.Errorf("LANE_AUDIO_PUBLIC_BASE_URL is not configured; upstream requires a publicly reachable audio URL")
+		base = strings.TrimSpace(os.Getenv("LANE_AUDIO_PUBLIC_BASE_URL"))
+	}
+	if base == "" {
+		return "", fmt.Errorf("audio public base URL is not configured (set account credential audio_public_base_url or env LANE_AUDIO_PUBLIC_BASE_URL); upstream requires a publicly reachable audio URL")
 	}
 	dir := strings.TrimSpace(os.Getenv(audioSpoolDirEnv))
 	if dir == "" {
