@@ -629,9 +629,19 @@ export default {
       baseUrl: 'Base URL',
       baseUrlHint: 'Leave default for official Anthropic API',
       laneProviders: {
-        hint: 'Lane upstream platforms are consumed only by the model-lane endpoints (rerank / search / audio): credentials need just an API key; leave Base URL empty to use the built-in upstream endpoint.',
-        baseUrlHint: 'Leave empty to use the lane built-in upstream endpoint; fill in to override the platform default.',
-        apiKeyHint: 'API Key issued by the lane upstream provider'
+        hint: 'Lane upstream platforms serve model-lane endpoints only (rerank / search / audio): only an API key is required; leave Base URL empty to use the built-in upstream endpoint.',
+        baseUrlHint: 'Leave empty to use the lane built-in endpoint; fill in to override the platform default upstream.',
+        apiKeyHint: 'API key issued by this lane upstream provider',
+        tencent: {
+          secretId: 'SecretId',
+          secretIdHint: 'SecretId from Tencent Cloud console → CAM → API key management (starts with AKID)',
+          secretKey: 'SecretKey',
+          secretKeyHint: 'SecretKey paired with the SecretId; standard 32 characters. Copy it in full — a truncated tail makes signature validation fail',
+          secretIdRequired: 'Tencent Cloud SecretId is required',
+          secretKeyRequired: 'Tencent Cloud SecretKey is required',
+          region: 'Region',
+          regionHint: 'Speech synthesis supports ap-beijing / ap-chengdu / ap-chongqing / ap-guangzhou / ap-nanjing / ap-shanghai; defaults to ap-guangzhou'
+        }
       },
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',

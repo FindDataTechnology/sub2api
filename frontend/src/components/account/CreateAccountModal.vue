@@ -1578,7 +1578,45 @@
           :platform="form.platform"
           :plan="currentOpenCodeOrCNMode()"
         />
-        <div>
+        <div v-if="form.platform === 'tencent'" class="space-y-4">
+          <!-- 腾讯云语音：云 API 3.0 用 SecretId/SecretKey 签名，不使用单一 api_key -->
+          <div>
+            <label class="input-label">{{ t('admin.accounts.laneProviders.tencent.secretId') }}</label>
+            <input
+              v-model="laneSecretId"
+              type="password"
+              required
+              class="input font-mono"
+              placeholder="AKID..."
+              data-testid="lane-tencent-secret-id"
+            />
+            <p class="input-hint">{{ t('admin.accounts.laneProviders.tencent.secretIdHint') }}</p>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.laneProviders.tencent.secretKey') }}</label>
+            <input
+              v-model="laneSecretKey"
+              type="password"
+              required
+              class="input font-mono"
+              placeholder="32 位字符"
+              data-testid="lane-tencent-secret-key"
+            />
+            <p class="input-hint">{{ t('admin.accounts.laneProviders.tencent.secretKeyHint') }}</p>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.laneProviders.tencent.region') }}</label>
+            <input
+              v-model="laneRegion"
+              type="text"
+              class="input font-mono"
+              placeholder="ap-guangzhou"
+              data-testid="lane-tencent-region"
+            />
+            <p class="input-hint">{{ t('admin.accounts.laneProviders.tencent.regionHint') }}</p>
+          </div>
+        </div>
+        <div v-else>
           <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
           <input
             v-model="apiKeyValue"
@@ -4273,6 +4311,14 @@ const oauthStepTitle = computed(() => {
 
 // Platform-specific hints for API Key type
 // 上游ID：直接上游声明请求标识的响应头名，留空不记录。
+// 车道音频上游（腾讯云）专用凭据字段：SecretId/SecretKey/地域。
+// 豆包与 OpenAI 兼容系仍用通用 apiKeyValue。
+const laneSecretId = ref('')
+const laneSecretKey = ref('')
+const laneRegion = ref('ap-guangzhou')
+const isLaneAudioPlatform = (platform: string): boolean =>
+  platform === 'doubao' || platform === 'tencent'
+
 const upstreamRequestIdHeader = ref('')
 const withUpstreamRequestIdHeader = <T extends Record<string, unknown> | undefined>(extra: T): T | Record<string, unknown> => {
   const name = upstreamRequestIdHeader.value.trim()
@@ -6150,7 +6196,17 @@ const handleSubmit = async () => {
   }
 
   // For apikey type, create directly
-  if (!apiKeyValue.value.trim()) {
+  // 腾讯云用 SecretId/SecretKey 双凭据，不走 api_key 必填校验。
+  if (form.platform === 'tencent') {
+    if (!laneSecretId.value.trim()) {
+      appStore.showError(t('admin.accounts.laneProviders.tencent.secretIdRequired'))
+      return
+    }
+    if (!laneSecretKey.value.trim()) {
+      appStore.showError(t('admin.accounts.laneProviders.tencent.secretKeyRequired'))
+      return
+    }
+  } else if (!apiKeyValue.value.trim()) {
     appStore.showError(t('admin.accounts.pleaseEnterApiKey'))
     return
   }
@@ -6172,6 +6228,17 @@ const handleSubmit = async () => {
   // Build credentials with optional model mapping
   const credentials: Record<string, unknown> = {
     api_key: apiKeyValue.value.trim()
+  }
+  // 车道音频上游：把平台记为账号级上游协议（audio-lane-multi-upstream），
+  // 供车道按协议分派到对应适配器。腾讯云用 SecretId/SecretKey 而非 api_key。
+  if (isLaneAudioPlatform(form.platform)) {
+    credentials.audio_protocol = form.platform
+    if (form.platform === 'tencent') {
+      delete credentials.api_key
+      credentials.secret_id = laneSecretId.value.trim()
+      credentials.secret_key = laneSecretKey.value.trim()
+      if (laneRegion.value.trim()) credentials.region = laneRegion.value.trim()
+    }
   }
   const resolvedBaseUrl = apiKeyBaseUrl.value.trim() || defaultBaseUrl
   if (resolvedBaseUrl) {

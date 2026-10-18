@@ -667,7 +667,40 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const wrapper = mountModal()
     const labels = (testid: string) =>
       wrapper.get(`[data-testid="${testid}"]`).findAll('button').map(button => button.text().trim())
-    expect(labels('platform-row-lanes')).toEqual(['SiliconFlow 硅基流动', 'SerpAPI 搜索', 'OpenAI-Next 聚合'])
+    expect(labels('platform-row-lanes')).toEqual([
+      'SiliconFlow 硅基流动',
+      'SerpAPI 搜索',
+      'OpenAI-Next 聚合',
+      '豆包语音 火山引擎',
+      '腾讯云语音',
+    ])
+  })
+
+  it('creates a Tencent Cloud audio lane account with SecretId/SecretKey (no api_key)', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="platform-button-tencent"]').trigger('click')
+
+    // 腾讯云不渲染通用 API Key 输入，而是 SecretId/SecretKey/Region 三项
+    expect(wrapper.find('[data-testid="lane-tencent-secret-id"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="lane-tencent-secret-key"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="lane-tencent-region"]').exists()).toBe(true)
+
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('tencent audio')
+    await wrapper.get('[data-testid="lane-tencent-secret-id"]').setValue('AKIDtest')
+    await wrapper.get('[data-testid="lane-tencent-secret-key"]').setValue('k'.repeat(32))
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    const payload = createAccountMock.mock.calls[0]?.[0]
+    expect(payload?.platform).toBe('tencent')
+    expect(payload?.type).toBe('apikey')
+    expect(payload?.credentials).toEqual({
+      audio_protocol: 'tencent',
+      secret_id: 'AKIDtest',
+      secret_key: 'k'.repeat(32),
+      region: 'ap-guangzhou',
+    })
   })
 
   it('creates a lane account with only the API key and no base_url', async () => {
