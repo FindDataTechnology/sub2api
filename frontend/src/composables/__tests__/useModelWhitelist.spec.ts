@@ -236,4 +236,22 @@ describe('useModelWhitelist', () => {
       modelMappings: [{ from: 'gpt-latest', to: 'gpt-5.4' }]
     })
   })
+
+
+  // fork 补丁 ciyuan-v0.2.16-16：聚合渠道的 /v1/models 不列 embedding 模型，
+  // 若清单里没有它们，管理台的模型下拉与分组白名单候选都选不到——
+  // 纯 embedding 账号因而无法在后台配置。与后端 embedding_model_catalog.go 同步。
+  it('exposes embedding models on the openai platform list', () => {
+    const models = getModelsByPlatform('openai')
+    expect(models).toContain('Qwen/Qwen3-Embedding-8B')
+    expect(models).toContain('text-embedding-3-large')
+    expect(models).toContain('text-embedding-3-small')
+  })
+
+  it('keeps existing openai models untouched (additive only)', () => {
+    const models = getModelsByPlatform('openai')
+    expect(models).toContain('gpt-5.6-sol')
+    expect(models).toContain('gpt-image-2.5-sunburst')
+    expect(models).toContain('gpt-5.4')
+  })
 })
