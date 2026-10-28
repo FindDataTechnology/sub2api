@@ -254,7 +254,7 @@ func (s *AccountTestService) FetchOpenAIAccountModels(ctx context.Context, accou
 			seen[publicID] = true
 		}
 	}
-	return payload.Data, nil
+	return WithEmbeddingModelsFromMapping(payload.Data, account), nil
 }
 
 // NewAccountTestService creates a new AccountTestService
