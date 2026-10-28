@@ -18,6 +18,7 @@
 package service
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -74,6 +75,67 @@ func withEmbeddingModels(ids []string) []string {
 		}
 		seen[strings.ToLower(m)] = struct{}{}
 		out = append(out, m)
+	}
+	return out
+}
+
+// WithEmbeddingModelsFromMapping 把账号 model_mapping 里**被投影丢掉**的
+// embedding 条目补回 picker 列表。
+//
+// 为什么投影会丢（2026-10-29 生产实测，账号 47 nebius-embedding-bulk）：
+// GetAvailableModels 先走 FetchOpenAIAccountModels —— 那条路是
+// 「上游 /v1/models → projectAccountModelsBody 按 mapping 投影」，投影要求
+// 目标模型存在于上游目录（byID），不存在即 `continue` 丢弃。OpenRouter 的
+// /v1/models 一条 embedding 都没有，于是 Qwen3-Embedding-8B 被丢光，接口
+// **成功返回空数组**（err==nil），handler 里 `fetchErr == nil` 直接短路返回，
+// 连 WithEmbeddingModelsForPicker 的回落都走不到。
+//
+// 判据取 mapping 而非全局目录：mapping 是运维对该账号「我能供这个模型」的显式
+// 声明，比静态目录更准；再叠 IsEmbeddingModelID 把范围锁死在 embedding，
+// chat 模型仍遵循「上游没列就不展示」的既有安全语义，既有账号零变化。
+// 公开名优先（mapping 的 key），无 key 时退到目标名。
+func WithEmbeddingModelsFromMapping(models []openai.Model, account *Account) []openai.Model {
+	if account == nil {
+		return models
+	}
+	mapping := account.GetModelMapping()
+	if len(mapping) == 0 {
+		return models
+	}
+	seen := make(map[string]struct{}, len(models)+len(mapping))
+	for _, m := range models {
+		seen[strings.ToLower(strings.TrimSpace(m.ID))] = struct{}{}
+	}
+	// 稳定输出：mapping 是 map，遍历顺序随机，先收集再排序。
+	extra := make([]string, 0, len(mapping))
+	for publicID, target := range mapping {
+		if strings.Contains(publicID, "*") {
+			continue
+		}
+		if !IsEmbeddingModelID(publicID) && !IsEmbeddingModelID(target) {
+			continue
+		}
+		id := strings.TrimSpace(publicID)
+		if id == "" {
+			id = strings.TrimSpace(target)
+		}
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[strings.ToLower(id)]; ok {
+			continue
+		}
+		seen[strings.ToLower(id)] = struct{}{}
+		extra = append(extra, id)
+	}
+	if len(extra) == 0 {
+		return models
+	}
+	sort.Strings(extra)
+	out := make([]openai.Model, 0, len(models)+len(extra))
+	out = append(out, models...)
+	for _, id := range extra {
+		out = append(out, openai.Model{ID: id, Object: "model", Type: "model", DisplayName: id})
 	}
 	return out
 }
