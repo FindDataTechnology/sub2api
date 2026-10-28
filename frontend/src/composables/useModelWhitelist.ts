@@ -21,7 +21,11 @@ const openaiModels = [
   'gpt-5.3-codex-spark', 'codex-auto-review',
   'gpt-4o-audio-preview', 'gpt-4o-realtime-preview',
   // GPT Image 系列
-  'gpt-image-1', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'
+  'gpt-image-1', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst',
+  // Embedding 系列（fork 补丁 ciyuan-v0.2.16-16）：聚合渠道的 /v1/models 不列
+  // embedding 模型，若不在本清单里，管理台的模型下拉与分组白名单候选都选不到它，
+  // 纯 embedding 账号因而无法在后台配置。与后端 embedding_model_catalog.go 保持同步。
+  'Qwen/Qwen3-Embedding-8B', 'text-embedding-3-large', 'text-embedding-3-small', 'text-embedding-ada-002'
 ]
 
 // Anthropic Claude
