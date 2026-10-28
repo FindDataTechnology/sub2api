@@ -837,6 +837,13 @@ export default {
       },
       modelRestriction: 'Model Restriction (Optional)',
       modelWhitelist: 'Model Whitelist',
+      embeddingProviderOnly: 'Embedding provider (pin)',
+      embeddingProviderUnset: 'Not pinned (follows aggregator routing — not recommended)',
+      embeddingProviderOnlyHint:
+        'One embedding model is served by several upstream providers behind an aggregator. ' +
+        'Each provider quantizes differently, so their vector spaces are NOT interchangeable. ' +
+        'Switching providers switches the vector space and silently corrupts recall. ' +
+        'Pick one and keep it stable; re-embed history after any change.',
       modelMapping: 'Model Mapping',
       fromModel: 'Request model',
       toModel: 'Target model',

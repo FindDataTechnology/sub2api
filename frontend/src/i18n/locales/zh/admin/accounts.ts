@@ -945,6 +945,12 @@ export default {
       },
       modelRestriction: '模型限制（可选）',
       modelWhitelist: '模型白名单',
+      embeddingProviderOnly: 'Embedding 细分渠道（钉扎）',
+      embeddingProviderUnset: '未钉扎（跟随聚合渠道路由，不推荐）',
+      embeddingProviderOnlyHint:
+        '同一 embedding 模型在聚合渠道上挂多家上游，各家量化不同、向量空间互不通用。' +
+        '换渠道等于换向量空间，会让历史向量与新查询来自不同空间、检索静默漂移。' +
+        '请选定一家并长期保持不变；切换后必须重建历史向量。',
       modelMapping: '模型映射',
       fromModel: '请求模型',
       toModel: '目标模型',
