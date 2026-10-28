@@ -280,7 +280,10 @@ func compositeRouteFromInput(groupID int64, input CompositeRouteInput) (*Composi
 func defaultModelsListCandidateIDs(platform string) []string {
 	switch platform {
 	case PlatformOpenAI:
-		return openai.DefaultModelIDs()
+		// fork 补丁（ciyuan-v0.2.16-16）：聚合渠道的 /v1/models 不列 embedding
+		// 模型，默认集也没有——后台白名单候选里因此永远选不到 embedding，
+		// 分组也就无法在管理台上配置它。仅在默认集基础上补齐，既有条目零改动。
+		return withEmbeddingModels(openai.DefaultModelIDs())
 	case PlatformGemini:
 		ids := make([]string, 0, len(geminicli.DefaultModels))
 		for _, model := range geminicli.DefaultModels {

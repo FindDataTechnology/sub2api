@@ -2822,7 +2822,10 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 
 		mapping := account.GetModelMapping()
 		if len(mapping) == 0 {
-			response.Success(c, openai.DefaultModels)
+			// fork 补丁（ciyuan-v0.2.16-16）：默认集不含 embedding，纯 embedding
+			// 账号在后台模型列表里恒为空（看不见=无法在管理台配置）。补入本部署
+			// 登记的 embedding 目录，既有默认集条目与顺序零改动。
+			response.Success(c, service.WithEmbeddingModelsForPicker(openai.DefaultModels))
 			return
 		}
 
