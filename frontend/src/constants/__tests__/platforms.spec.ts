@@ -68,7 +68,7 @@ describe('platform catalog with a newly registered platform', () => {
     expect(compositePrecedencePlatformIds()).toEqual([
       'anthropic', 'gemini', 'openai', 'antigravity', 'grok',
       'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'typesafe', 'command_code', 'cline',
-      'siliconflow', 'serpapi', 'openainext'
+      'siliconflow', 'serpapi', 'openainext', 'doubao', 'tencent'
     ])
     expect(CONCRETE_PLATFORM_OPTIONS.map((option) => option.label)).toEqual([
       'Anthropic', 'OpenAI', 'Gemini', 'Antigravity', 'Grok',

@@ -708,6 +708,10 @@ func newGrokCatalogUpstream(modelsStatus int, modelsBody string, registryCode in
 	}
 }
 
+// RecordAIMDResult：fork AIMD 接口方法在上游测试 fake 上的 no-op（merge-upstream-v0-2-19 1.8；
+// 与 fork CI 门收口同款——上游 v0.2.17-19 新增 stub 不感知 fork 的有界排队接口）
+func (u *grokCatalogUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *grokCatalogUpstream) Do(req *http.Request, proxyURL string, _ int64, _ int) (*http.Response, error) {
 	u.mu.Lock()
 	u.requests = append(u.requests, req)

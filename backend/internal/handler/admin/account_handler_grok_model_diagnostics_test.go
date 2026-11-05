@@ -330,6 +330,10 @@ type grokDiagHandlerUpstream struct {
 	responses []*http.Response
 }
 
+// RecordAIMDResult：fork AIMD 接口方法在上游测试 fake 上的 no-op（merge-upstream-v0-2-19 1.8；
+// 与 fork CI 门收口同款——上游 v0.2.17-19 新增 stub 不感知 fork 的有界排队接口）
+func (u *grokDiagHandlerUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *grokDiagHandlerUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
