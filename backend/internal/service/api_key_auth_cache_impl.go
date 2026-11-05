@@ -14,7 +14,11 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 25 // v25: group rerank_price_per_request field (ciyuan lanes, tasks 3.1; must bump when snapshot shape gains fields — stale v24 snapshots carried nil rerank price and billed zero)
+// v26: merge-upstream-v0-2-19 —— 双侧曾在各自 v25 各加一字段，合并体快照形状=两字段并集，
+// 必须再升一版：v25(fork)=group rerank_price_per_request（ciyuan lanes, tasks 3.1；v24 旧快照 rerank 价 nil 计零），
+// v25(upstream)=group image_count_billing 开关（image 端点按张计费）。
+// 线上现存 v25 快照（仅 rerank 价）按版本不符拒绝重建，防止 image_count_billing 读 nil。
+const apiKeyAuthSnapshotVersion = 26
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -391,6 +395,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			MonthlyLimitUSD:                 apiKey.Group.MonthlyLimitUSD,
 			AllowImageGeneration:            apiKey.Group.AllowImageGeneration,
 			AllowBatchImageGeneration:       apiKey.Group.AllowBatchImageGeneration,
+			ImageCountBilling:               apiKey.Group.ImageCountBilling,
 			ImageRateIndependent:            apiKey.Group.ImageRateIndependent,
 			ImageRateMultiplier:             apiKey.Group.ImageRateMultiplier,
 			ImagePrice1K:                    apiKey.Group.ImagePrice1K,
@@ -494,6 +499,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			MonthlyLimitUSD:                 snapshot.Group.MonthlyLimitUSD,
 			AllowImageGeneration:            snapshot.Group.AllowImageGeneration,
 			AllowBatchImageGeneration:       snapshot.Group.AllowBatchImageGeneration,
+			ImageCountBilling:               snapshot.Group.ImageCountBilling,
 			ImageRateIndependent:            snapshot.Group.ImageRateIndependent,
 			ImageRateMultiplier:             snapshot.Group.ImageRateMultiplier,
 			ImagePrice1K:                    snapshot.Group.ImagePrice1K,
