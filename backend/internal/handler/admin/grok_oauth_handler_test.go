@@ -62,6 +62,9 @@ func (s *grokOAuthReconcilerStub) ReconcileGrokOAuth(_ context.Context, input se
 	return s.result, s.err
 }
 
+// RecordAIMDResult: HTTPUpstream 口新增的 AIMD 喂点（2.2），本 fake 无状态 no-op。
+func (u *grokQuotaHandlerUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *grokQuotaHandlerUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	var body []byte
 	if req.Body != nil {

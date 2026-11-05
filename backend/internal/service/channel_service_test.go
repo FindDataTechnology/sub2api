@@ -2129,7 +2129,7 @@ func TestMatchingPlatforms(t *testing.T) {
 		{"gemini returns itself", PlatformGemini, []string{PlatformGemini}},
 		{"openai returns itself", PlatformOpenAI, []string{PlatformOpenAI}},
 		// 词元车道平台（Gateway=lane）按展示序补入 composite 匹配清单。
-		{"composite returns concrete platforms", PlatformComposite, []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe, PlatformCommandCode, PlatformCline, domain.PlatformSiliconFlow, domain.PlatformSerpAPI, domain.PlatformOpenAINext}},
+		{"composite returns concrete platforms", PlatformComposite, []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe, PlatformCommandCode, PlatformCline, domain.PlatformSiliconFlow, domain.PlatformSerpAPI, domain.PlatformOpenAINext, domain.PlatformDoubao, domain.PlatformTencent}},
 	}
 
 	for _, tt := range tests {

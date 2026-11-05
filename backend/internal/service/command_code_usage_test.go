@@ -30,6 +30,9 @@ type commandCodeAlphaResponse struct {
 	body   string
 }
 
+// RecordAIMDResult: HTTPUpstream 口新增的 AIMD 喂点（2.2），本 fake 无状态 no-op。
+func (u *commandCodeAlphaUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *commandCodeAlphaUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	u.mu.Lock()
 	u.requests = append(u.requests, req)
@@ -248,6 +251,9 @@ func TestCommandCodeProbeFailsWhenWhoamiFails(t *testing.T) {
 
 // failingCommandCodeUpstream 让每个请求都在网络层失败。
 type failingCommandCodeUpstream struct{}
+
+// RecordAIMDResult: HTTPUpstream 口新增的 AIMD 喂点（2.2），本 fake 无状态 no-op。
+func (failingCommandCodeUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
 
 func (failingCommandCodeUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
 	return nil, errors.New("dial tcp: i/o timeout")

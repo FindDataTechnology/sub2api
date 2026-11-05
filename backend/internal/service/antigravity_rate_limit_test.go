@@ -32,6 +32,9 @@ type recordingOKUpstream struct {
 	calls int
 }
 
+// RecordAIMDResult: HTTPUpstream 口新增的 AIMD 喂点（2.2），本 fake 无状态 no-op。
+func (r *recordingOKUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (r *recordingOKUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	r.calls++
 	return &http.Response{
@@ -44,6 +47,9 @@ func (r *recordingOKUpstream) Do(req *http.Request, proxyURL string, accountID i
 func (r *recordingOKUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
 	return r.Do(req, proxyURL, accountID, accountConcurrency)
 }
+
+// RecordAIMDResult: HTTPUpstream 口新增的 AIMD 喂点（2.2），本 fake 无状态 no-op。
+func (s *stubAntigravityUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
 
 func (s *stubAntigravityUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	url := req.URL.String()

@@ -41,6 +41,9 @@ type mockSmartRetryUpstream struct {
 	repeatLast     bool // 超出范围时重复最后一个响应
 }
 
+// RecordAIMDResult: HTTPUpstream 口新增的 AIMD 喂点（2.2），本 fake 无状态 no-op。
+func (m *mockSmartRetryUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (m *mockSmartRetryUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	idx := m.callIdx
 	m.calls = append(m.calls, req.URL.String())

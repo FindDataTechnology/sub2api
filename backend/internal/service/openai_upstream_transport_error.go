@@ -157,13 +157,18 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	// 有界队列快速拒（add-sub2api-fork-concurrency 2.1）：ErrQueueFull/
 	// ErrAccountTripped 是本池自己发布的容量信号——立刻以 429 + Retry-After
 	// 回客户端（FAILover 反而会把压力推给下一个账号，违背快速拒语义），
-	// 不记账号故障、不临时封禁。
+	// 不记账号故障、不临时封禁。类型化 Reason 与真上游限流 429 分流
+	//（handler 渲染走 IsAccountQueueFastReject 分支）。
 	if errors.Is(err, ErrAccountQueueFull) || errors.Is(err, ErrAccountTrippedAIMD) {
+		retryAfter := http.Header{}
+		retryAfter.Set("Retry-After", "2")
 		return &UpstreamFailoverError{
-			StatusCode:    http.StatusTooManyRequests,
-			ResponseBody:  []byte(`{"error":{"message":"upstream account queue full, retry later","type":"queue_full","code":"queue_full"}}`),
-			ClientStatusCode: http.StatusTooManyRequests,
-			ClientMessage:    "upstream account queue full, retry later",
+			StatusCode:        http.StatusTooManyRequests,
+			ResponseBody:      []byte(`{"error":{"message":"upstream account queue full, retry later","type":"queue_full","code":"queue_full"}}`),
+			ResponseHeaders:   retryAfter,
+			ClientStatusCode:  http.StatusTooManyRequests,
+			ClientMessage:     "Upstream account queue full, please retry later",
+			Reason:            AccountQueueFastRejectReason,
 			NextAccountAction: NextAccountStop,
 		}
 	}

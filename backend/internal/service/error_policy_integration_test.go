@@ -27,6 +27,9 @@ type epFixedUpstream struct {
 	calls      int
 }
 
+// RecordAIMDResult: HTTPUpstream 口新增的 AIMD 喂点（2.2），本 fake 无状态 no-op。
+func (u *epFixedUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *epFixedUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	u.calls++
 	return &http.Response{

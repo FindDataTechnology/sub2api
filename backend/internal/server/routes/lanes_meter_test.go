@@ -49,6 +49,21 @@ func (r *lanesMeterAccountRepo) ListSchedulableByPlatform(_ context.Context, pla
 	return out, nil
 }
 
+// ListSchedulableByPlatforms: 池接口已改复数批量取数（internal/lanes pool.go），
+// 不实现则嵌入的 nil 接口提升出自动生成方法，池一调即 panic。
+func (r *lanesMeterAccountRepo) ListSchedulableByPlatforms(_ context.Context, platforms []string) ([]service.Account, error) {
+	var out []service.Account
+	for _, a := range r.seedAccounts {
+		for _, p := range platforms {
+			if a.Platform == p {
+				out = append(out, a)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 func lanePoolSeedAccounts() []service.Account {
 	return []service.Account{
 		{ID: 11, Platform: "siliconflow", Status: service.StatusActive, Priority: 1},

@@ -203,6 +203,10 @@ type cachedBillingUpstream struct {
 	transportErrors map[string]error
 }
 
+// RecordAIMDResult: HTTPUpstream 新增的 AIMD 喂点。嵌入的 nil 接口会把该方法
+// 提升进方法集，生产代码一调即 nil panic——必须显式覆写为 no-op。
+func (u *cachedBillingUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 type cachedBillingUpstreamFailure struct {
 	status int
 	body   string
