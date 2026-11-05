@@ -22,6 +22,8 @@ var (
 		domain.PlatformSiliconFlow,
 		domain.PlatformSerpAPI,
 		domain.PlatformOpenAINext,
+		domain.PlatformDoubao,
+		domain.PlatformTencent,
 	}
 	legacySchedulerSnapshotPlatforms = []string{
 		PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok,
@@ -39,6 +41,8 @@ var (
 		domain.PlatformSiliconFlow,
 		domain.PlatformSerpAPI,
 		domain.PlatformOpenAINext,
+		domain.PlatformDoubao,
+		domain.PlatformTencent,
 	}
 	legacyMultiProtocolProviders = []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformCommandCode, PlatformCline}
 	platformProbeValues          = append(append([]string{}, legacyAllPlatforms...), PlatformComposite, "", "moonshot", "Kimi", "openai ", "glm", "bogus")

@@ -62,6 +62,9 @@ type contextBoundHTTPUpstream struct {
 	body *contextBoundBlockingReadCloser
 }
 
+// RecordAIMDResult: HTTPUpstream 口新增的 AIMD 喂点（2.2），本 fake 无状态 no-op。
+func (u *contextBoundHTTPUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *contextBoundHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	u.body.ctx = req.Context()
 	return &http.Response{

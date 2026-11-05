@@ -60,6 +60,9 @@ func (u *syncUpstreamHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string,
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
+// RecordAIMDResult: HTTPUpstream 口新增的 AIMD 喂点，fake 无状态 no-op。
+func (u *syncUpstreamHTTPUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func setupSyncUpstreamModelsRouter(adminSvc service.AdminService, upstream service.HTTPUpstream) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

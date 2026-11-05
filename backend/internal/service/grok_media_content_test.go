@@ -24,6 +24,9 @@ type grokMediaContentUpstreamStub struct {
 	responses []*http.Response
 }
 
+// RecordAIMDResult: HTTPUpstream 口新增的 AIMD 喂点（2.2），本 fake 无状态 no-op。
+func (s *grokMediaContentUpstreamStub) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (s *grokMediaContentUpstreamStub) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	s.request = req
 	s.requests = append(s.requests, req)

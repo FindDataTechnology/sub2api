@@ -2005,6 +2005,10 @@ type openAIHTTPPassthroughFailoverUpstream struct {
 	accountIDs []int64
 }
 
+// RecordAIMDResult: HTTPUpstream 新增的 AIMD 喂点。嵌入的 nil 接口会把该方法
+// 提升进方法集，生产代码一调即 nil panic——必须显式覆写为 no-op。
+func (u *openAIHTTPPassthroughFailoverUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *openAIHTTPPassthroughFailoverUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.mu.Lock()
 	u.accountIDs = append(u.accountIDs, accountID)
@@ -2028,6 +2032,10 @@ type openAIHTTPPassthroughAuthFailoverUpstream struct {
 	accountIDs []int64
 	statusCode int
 }
+
+// RecordAIMDResult: HTTPUpstream 新增的 AIMD 喂点。嵌入的 nil 接口会把该方法
+// 提升进方法集，生产代码一调即 nil panic——必须显式覆写为 no-op。
+func (u *openAIHTTPPassthroughAuthFailoverUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
 
 func (u *openAIHTTPPassthroughAuthFailoverUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.mu.Lock()
@@ -2058,6 +2066,10 @@ type openAIHTTPPassthroughSSERateLimitUpstream struct {
 	mu         sync.Mutex
 	accountIDs []int64
 }
+
+// RecordAIMDResult: HTTPUpstream 新增的 AIMD 喂点。嵌入的 nil 接口会把该方法
+// 提升进方法集，生产代码一调即 nil panic——必须显式覆写为 no-op。
+func (u *openAIHTTPPassthroughSSERateLimitUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
 
 func (u *openAIHTTPPassthroughSSERateLimitUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.mu.Lock()

@@ -24,5 +24,7 @@ func TestAllPlatformsIncludesEveryConcretePlatform(t *testing.T) {
 		"siliconflow",
 		"serpapi",
 		"openainext",
+		"doubao",
+		"tencent",
 	}, AllPlatforms())
 }

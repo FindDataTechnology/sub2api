@@ -1617,6 +1617,19 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 	if failoverErr != nil {
 		copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
 	}
+	// 有界队列快速拒（add-sub2api-fork-concurrency 2.1）：与真上游限流 429 分流。
+	if failoverErr != nil && failoverErr.IsAccountQueueFastReject() {
+		status := failoverErr.ClientStatusCode
+		if status <= 0 {
+			status = http.StatusTooManyRequests
+		}
+		message := strings.TrimSpace(failoverErr.ClientMessage)
+		if message == "" {
+			message = "Upstream account queue full, please retry later"
+		}
+		h.anthropicStreamingAwareError(c, status, "rate_limit_error", message, streamStarted)
+		return
+	}
 	if failoverErr != nil && failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)
 		h.anthropicStreamingAwareError(c, status, "api_error", message, streamStarted)
@@ -3532,6 +3545,21 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		return
 	}
 	copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
+	// 有界队列快速拒（add-sub2api-fork-concurrency 2.1）：429 + Retry-After
+	// 原样透出，不进 mapUpstreamError（那里 429 是真上游限流语义，两者分流）。
+	if failoverErr.IsAccountQueueFastReject() {
+		status := failoverErr.ClientStatusCode
+		if status <= 0 {
+			status = http.StatusTooManyRequests
+		}
+		message := strings.TrimSpace(failoverErr.ClientMessage)
+		if message == "" {
+			message = "Upstream account queue full, please retry later"
+		}
+		service.SetOpsUpstreamError(c, status, message, "")
+		h.handleStreamingAwareError(c, status, "rate_limit_error", message, streamStarted)
+		return
+	}
 	if failoverErr.IsOpenAIRequestBodyTooLarge() {
 		service.SetOpsUpstreamError(c, http.StatusRequestEntityTooLarge, service.OpenAIRequestBodyTooLargeClientMessage, "")
 		h.handleStreamingAwareError(
@@ -3676,12 +3704,6 @@ func (h *OpenAIGatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, sta
 }
 
 func (h *OpenAIGatewayHandler) mapUpstreamError(statusCode int) (int, string, string) {
-	// 有界队列快速拒（add-sub2api-fork-concurrency 2.1）：failover 链耗尽落在
-	// 队列哨兵时，429 语义原样透出（限流类错误，客户端可控重试），不伪装成
-	// 502 上游故障。
-	if statusCode == 429 {
-		return http.StatusTooManyRequests, "rate_limit_error", "Upstream account queue full, please retry later"
-	}
 	switch statusCode {
 	case 401:
 		return http.StatusBadGateway, "upstream_error", "Upstream authentication failed, please contact administrator"

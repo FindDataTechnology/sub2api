@@ -28,6 +28,9 @@ type queuedHTTPUpstream struct {
 	tlsFlags  []bool
 }
 
+// RecordAIMDResult: HTTPUpstream 口新增的 AIMD 喂点（2.2），本 fake 无状态 no-op。
+func (u *queuedHTTPUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *queuedHTTPUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	return nil, fmt.Errorf("unexpected Do call")
 }

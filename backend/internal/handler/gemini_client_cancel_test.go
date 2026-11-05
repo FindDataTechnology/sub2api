@@ -27,6 +27,10 @@ type clientCancelUpstream struct {
 	calls  atomic.Int32
 }
 
+// RecordAIMDResult: HTTPUpstream 新增的 AIMD 喂点。嵌入的 nil 接口会把该方法
+// 提升进方法集，生产代码一调即 nil panic——必须显式覆写为 no-op。
+func (u *clientCancelUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *clientCancelUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	u.calls.Add(1)
 	u.cancel()
