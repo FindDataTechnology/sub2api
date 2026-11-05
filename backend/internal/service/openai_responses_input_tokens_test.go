@@ -101,3 +101,4 @@ func TestForwardResponsesInputTokensUpstream404FallsBackLocally(t *testing.T) {
 	require.Positive(t, gjson.Get(recorder.Body.String(), "input_tokens").Int())
 	require.NotNil(t, upstream.lastReq)
 }
+

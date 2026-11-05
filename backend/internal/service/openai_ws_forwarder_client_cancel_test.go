@@ -182,3 +182,4 @@ func (c *openAIWSCancelSafeConn) ReadMessage(ctx context.Context) ([]byte, error
 	}
 	return event, nil
 }
+

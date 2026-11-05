@@ -90,3 +90,4 @@ func TestForwardAsAnthropic_TransportError_ClientCanceled_NoFailover(t *testing.
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr), "client-canceled transport error should NOT trigger failover")
 }
+

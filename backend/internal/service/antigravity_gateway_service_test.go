@@ -2012,3 +2012,7 @@ func generateLargeUnwrapJSON(minSize int) []byte {
 	b, _ := json.Marshal(outer)
 	return b
 }
+
+func (s *queuedHTTPUpstreamStub) RecordAIMDResult(accountID int64, statusCode int) {}
+
+func (s *httpUpstreamStub) RecordAIMDResult(accountID int64, statusCode int) {}

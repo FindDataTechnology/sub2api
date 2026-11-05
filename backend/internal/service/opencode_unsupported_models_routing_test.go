@@ -84,3 +84,4 @@ func TestOpenCodeConnectionTestRejectsMappedUnsupportedModel(t *testing.T) {
 	require.ErrorContains(t, err, "not supported on OpenCode standard gateway")
 	require.ErrorContains(t, err, "jev-1.13")
 }
+

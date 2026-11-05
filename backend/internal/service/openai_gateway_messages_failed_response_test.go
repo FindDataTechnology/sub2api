@@ -210,3 +210,4 @@ func TestForwardAsAnthropic_BufferedResponseFailed_Failover(t *testing.T) {
 	var failoverErr *UpstreamFailoverError
 	require.True(t, errors.As(err, &failoverErr), "rate_limit_error should trigger UpstreamFailoverError for failover, got: %T: %v", err, err)
 }
+

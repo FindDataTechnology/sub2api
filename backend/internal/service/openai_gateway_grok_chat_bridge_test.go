@@ -729,3 +729,4 @@ func grokChatBridgeCompletedResponse(responseID string, cachedTokens int) *http.
 		Body: io.NopCloser(strings.NewReader(body)),
 	}
 }
+

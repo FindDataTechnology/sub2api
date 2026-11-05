@@ -356,3 +356,4 @@ func TestIsOpenAIImageCapabilityLossError(t *testing.T) {
 	require.False(t, isOpenAIImageCapabilityLossError(http.StatusBadRequest, genericBadRequestBody))
 	require.False(t, isOpenAIImageCapabilityLossError(http.StatusTooManyRequests, capabilityLossBody))
 }
+

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
@@ -3373,4 +3374,30 @@ func sanitizeExtraBaseRPM(extra map[string]any) {
 		v = 10000
 	}
 	extra["base_rpm"] = v
+}
+
+// GetUpstreamQueueMetrics GET /api/v1/admin/accounts/upstream-queue-metrics
+//
+// 有界队列 + AIMD 的观测面（add-sub2api-fork-concurrency 2.3）：三 metrics
+// 合一——queue_depth（waiting）、queue_rejected_total、aimd_concurrency
+// （bound/limit）+ 哨兵字段 aimd_state（open/half_open/closed，channel_monitor
+// 哨兵收编消费的真状态）。全量枚举本进程在册账号；未建队列的账号不在册。
+func (h *AccountHandler) GetUpstreamQueueMetrics(c *gin.Context) {
+	all := repository.AllAccountQueueMetrics()
+	items := make([]gin.H, 0, len(all))
+	for id, snap := range all {
+		items = append(items, gin.H{
+			"account_id":           id,
+			"queue_depth":          snap.Waiting,
+			"queue_rejected_total": snap.QueueFull,
+			"aimd_concurrency":     snap.Bound,
+			"aimd_limit":           snap.Limit,
+			"in_flight":            snap.InFlight,
+			"max_seen":             snap.MaxSeen,
+			"tripped":              snap.Tripped,
+			"aimd_trips_total":     snap.TripCount,
+			"aimd_state":           repository.AccountQueueAIMDState(id),
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
 }

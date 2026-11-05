@@ -208,3 +208,4 @@ func TestOpenAIGatewayService_ForwardClearsStaleNamespaceNames(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, openAIResponsesNamespaceNames(c))
 }
+

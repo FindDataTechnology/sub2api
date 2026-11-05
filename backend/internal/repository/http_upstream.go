@@ -210,6 +210,16 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 		profile = service.HTTPUpstreamProfileFromContext(req.Context())
 	}
 
+	// per-account 有界排队（add-sub2api-fork-concurrency 2.1/2.2）：MaxConnsPerHost
+	// 饱和后 transport 内部队列无界等待——坏仓库分钟级 403 会拖死整池。这里在
+	// 进 transport 前先过账号信号量：队满/熔开即 ErrQueueFull/ErrAccountTripped
+	// 快速拒（handler 映射 429 + Retry-After），AIMD 按结果记账。
+	qst, qerr := acquireAccountSlot(accountID, accountConcurrency)
+	if qerr != nil {
+		return nil, qerr
+	}
+	defer releaseAccountSlot(qst)
+
 	// 获取或创建对应的客户端，并标记请求占用
 	entry, err := s.acquireClientWithProfile(proxyURL, accountID, accountConcurrency, profile)
 	if err != nil {
@@ -222,11 +232,18 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	resp, err := doUpstreamRequest(client, req)
 	if err != nil {
 		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
+		// AIMD：transport 层失败（超时/连接拒绝/断连）按故障记账（2.2）。
+		// 客户端主动取消（context canceled）不是账号故障，不喂 AIMD。
+		if req == nil || req.Context().Err() == nil {
+			aimdRecordFailure(qst)
+		}
 		// 请求失败，立即减少计数
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 		return nil, err
 	}
+	// AIMD：拿到了响应头——账号可用，成功记账（清连击+冷却期恢复）。
+	aimdRecordSuccess(qst)
 	s.recordOpenAIHTTP2Success(profile, entry.protocolMode, entry.proxyKey)
 
 	// 包装响应体，在关闭时自动减少计数并更新时间戳

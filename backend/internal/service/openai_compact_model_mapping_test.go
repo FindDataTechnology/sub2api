@@ -212,3 +212,4 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactOnlyModelMappingOverridesU
 	require.True(t, exists)
 	require.Equal(t, "gpt-5.4-openai-compact", opsModel)
 }
+

@@ -544,3 +544,4 @@ func (r *agentIdentityForwardRepo) UpdateCredentials(_ context.Context, _ int64,
 	r.account.Credentials = credentials
 	return nil
 }
+

@@ -247,3 +247,5 @@ func TestOpenAIWSHTTPBridgeSessionIsolationAcrossSameSessionHash(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "sentinel-native-conn", gotConn)
 }
+
+func (u *httpBridgeIsolationUpstream) RecordAIMDResult(accountID int64, statusCode int) {}

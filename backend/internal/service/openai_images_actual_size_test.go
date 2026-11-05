@@ -172,3 +172,4 @@ func encodeOpenAIImageTestWebPVP8L(width, height int) string {
 	header[24] = byte(height>>10) & 0x0f
 	return base64.StdEncoding.EncodeToString(header)
 }
+

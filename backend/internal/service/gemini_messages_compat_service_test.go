@@ -1291,3 +1291,5 @@ func parseAnthropicContentBlockEvents(t *testing.T, raw string) []anthropicConte
 	}
 	return events
 }
+
+func (s *geminiCompatHTTPUpstreamStub) RecordAIMDResult(accountID int64, statusCode int) {}
