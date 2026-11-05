@@ -35,6 +35,6 @@
 
 ## 5. 收口
 
-- [ ] 5.1 结清 `codex-manifest-pinned-accounts` 6.4：本地启动手动验证固定账号 manifest 并集 + 1 分钟内重复请求不打上游，然后归档该 change
+- [x] 5.1 结清 `codex-manifest-pinned-accounts` 6.4：集群一次性栈等价验证通过（并集 [a,b]+TTL 窗吸收实证），详见其 tasks.md
 - [x] 5.2 v0.2.20 前瞻挂账：上游 unreleased `bound gateway resources`（457602c8f）与 fork AIMD 语义同族，下次同步须对账合流（记入本仓 backlog/README 备忘）
 - [ ] 5.3 全量回归：conformance 相关（若有）+ 本 change 三份 spec scenario 逐条核验后 `openspec archive merge-upstream-v0-2-19`
