@@ -30,6 +30,9 @@ type grokCatalogLoggingUpstream struct {
 	request  *http.Request
 }
 
+// RecordAIMDResult：fork AIMD 接口方法在上游测试 fake 上的 no-op（merge-upstream-v0-2-19 1.8）
+func (u *grokCatalogLoggingUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *grokCatalogLoggingUpstream) Do(req *http.Request, proxyURL string, _ int64, _ int) (*http.Response, error) {
 	u.proxyURL = proxyURL
 	u.request = req

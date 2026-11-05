@@ -106,6 +106,10 @@ type geminiVertex429SequenceUpstream struct {
 	calls     int
 }
 
+// RecordAIMDResult：fork AIMD 接口方法在上游测试 fake 上的 no-op（merge-upstream-v0-2-19 1.8；
+// 与 fork CI 门收口同款——上游 v0.2.17-19 新增 stub 不感知 fork 的有界排队接口）
+func (s *geminiVertex429SequenceUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (s *geminiVertex429SequenceUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	resp := s.responses[min(s.calls, len(s.responses)-1)]
 	s.calls++

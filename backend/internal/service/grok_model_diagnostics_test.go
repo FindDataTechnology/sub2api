@@ -581,6 +581,9 @@ type grokDiagnosticHTTPUpstream struct {
 	calls int
 }
 
+// RecordAIMDResult：fork AIMD 接口方法在上游测试 fake 上的 no-op（merge-upstream-v0-2-19 1.8）
+func (u *grokDiagnosticHTTPUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *grokDiagnosticHTTPUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
 	u.calls++
 	return nil, errors.New("diagnostics must not call upstream")
