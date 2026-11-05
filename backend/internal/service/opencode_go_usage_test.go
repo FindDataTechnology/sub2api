@@ -1007,3 +1007,5 @@ func TestOpenCodeGoUsageRefreshRejectsIneligibleAccount(t *testing.T) {
 	require.True(t, errors.Is(err, ErrOpenCodeGoUsageAccountInvalid))
 	require.Equal(t, int64(0), stub.calls.Load())
 }
+
+func (s *openCodeGoUsageHTTPStub) RecordAIMDResult(accountID int64, statusCode int) {}

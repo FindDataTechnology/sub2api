@@ -185,3 +185,4 @@ func TestCountGrokNativeSearchCallsFromJSON_MessagesStyleBody(t *testing.T) {
 	body := []byte(`{"id":"r1","output":[{"type":"web_search_call","id":"ws1"},{"type":"message","role":"assistant"}]}`)
 	require.Equal(t, 1, countGrokNativeSearchCallsFromJSONBytes(body))
 }
+

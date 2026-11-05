@@ -1875,3 +1875,4 @@ func TestGPT61SolOnlyChatFallbackRejectsToolsAndDisabledReasoning(t *testing.T) 
 		}
 	}
 }
+

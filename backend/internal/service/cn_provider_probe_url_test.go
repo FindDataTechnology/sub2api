@@ -200,3 +200,5 @@ func TestCNProviderBalanceService_OfficialHostPassesValidation(t *testing.T) {
 	_, _ = svc.QueryBalance(context.Background(), 3)
 	require.Equal(t, 1, upstream.calls, "official host must pass URL policy and reach the upstream layer")
 }
+
+func (u *recordingHTTPUpstream) RecordAIMDResult(accountID int64, statusCode int) {}

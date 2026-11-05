@@ -133,3 +133,5 @@ func TestPluginManagerStatusReportsNotRunningWithoutRuntime(t *testing.T) {
 	assert.Equal(t, "插件未运行", resp.Message)
 	assert.Empty(t, resp.StatusJson)
 }
+
+func (u *pluginRoutingHTTPUpstream) RecordAIMDResult(accountID int64, statusCode int) {}

@@ -1895,3 +1895,6 @@ func TestOpenAIGatewayService_Forward_WSv2InvalidEncryptedContentKeepsPreviousRe
 	require.Equal(t, "ok", gjson.GetBytes(requests[1], `input.0.output`).String())
 	require.Equal(t, "resp_prev_function_call", gjson.GetBytes(requests[1], "previous_response_id").String())
 }
+
+
+func (u *httpUpstreamSequenceRecorder) RecordAIMDResult(accountID int64, statusCode int) {}

@@ -306,3 +306,4 @@ func TestOpenAIPassthroughAPIKeyRestoresClientToolsStreaming(t *testing.T) {
 	require.Contains(t, output, `"input":"*** Begin Patch"`)
 	require.NotContains(t, output, `"input":{`)
 }
+

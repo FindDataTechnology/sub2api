@@ -128,3 +128,5 @@ func TestCNProviderBalanceService_DeepSeekValidZeroBalanceRemainsSuccessful(t *t
 	require.Len(t, result.Balances, 1)
 	require.Len(t, repo.extraWrites, 1, "a valid upstream zero balance must still be persisted")
 }
+
+func (u *cnBalanceResponseUpstream) RecordAIMDResult(accountID int64, statusCode int) {}

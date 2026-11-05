@@ -156,3 +156,5 @@ func TestEmbeddingProviderOnlyExtraValidationAndNormalize(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, " Nebius , DeepInfra ", normalized[EmbeddingProviderOnlyExtraKey])
 }
+
+func (r *httpUpstreamRecorder) RecordAIMDResult(accountID int64, statusCode int) {}

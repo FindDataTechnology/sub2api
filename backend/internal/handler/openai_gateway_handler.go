@@ -3676,6 +3676,12 @@ func (h *OpenAIGatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, sta
 }
 
 func (h *OpenAIGatewayHandler) mapUpstreamError(statusCode int) (int, string, string) {
+	// 有界队列快速拒（add-sub2api-fork-concurrency 2.1）：failover 链耗尽落在
+	// 队列哨兵时，429 语义原样透出（限流类错误，客户端可控重试），不伪装成
+	// 502 上游故障。
+	if statusCode == 429 {
+		return http.StatusTooManyRequests, "rate_limit_error", "Upstream account queue full, please retry later"
+	}
 	switch statusCode {
 	case 401:
 		return http.StatusBadGateway, "upstream_error", "Upstream authentication failed, please contact administrator"

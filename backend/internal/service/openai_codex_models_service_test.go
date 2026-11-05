@@ -3881,3 +3881,5 @@ func TestGPT61SolAPIKeyCatalogContextWindow(t *testing.T) {
 		})
 	}
 }
+
+func (s *codexModelsHTTPUpstreamStub) RecordAIMDResult(accountID int64, statusCode int) {}
