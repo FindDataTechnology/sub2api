@@ -45,7 +45,7 @@
 - [x] 6.1 `cd backend && go test -tags=unit ./...` 与 `golangci-lint run ./...` 通过
 - [x] 6.2 `cd backend && go test -tags=integration ./internal/repository/...` 通过（含投影对账测试）
 - [x] 6.3 `cd frontend && pnpm test` 与类型检查通过
-- [ ] 6.4 本地启动后手动验证：编辑 OpenAI 分组开启固定账号并选择两个权限不同的账号，Codex 客户端拉取 manifest 得到并集；1 分钟内重复请求不打上游
+- [x] 6.4 已验证（2026-11-06，集群一次性栈 s2a-verify-64 起 postgres+redis+sub2api:sha-6cbe84a+双 stub 上游）：开启钉扎（account_ids=[3,4]）后 Codex 端点（client_version=0.146.0）拉 manifest 得双账号模型并集 [a,b]；TTL 60s 内重复拉取 stub 上游计数不变（1 分钟窗口吸收实证），TTL 过期后重拉各 +1。本机无容器 daemon，验证栈走 cheap-ts 集群等价完成「本地启动」
 
 ## 7. 普通模型列表扩展
 
