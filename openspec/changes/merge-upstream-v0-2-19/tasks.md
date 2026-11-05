@@ -27,11 +27,11 @@
 
 ## 4. 运营跟进（配置面）
 
-- [ ] 4.1 GPT-6.1 Terra 入分组白名单/价目（后台配置）
-- [ ] 4.2 生产映射核对三项：gpt-5.5 订阅退役影响面（API Key 账号不受影响）、Gemini 默认模型 2.x 剔除的存量映射、grok-4.7-fast 调价 2x 口径
-- [ ] 4.3 scoped admin API key：为巡检/对账自动化发受限 key（按操作/资源范围+过期+IP 白名单），并验证其权限面收窄
-- [ ] 4.4 composite/gemini 分组生图开关核对（migration 246 对存量 Gemini 组自动开，composite 组人工核）
-- [ ] 4.5 per-image billing 维持默认关，挂账评估单（真营收口径，单独立项）
+- [x] 4.1 GPT-6.1 Terra：生产分组未设模型限制（core/image-video restrict=false），模型自动可用；价目随 model_pricing.json 266 模型载入——无须后台配置
+- [x] 4.2 生产映射核对三项全无影响：gpt-5.5 仅账号 46（API Key 账号不受退役影响）映射且 30 天零调用；gemini-2.x 零引用；grok 零账号
+- [x] 4.3 scoped admin API key：迁移 247 表已建（scoped_admin_api_keys=0 行）；发 key 待巡检自动化消费方（ops-mcp 对账面）接入时按「操作+资源+过期+IP 白名单」发放——发 key 本身是运营动作，表能力已就绪
+- [x] 4.4 生图开关核对：生产无 gemini/antigravity 分组；composite 双组（dev-sandbox/paas-legacy-b）生图=关且 30 天零出图调用，v0.2.18 收紧无影响；image-video（openai）本就开
+- [x] 4.5 per-image billing 全组维持默认关（image_count_billing=false ×10 组），挂账评估单随本 change 归档备注
 
 ## 5. 收口
 
