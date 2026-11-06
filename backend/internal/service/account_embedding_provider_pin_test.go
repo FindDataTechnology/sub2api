@@ -52,7 +52,7 @@ func embeddingsPinUpstream() *httpUpstreamRecorder {
 		},
 		Body: io.NopCloser(strings.NewReader(`{
 			"object":"list",
-			"data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],
+			"data":[{"object":"embedding","index":0,"embedding":[` + strings.Repeat("0.1,", 1023) + `0.1]}],
 			"model":"qwen/qwen3-embedding-8b",
 			"usage":{"prompt_tokens":7,"total_tokens":7}
 		}`)),
