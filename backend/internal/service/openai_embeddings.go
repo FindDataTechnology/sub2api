@@ -165,6 +165,16 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
 
+	// Dimension drift guard (ciyuan-embedding-lane): a successful response
+	// whose vectors disagree with the caller-declared `dimensions`, or whose
+	// batch mixes lengths, is a corrupt vector space — reject it as an
+	// upstream anomaly instead of writing bad vectors into the consumer's
+	// store. Returning a plain error lets the handler's non-failover path
+	// answer 502 without billing the caller for the bad response.
+	if err := validateOpenAIEmbeddingsResponseDimensions(body, respBody); err != nil {
+		return nil, fmt.Errorf("validate embeddings dimensions: %w", err)
+	}
+
 	writeOpenAIEmbeddingsUpstreamResponse(c, resp, respBody, s.responseHeaderFilter)
 
 	return &OpenAIForwardResult{
@@ -253,4 +263,46 @@ func firstPositiveGJSONInt(values ...gjson.Result) int {
 
 func buildOpenAIEmbeddingsURL(base string) string {
 	return buildOpenAIEndpointURL(base, "/v1/embeddings")
+}
+
+// validateOpenAIEmbeddingsResponseDimensions rejects the silent dimension
+// drift the ciyuan embedding contract forbids. Rules (all deliberately narrow
+// so other embedding models keep their passthrough behaviour):
+//   - a request carrying `dimensions=N` expects every vector to have N values;
+//   - a batch whose vectors have different lengths is malformed regardless;
+//   - `encoding_format=base64` (string embeddings) is not decodable here and
+//     is left to the caller; a response without a `data` array is not ours to
+//     judge (e.g. an upstream error shape).
+func validateOpenAIEmbeddingsResponseDimensions(requestBody, responseBody []byte) error {
+	data := gjson.GetBytes(responseBody, "data")
+	if !data.IsArray() {
+		return nil
+	}
+
+	want := int64(0)
+	if d := gjson.GetBytes(requestBody, "dimensions"); d.Exists() && d.Type == gjson.Number && d.Int() > 0 {
+		want = d.Int()
+	}
+
+	batchDim := int64(0)
+	for _, item := range data.Array() {
+		vec := item.Get("embedding")
+		if !vec.IsArray() { // base64 / other encoding
+			continue
+		}
+		n := int64(len(vec.Array()))
+		if n == 0 {
+			continue
+		}
+		if batchDim == 0 {
+			batchDim = n
+		}
+		if n != batchDim {
+			return fmt.Errorf("upstream embeddings mix vector dimensions (%d vs %d)", batchDim, n)
+		}
+		if want > 0 && n != want {
+			return fmt.Errorf("upstream embeddings dimension %d does not match requested dimensions=%d", n, want)
+		}
+	}
+	return nil
 }
