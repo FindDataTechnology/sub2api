@@ -474,9 +474,14 @@ func TestBulkUpdateRollsBackWhenOutboxFails(t *testing.T) {
 
 func updatedAccountRows(id int64, extra string) *sqlmock.Rows {
 	now := time.Now()
+	// 列序必须与 ent 生成的 dbaccount.Columns 一致：credentials 之后紧跟
+	// credentials_meta / credentials_encrypted / credentials_hash / credentials_api_key_hash，
+	// 然后才是 extra。新增凭据列时这里要同步，否则 sqlmock 会报
+	// "Expected number of values to match number of columns"。
 	return sqlmock.NewRows(dbaccount.Columns).AddRow(
 		id, now, now, nil, "test", nil, service.PlatformOpenAI, service.AccountTypeAPIKey,
-		[]byte(`{"api_key":"sk-test"}`), []byte(extra), nil, nil, 1, nil, 1, 1.0,
+		[]byte(`{"api_key":"sk-test"}`), []byte(`{}`), nil, nil, nil,
+		[]byte(extra), nil, nil, 1, nil, 1, 1.0,
 		service.StatusActive, nil, nil, nil, false, true, nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, service.QuotaDimensionGlobal,
 	)
