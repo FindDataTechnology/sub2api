@@ -115,6 +115,8 @@ type APIKeyMutation struct {
 	updated_at         *time.Time
 	deleted_at         *time.Time
 	key                *string
+	key_hash           *string
+	key_encrypted      *string
 	name               *string
 	status             *string
 	last_used_at       *time.Time
@@ -444,6 +446,104 @@ func (m *APIKeyMutation) OldKey(ctx context.Context) (v string, err error) {
 // ResetKey resets all changes to the "key" field.
 func (m *APIKeyMutation) ResetKey() {
 	m.key = nil
+}
+
+// SetKeyHash sets the "key_hash" field.
+func (m *APIKeyMutation) SetKeyHash(s string) {
+	m.key_hash = &s
+}
+
+// KeyHash returns the value of the "key_hash" field in the mutation.
+func (m *APIKeyMutation) KeyHash() (r string, exists bool) {
+	v := m.key_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldKeyHash returns the old "key_hash" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldKeyHash(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldKeyHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldKeyHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldKeyHash: %w", err)
+	}
+	return oldValue.KeyHash, nil
+}
+
+// ClearKeyHash clears the value of the "key_hash" field.
+func (m *APIKeyMutation) ClearKeyHash() {
+	m.key_hash = nil
+	m.clearedFields[apikey.FieldKeyHash] = struct{}{}
+}
+
+// KeyHashCleared returns if the "key_hash" field was cleared in this mutation.
+func (m *APIKeyMutation) KeyHashCleared() bool {
+	_, ok := m.clearedFields[apikey.FieldKeyHash]
+	return ok
+}
+
+// ResetKeyHash resets all changes to the "key_hash" field.
+func (m *APIKeyMutation) ResetKeyHash() {
+	m.key_hash = nil
+	delete(m.clearedFields, apikey.FieldKeyHash)
+}
+
+// SetKeyEncrypted sets the "key_encrypted" field.
+func (m *APIKeyMutation) SetKeyEncrypted(s string) {
+	m.key_encrypted = &s
+}
+
+// KeyEncrypted returns the value of the "key_encrypted" field in the mutation.
+func (m *APIKeyMutation) KeyEncrypted() (r string, exists bool) {
+	v := m.key_encrypted
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldKeyEncrypted returns the old "key_encrypted" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldKeyEncrypted(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldKeyEncrypted is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldKeyEncrypted requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldKeyEncrypted: %w", err)
+	}
+	return oldValue.KeyEncrypted, nil
+}
+
+// ClearKeyEncrypted clears the value of the "key_encrypted" field.
+func (m *APIKeyMutation) ClearKeyEncrypted() {
+	m.key_encrypted = nil
+	m.clearedFields[apikey.FieldKeyEncrypted] = struct{}{}
+}
+
+// KeyEncryptedCleared returns if the "key_encrypted" field was cleared in this mutation.
+func (m *APIKeyMutation) KeyEncryptedCleared() bool {
+	_, ok := m.clearedFields[apikey.FieldKeyEncrypted]
+	return ok
+}
+
+// ResetKeyEncrypted resets all changes to the "key_encrypted" field.
+func (m *APIKeyMutation) ResetKeyEncrypted() {
+	m.key_encrypted = nil
+	delete(m.clearedFields, apikey.FieldKeyEncrypted)
 }
 
 // SetName sets the "name" field.
@@ -1532,7 +1632,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 23)
+	fields := make([]string, 0, 25)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1547,6 +1647,12 @@ func (m *APIKeyMutation) Fields() []string {
 	}
 	if m.key != nil {
 		fields = append(fields, apikey.FieldKey)
+	}
+	if m.key_hash != nil {
+		fields = append(fields, apikey.FieldKeyHash)
+	}
+	if m.key_encrypted != nil {
+		fields = append(fields, apikey.FieldKeyEncrypted)
 	}
 	if m.name != nil {
 		fields = append(fields, apikey.FieldName)
@@ -1620,6 +1726,10 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.UserID()
 	case apikey.FieldKey:
 		return m.Key()
+	case apikey.FieldKeyHash:
+		return m.KeyHash()
+	case apikey.FieldKeyEncrypted:
+		return m.KeyEncrypted()
 	case apikey.FieldName:
 		return m.Name()
 	case apikey.FieldGroupID:
@@ -1675,6 +1785,10 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldUserID(ctx)
 	case apikey.FieldKey:
 		return m.OldKey(ctx)
+	case apikey.FieldKeyHash:
+		return m.OldKeyHash(ctx)
+	case apikey.FieldKeyEncrypted:
+		return m.OldKeyEncrypted(ctx)
 	case apikey.FieldName:
 		return m.OldName(ctx)
 	case apikey.FieldGroupID:
@@ -1754,6 +1868,20 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetKey(v)
+		return nil
+	case apikey.FieldKeyHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetKeyHash(v)
+		return nil
+	case apikey.FieldKeyEncrypted:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetKeyEncrypted(v)
 		return nil
 	case apikey.FieldName:
 		v, ok := value.(string)
@@ -2013,6 +2141,12 @@ func (m *APIKeyMutation) ClearedFields() []string {
 	if m.FieldCleared(apikey.FieldDeletedAt) {
 		fields = append(fields, apikey.FieldDeletedAt)
 	}
+	if m.FieldCleared(apikey.FieldKeyHash) {
+		fields = append(fields, apikey.FieldKeyHash)
+	}
+	if m.FieldCleared(apikey.FieldKeyEncrypted) {
+		fields = append(fields, apikey.FieldKeyEncrypted)
+	}
 	if m.FieldCleared(apikey.FieldGroupID) {
 		fields = append(fields, apikey.FieldGroupID)
 	}
@@ -2053,6 +2187,12 @@ func (m *APIKeyMutation) ClearField(name string) error {
 	switch name {
 	case apikey.FieldDeletedAt:
 		m.ClearDeletedAt()
+		return nil
+	case apikey.FieldKeyHash:
+		m.ClearKeyHash()
+		return nil
+	case apikey.FieldKeyEncrypted:
+		m.ClearKeyEncrypted()
 		return nil
 	case apikey.FieldGroupID:
 		m.ClearGroupID()
@@ -2100,6 +2240,12 @@ func (m *APIKeyMutation) ResetField(name string) error {
 		return nil
 	case apikey.FieldKey:
 		m.ResetKey()
+		return nil
+	case apikey.FieldKeyHash:
+		m.ResetKeyHash()
+		return nil
+	case apikey.FieldKeyEncrypted:
+		m.ResetKeyEncrypted()
 		return nil
 	case apikey.FieldName:
 		m.ResetName()
@@ -2293,6 +2439,10 @@ type AccountMutation struct {
 	platform                    *string
 	_type                       *string
 	credentials                 *map[string]interface{}
+	credentials_meta            *map[string]interface{}
+	credentials_encrypted       *string
+	credentials_hash            *string
+	credentials_api_key_hash    *string
 	extra                       *map[string]interface{}
 	proxy_fallback_origin_id    *int64
 	addproxy_fallback_origin_id *int64
@@ -2748,6 +2898,189 @@ func (m *AccountMutation) OldCredentials(ctx context.Context) (v map[string]inte
 // ResetCredentials resets all changes to the "credentials" field.
 func (m *AccountMutation) ResetCredentials() {
 	m.credentials = nil
+}
+
+// SetCredentialsMeta sets the "credentials_meta" field.
+func (m *AccountMutation) SetCredentialsMeta(value map[string]interface{}) {
+	m.credentials_meta = &value
+}
+
+// CredentialsMeta returns the value of the "credentials_meta" field in the mutation.
+func (m *AccountMutation) CredentialsMeta() (r map[string]interface{}, exists bool) {
+	v := m.credentials_meta
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCredentialsMeta returns the old "credentials_meta" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldCredentialsMeta(ctx context.Context) (v map[string]interface{}, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCredentialsMeta is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCredentialsMeta requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCredentialsMeta: %w", err)
+	}
+	return oldValue.CredentialsMeta, nil
+}
+
+// ResetCredentialsMeta resets all changes to the "credentials_meta" field.
+func (m *AccountMutation) ResetCredentialsMeta() {
+	m.credentials_meta = nil
+}
+
+// SetCredentialsEncrypted sets the "credentials_encrypted" field.
+func (m *AccountMutation) SetCredentialsEncrypted(s string) {
+	m.credentials_encrypted = &s
+}
+
+// CredentialsEncrypted returns the value of the "credentials_encrypted" field in the mutation.
+func (m *AccountMutation) CredentialsEncrypted() (r string, exists bool) {
+	v := m.credentials_encrypted
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCredentialsEncrypted returns the old "credentials_encrypted" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldCredentialsEncrypted(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCredentialsEncrypted is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCredentialsEncrypted requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCredentialsEncrypted: %w", err)
+	}
+	return oldValue.CredentialsEncrypted, nil
+}
+
+// ClearCredentialsEncrypted clears the value of the "credentials_encrypted" field.
+func (m *AccountMutation) ClearCredentialsEncrypted() {
+	m.credentials_encrypted = nil
+	m.clearedFields[account.FieldCredentialsEncrypted] = struct{}{}
+}
+
+// CredentialsEncryptedCleared returns if the "credentials_encrypted" field was cleared in this mutation.
+func (m *AccountMutation) CredentialsEncryptedCleared() bool {
+	_, ok := m.clearedFields[account.FieldCredentialsEncrypted]
+	return ok
+}
+
+// ResetCredentialsEncrypted resets all changes to the "credentials_encrypted" field.
+func (m *AccountMutation) ResetCredentialsEncrypted() {
+	m.credentials_encrypted = nil
+	delete(m.clearedFields, account.FieldCredentialsEncrypted)
+}
+
+// SetCredentialsHash sets the "credentials_hash" field.
+func (m *AccountMutation) SetCredentialsHash(s string) {
+	m.credentials_hash = &s
+}
+
+// CredentialsHash returns the value of the "credentials_hash" field in the mutation.
+func (m *AccountMutation) CredentialsHash() (r string, exists bool) {
+	v := m.credentials_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCredentialsHash returns the old "credentials_hash" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldCredentialsHash(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCredentialsHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCredentialsHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCredentialsHash: %w", err)
+	}
+	return oldValue.CredentialsHash, nil
+}
+
+// ClearCredentialsHash clears the value of the "credentials_hash" field.
+func (m *AccountMutation) ClearCredentialsHash() {
+	m.credentials_hash = nil
+	m.clearedFields[account.FieldCredentialsHash] = struct{}{}
+}
+
+// CredentialsHashCleared returns if the "credentials_hash" field was cleared in this mutation.
+func (m *AccountMutation) CredentialsHashCleared() bool {
+	_, ok := m.clearedFields[account.FieldCredentialsHash]
+	return ok
+}
+
+// ResetCredentialsHash resets all changes to the "credentials_hash" field.
+func (m *AccountMutation) ResetCredentialsHash() {
+	m.credentials_hash = nil
+	delete(m.clearedFields, account.FieldCredentialsHash)
+}
+
+// SetCredentialsAPIKeyHash sets the "credentials_api_key_hash" field.
+func (m *AccountMutation) SetCredentialsAPIKeyHash(s string) {
+	m.credentials_api_key_hash = &s
+}
+
+// CredentialsAPIKeyHash returns the value of the "credentials_api_key_hash" field in the mutation.
+func (m *AccountMutation) CredentialsAPIKeyHash() (r string, exists bool) {
+	v := m.credentials_api_key_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCredentialsAPIKeyHash returns the old "credentials_api_key_hash" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldCredentialsAPIKeyHash(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCredentialsAPIKeyHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCredentialsAPIKeyHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCredentialsAPIKeyHash: %w", err)
+	}
+	return oldValue.CredentialsAPIKeyHash, nil
+}
+
+// ClearCredentialsAPIKeyHash clears the value of the "credentials_api_key_hash" field.
+func (m *AccountMutation) ClearCredentialsAPIKeyHash() {
+	m.credentials_api_key_hash = nil
+	m.clearedFields[account.FieldCredentialsAPIKeyHash] = struct{}{}
+}
+
+// CredentialsAPIKeyHashCleared returns if the "credentials_api_key_hash" field was cleared in this mutation.
+func (m *AccountMutation) CredentialsAPIKeyHashCleared() bool {
+	_, ok := m.clearedFields[account.FieldCredentialsAPIKeyHash]
+	return ok
+}
+
+// ResetCredentialsAPIKeyHash resets all changes to the "credentials_api_key_hash" field.
+func (m *AccountMutation) ResetCredentialsAPIKeyHash() {
+	m.credentials_api_key_hash = nil
+	delete(m.clearedFields, account.FieldCredentialsAPIKeyHash)
 }
 
 // SetExtra sets the "extra" field.
@@ -4138,7 +4471,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 31)
+	fields := make([]string, 0, 35)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -4162,6 +4495,18 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.credentials != nil {
 		fields = append(fields, account.FieldCredentials)
+	}
+	if m.credentials_meta != nil {
+		fields = append(fields, account.FieldCredentialsMeta)
+	}
+	if m.credentials_encrypted != nil {
+		fields = append(fields, account.FieldCredentialsEncrypted)
+	}
+	if m.credentials_hash != nil {
+		fields = append(fields, account.FieldCredentialsHash)
+	}
+	if m.credentials_api_key_hash != nil {
+		fields = append(fields, account.FieldCredentialsAPIKeyHash)
 	}
 	if m.extra != nil {
 		fields = append(fields, account.FieldExtra)
@@ -4256,6 +4601,14 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.GetType()
 	case account.FieldCredentials:
 		return m.Credentials()
+	case account.FieldCredentialsMeta:
+		return m.CredentialsMeta()
+	case account.FieldCredentialsEncrypted:
+		return m.CredentialsEncrypted()
+	case account.FieldCredentialsHash:
+		return m.CredentialsHash()
+	case account.FieldCredentialsAPIKeyHash:
+		return m.CredentialsAPIKeyHash()
 	case account.FieldExtra:
 		return m.Extra()
 	case account.FieldProxyID:
@@ -4327,6 +4680,14 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldType(ctx)
 	case account.FieldCredentials:
 		return m.OldCredentials(ctx)
+	case account.FieldCredentialsMeta:
+		return m.OldCredentialsMeta(ctx)
+	case account.FieldCredentialsEncrypted:
+		return m.OldCredentialsEncrypted(ctx)
+	case account.FieldCredentialsHash:
+		return m.OldCredentialsHash(ctx)
+	case account.FieldCredentialsAPIKeyHash:
+		return m.OldCredentialsAPIKeyHash(ctx)
 	case account.FieldExtra:
 		return m.OldExtra(ctx)
 	case account.FieldProxyID:
@@ -4437,6 +4798,34 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetCredentials(v)
+		return nil
+	case account.FieldCredentialsMeta:
+		v, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCredentialsMeta(v)
+		return nil
+	case account.FieldCredentialsEncrypted:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCredentialsEncrypted(v)
+		return nil
+	case account.FieldCredentialsHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCredentialsHash(v)
+		return nil
+	case account.FieldCredentialsAPIKeyHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCredentialsAPIKeyHash(v)
 		return nil
 	case account.FieldExtra:
 		v, ok := value.(map[string]interface{})
@@ -4698,6 +5087,15 @@ func (m *AccountMutation) ClearedFields() []string {
 	if m.FieldCleared(account.FieldNotes) {
 		fields = append(fields, account.FieldNotes)
 	}
+	if m.FieldCleared(account.FieldCredentialsEncrypted) {
+		fields = append(fields, account.FieldCredentialsEncrypted)
+	}
+	if m.FieldCleared(account.FieldCredentialsHash) {
+		fields = append(fields, account.FieldCredentialsHash)
+	}
+	if m.FieldCleared(account.FieldCredentialsAPIKeyHash) {
+		fields = append(fields, account.FieldCredentialsAPIKeyHash)
+	}
 	if m.FieldCleared(account.FieldProxyID) {
 		fields = append(fields, account.FieldProxyID)
 	}
@@ -4762,6 +5160,15 @@ func (m *AccountMutation) ClearField(name string) error {
 		return nil
 	case account.FieldNotes:
 		m.ClearNotes()
+		return nil
+	case account.FieldCredentialsEncrypted:
+		m.ClearCredentialsEncrypted()
+		return nil
+	case account.FieldCredentialsHash:
+		m.ClearCredentialsHash()
+		return nil
+	case account.FieldCredentialsAPIKeyHash:
+		m.ClearCredentialsAPIKeyHash()
 		return nil
 	case account.FieldProxyID:
 		m.ClearProxyID()
@@ -4839,6 +5246,18 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldCredentials:
 		m.ResetCredentials()
+		return nil
+	case account.FieldCredentialsMeta:
+		m.ResetCredentialsMeta()
+		return nil
+	case account.FieldCredentialsEncrypted:
+		m.ResetCredentialsEncrypted()
+		return nil
+	case account.FieldCredentialsHash:
+		m.ResetCredentialsHash()
+		return nil
+	case account.FieldCredentialsAPIKeyHash:
+		m.ResetCredentialsAPIKeyHash()
 		return nil
 	case account.FieldExtra:
 		m.ResetExtra()

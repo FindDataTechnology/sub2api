@@ -80,6 +80,38 @@ func (Account) Fields() []ent.Field {
 			Default(func() map[string]any { return map[string]any{} }).
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 
+		// credentials_meta: 凭据中"非密钥"子键的明文副本，供 SQL 侧筛选使用。
+		// 目前白名单只有 base_url 与 account_mode（生产 SQL 只提取这两个非密钥子键）。
+		// 密钥子键（api_key / secret_id / refresh_token / ...）绝不进这一列——
+		// 默认保密、显式放行。新增子键前必须先确认 SQL 层确实需要明文筛选。
+		field.JSON("credentials_meta", map[string]any{}).
+			Default(func() map[string]any { return map[string]any{} }).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
+
+		// credentials_encrypted: 整份 credentials 明文的 AES-256-GCM 密文
+		// （base64(nonce + ciphertext + tag)，与 channel_monitor 同格式）。
+		// 为空表示该行尚未迁移，此时读路径回落到明文列 credentials 并打点计数。
+		field.String("credentials_encrypted").
+			Optional().
+			Nillable(),
+
+		// credentials_hash: sha256(规范化明文 JSON) 的 hex。
+		// 存在的唯一理由是乐观并发比较：AES-GCM 带随机 nonce，同一明文两次加密的
+		// 密文不同，所以 `credentials = $1::jsonb` / `IS DISTINCT FROM` 这类
+		// 整文档等值比较必须改比这个哈希，不能比密文。
+		field.String("credentials_hash").
+			MaxLen(64).
+			Optional().
+			Nillable(),
+
+		// credentials_api_key_hash: sha256(api_key) 的 hex，供"按 api_key 找账号"
+		// （ollama / opencode 用量车道）使用。列变密文后 credentials ->> 'api_key'
+		// 会静默返回 NULL，这类查询必须走指纹列。
+		field.String("credentials_api_key_hash").
+			MaxLen(64).
+			Optional().
+			Nillable(),
+
 		// extra: 扩展数据，存储平台特定的额外信息
 		// 如 CRS 账户的 crs_account_id、组织信息等
 		field.JSON("extra", map[string]any{}).
@@ -249,5 +281,8 @@ func (Account) Indexes() []ent.Index {
 		index.Fields("priority", "status"),
 		index.Fields("deleted_at"), // 软删除查询优化
 		index.Fields("parent_account_id"),
+		// credentials_api_key_hash: 用量车道按 api_key 找账号的唯一入口。
+		// 该列变密文后不能再 `credentials ->> 'api_key' = $1`，必须走这个指纹。
+		index.Fields("credentials_api_key_hash"),
 	}
 }

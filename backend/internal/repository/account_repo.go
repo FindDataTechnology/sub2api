@@ -50,6 +50,12 @@ type accountRepository struct {
 	// Used to proactively sync account snapshot to cache when status changes,
 	// ensuring sticky sessions can promptly detect unavailable accounts.
 	schedulerCache service.SchedulerCache
+	// cryptor 负责 credentials 列的加解密（AES-256-GCM）。
+	// nil 是合法值，表示"明文直通"——这是加解密改造之前的既有行为，
+	// 因此全部测试用的 newAccountRepositoryWithSQL 不需要改动。
+	// 注意：cryptor 为 nil 而密文列非空时必须报错，绝不能把密文当明文用，
+	// 否则会把密文原样发给上游。
+	cryptor service.SecretEncryptor
 }
 
 var schedulerNeutralExtraKeyPrefixes = []string{
@@ -121,8 +127,21 @@ func NewAdminAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCac
 
 // newAccountRepositoryWithSQL 是内部构造函数，支持依赖注入 SQL 执行器。
 // 这种设计便于单元测试时注入 mock 对象。
+//
+// cryptor 为 nil（明文直通）。需要加解密的调用方用 newAccountRepositoryWithSQLCrypto。
 func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedulerCache service.SchedulerCache) *accountRepository {
-	return &accountRepository{client: client, sql: sqlq, schedulerCache: schedulerCache}
+	return newAccountRepositoryWithSQLCrypto(client, sqlq, schedulerCache, nil)
+}
+
+// newAccountRepositoryWithSQLCrypto 与 newAccountRepositoryWithSQL 相同，额外注入
+// credentials 列的加解密器。cryptor 为 nil 时退化为明文直通（既有行为）。
+func newAccountRepositoryWithSQLCrypto(
+	client *dbent.Client,
+	sqlq sqlExecutor,
+	schedulerCache service.SchedulerCache,
+	cryptor service.SecretEncryptor,
+) *accountRepository {
+	return &accountRepository{client: client, sql: sqlq, schedulerCache: schedulerCache, cryptor: cryptor}
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
