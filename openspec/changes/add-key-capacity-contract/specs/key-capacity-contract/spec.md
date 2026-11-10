@@ -15,6 +15,26 @@
 - **THEN** 旧的同号快照 MUST 被判定为过期并重建
 - **THEN** 存在单测断言「旧版本快照不被采信」
 
+### Requirement: 有效上限必须如实暴露（含继承）
+
+能力快照与 `state` 端点 SHALL 回报 key 的**有效**上限，而不只是 key 列上的原始值：
+`effective_concurrency_limit`、`effective_rpm_limit` 与各自的 `limit_source`
+（`key` | `user` | `group` | `unlimited`）。
+
+当 key 列值为 0（不限）但 user/group 层有限制时，`effective_*` MUST 反映该限制，
+且 `limit_source` MUST 指向实际生效的那一层。系统 MUST NOT 在 key 列为 0 时报"不限"
+而实际受 user 层约束。
+
+#### Scenario: key 不限但 user 限 5
+- **WHEN** 某 key 的 `concurrency_limit=0`，其 user 的 `Concurrency=5`
+- **THEN** `effective_concurrency_limit` 为 5，`limit_source` 为 `user`
+- **THEN** 响应中 MUST NOT 出现"不限"的表述
+
+#### Scenario: 超限时说明是哪一层
+- **WHEN** 请求因并发超限被拒
+- **THEN** 错误体带 `limit_kind=concurrency` 与 `limit_scope`（`key` | `user` | `group`）
+- **THEN** 调用方能据此判断是削减自己的并发还是申请更高额度
+
 ### Requirement: key 级准入与超限语义
 
 系统 SHALL 在 `apiKeyAuth` 之后、分组白名单门之前，按 key 的 `concurrency_limit` 与

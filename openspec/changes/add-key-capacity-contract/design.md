@@ -120,6 +120,83 @@ group 上限 → **拒绝**（`LIMIT_EXCEEDS_UPSTREAM`，附两个数），不�
 只用它算会得到"100% 成功"的假象）——这正是本仓"读不到当成不存在"的同族陷阱。
 两个来源都缺时给 `null`，不给 100%。
 
+## 存量上限分布（2026-11-11 实测）——它改变了本 change 的定位
+
+| 字段 | 分布 | 读法 |
+|---|---|---|
+| `users.concurrency` | **5 × 89 人**、0 × 29、30 × 1、1 × 1 | 并发**已经在 user 层被限成 5**，且是绝大多数人的实际约束 |
+| `users.rpm_limit` | **0 × 118 人**、10 × 2 | RPM 几乎全不限（0） |
+| `groups.rpm_limit` | **0 × 9 组**、600 × 1 | 分组级 RPM 基本形同虚设 |
+
+**这解释了一个此前没解释的现象**：`ErrQueueFull` → 429 不是"没有闸"，而是
+**闸在 user 层（5 并发）而调用方以为自己在用 key**。用户在多把 key 之间分配工作时，
+完全看不到那把 key 实际共享同一个 user 级 5 并发额度——一出问题就是 429，且归因不到自己头上。
+
+**因此本 change 的定位要改**：不是"再加一层限制"，而是**把已存在的限制变得可见、可分配、可归因**：
+
+1. **可见**：`capabilities.limits` 必须如实给出 key 实际生效的上限——**包含从 user/group 继承来的**
+   有效值，而不只是 key 列上的值。key 列 0（不限）但 user 是 5，则 `effective_concurrency_limit: 5`，
+   且 `limit_source: "user"`。**不这样做的就是欺骗**：告诉调用方"不限"而实际撞 5 并发 429。
+2. **可分配**：用户能在自己的 5 并发额度内，给不同 key 分配（如 A key 3、B key 2），
+   而不是所有 key 抢同一个池。
+3. **可归因**：超限错误必须说明**是哪一层**挡的（`limit_scope: key|user|group`），
+   否则调用方永远在猜。
+
+### 由此新增一条硬要求
+
+`concurrency_limit` 的语义必须是"**在该 key 的可用上限内**再切一刀"，而不是覆盖上位限制。
+故校验规则：`key.concurrency_limit ≤ effective_user_limit`（user 为 0 时视为不限）。
+超过则拒绝（`LIMIT_EXCEEDS_UPSTREAM`），并且 `state` 端点必须同时回报三层的值。
+
+## 生效时间：实测结论与定值（2026-11-11，回答"key 生效时间"）
+
+### 三个默认值（源码实证，`config.go:2372-2378`）
+
+| 项 | 默认 | 含义 |
+|---|---|---|
+| `api_key_auth_cache.l1_ttl_seconds` | **15**（jitter 10%） | 进程内 L1，命中不走 Redis/DB |
+| `api_key_auth_cache.l2_ttl_seconds` | **300** | Redis L2，跨请求/跨重启存活 |
+| `api_key_auth_cache.negative_ttl_seconds` | **30** | 无效 key 的负缓存 |
+
+### 但**改 key 后是主动失效，不是等 TTL 过期**
+
+`api_key_auth_cache_invalidate.go` → `deleteAuthCache`（`api_key_auth_cache_impl.go:258`）
+**同时**清三处：`authCacheL1.Del`、`authNegativeCacheL1.Del`、`cache.DeleteAuthCache`（Redis L2）。
+调用点覆盖 update/delete/重置用量/分组批量改（`api_key_service.go:596/934`、
+`admin_group.go:1266/1446/1461/1484/1549`、`admin_user.go:397`）。
+
+**且生产是单副本**（M0.1 实测 1 replicas），失效调用与被失效的进程是同一个 →
+**改配置基本即时生效**，15s/300s 只是"没有主动失效时"的兜底。
+
+### 定值（本 change 采用）
+
+| 场景 | 生效时间 | 依据 |
+|---|---|---|
+| 单副本改 key 的 concurrency/rpm | **即时**（主动失效同进程） | 上面的实现实证 |
+| 兜底上界 | **≤15s**（L1 TTL，jitter 后 ≤16.5s） | L1 默认 15s + 10% jitter |
+| 若将来扩副本 | **≤15s**（其它实例的 L1 不可被动清） | 跨进程只能等 L1 过期或加广播失效 |
+
+**故设计取值：不改 TTL 默认值。** 理由：单副本下主动失效已给到"即时"，改小 TTL 只会增加
+DB/Redis 压力而不改善可观测行为；扩副本时真要"即时"，正确做法是**加失效广播**
+（Redis pub/sub 或短周期版本轮询），而不是把 TTL 调到 1-2s——后者是拿数据库换正确性。
+
+`state` 端点的 `observed_snapshot_version` 就是用来兜住这条的：即使有实例落后，
+查询时能看出"它还在旧版本"，不需要运维靠等。
+
+### 关于"不同渠道应该也不同"——目前的实测回答
+
+按 `accounts.platform` 统计近 3 天延迟：
+
+| platform | 样本 | avg | p50 | p95 | p99 |
+|---|---|---|---|---|---|
+| `openai` | 46,010 | 22.1s | 10.1s | 86.1s | 171.3s |
+
+**只有一个渠道有量**（其余平台样本 <200，未入表）。所以"不同渠道生效时间/基线不同"这件事
+**今天没有数据支撑**——不是不存在，是负载都压在同一条渠道上。因此本 change：
+- 字段与端点按 `(platform, model)` 类设计，**结构上支持按渠道分化**；
+- 但 v1 只对 `openai` 类给基线，其余类返回 `confidence: low` + `null`；
+- **不**为"其它渠道"编造数值。等它们有量后同一套代码自动生效。
+
 ## Risks / Trade-offs
 
 - **[快照版本号漏升]** 新字段静默为 0 → 限流失效且无报错。缓解：D2 + 单测断言
