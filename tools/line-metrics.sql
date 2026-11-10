@@ -139,3 +139,49 @@ agg AS (
 )
 SELECT line, model_lower, reqs, usd, avg_ms, p95_ms
 FROM agg WHERE rn <= 2 ORDER BY line, rn;
+
+\echo ''
+\echo '══════ 4. 花费异常（周环比 >=2 倍，或近 3 日均量 >=2 倍于前 7 日均量）══════'
+-- 为什么需要这一节：168 小时前没人会注意一把叫 "probe" 的 key。
+-- 两个信号都要，因为它们的灵敏度不同（2026-11-10 实测校准）：
+--   · 周环比（7d vs 前 7d）稳，但对「只涨了 5 天」的斜坡不敏感——
+--     wanxing-probe 日内从 76 涨到 2,293（30 倍），周环比只有 1.7 倍。
+--   · 近 3 日均量 vs 前 7 日均量 抓斜坡（同例：1,204/日 vs 385/日 = 3.1 倍）。
+-- 阈值取 2 倍而非 3 倍：实测 `特价` 周环比 2.8 倍（$115/周），是本轮最大的真实增量，
+-- 3 倍门槛会把它漏掉。放宽后仍需 man 复核——本查询只负责「让人看见」，不负责判定异常性质。
+WITH win AS (
+    SELECT u.api_key_id,
+           sum(COALESCE(u.actual_cost,0)) FILTER (WHERE u.created_at >= now() - interval '7 days')  AS cur_usd,
+           count(*)                       FILTER (WHERE u.created_at >= now() - interval '7 days')  AS cur_reqs,
+           sum(COALESCE(u.actual_cost,0)) FILTER (WHERE u.created_at >= now() - interval '14 days'
+                                                    AND u.created_at <  now() - interval '7 days')  AS prev_usd,
+           count(*)                       FILTER (WHERE u.created_at >= now() - interval '14 days'
+                                                    AND u.created_at <  now() - interval '7 days')  AS prev_reqs,
+           count(*)                       FILTER (WHERE u.created_at >= now() - interval '3 days')  AS last3_reqs,
+           sum(COALESCE(u.actual_cost,0)) FILTER (WHERE u.created_at >= now() - interval '3 days')  AS last3_usd
+    FROM usage_logs u
+    WHERE u.created_at >= now() - interval '14 days'
+    GROUP BY u.api_key_id
+),
+scored AS (
+    SELECT w.*,
+           COALESCE(w.cur_usd,0) / NULLIF(w.prev_usd,0)          AS usd_growth_x,
+           COALESCE(w.cur_reqs,0) / NULLIF(w.prev_reqs,0)        AS req_growth_x,
+           (COALESCE(w.last3_reqs,0) / 3.0)
+             / NULLIF(COALESCE(w.prev_reqs,0) / 7.0, 0)          AS ramp_x
+    FROM win w
+)
+SELECT k.name                                   AS key_name,
+       k.group_id,
+       COALESCE(s.prev_reqs,0)                  AS reqs_prev7,
+       COALESCE(s.cur_reqs,0)                   AS reqs_cur7,
+       COALESCE(s.last3_reqs,0)                 AS reqs_last3d,
+       round(COALESCE(s.prev_usd,0)::numeric,2) AS usd_prev7,
+       round(COALESCE(s.cur_usd,0)::numeric,2)  AS usd_cur7,
+       round(s.usd_growth_x::numeric,1)         AS usd_x,
+       round(s.ramp_x::numeric,1)               AS ramp_x
+FROM scored s JOIN api_keys k ON k.id = s.api_key_id
+WHERE COALESCE(s.cur_usd,0) >= 0.5
+  AND (s.usd_growth_x >= 2 OR s.ramp_x >= 2
+       OR (s.prev_usd IS NULL AND COALESCE(s.cur_usd,0) >= 1))
+ORDER BY COALESCE(s.cur_usd,0) DESC;
