@@ -81,6 +81,17 @@ type capabilitiesLimits struct {
 	GroupWeeklyLimitUSD *float64 `json:"group_weekly_limit_usd"`
 	GroupMonthlyLimit   *float64 `json:"group_monthly_limit_usd"`
 	WindowUsage         *float64 `json:"window_usage"`
+
+	// ===== 容量契约（add-key-capacity-contract）=====
+	// 有效上限必须如实暴露：key 列为 0（不限）但 user 层限 5 时，报 5 并说明来源。
+	// **报"不限"而实际受 user 约束就是欺骗**——调用方会按"不限"规划并发，然后撞 429。
+	ConcurrencyRequest int `json:"concurrency_request"` // 保底（额度保留，不保证饱和吞吐）
+	// EffectiveConcurrencyLimit 是本 key 实际生效的并发上限；0 表示确实不限。
+	EffectiveConcurrencyLimit int    `json:"effective_concurrency_limit"`
+	EffectiveRPMLimit         int    `json:"effective_rpm_limit"`
+	LimitSource               string `json:"limit_source"` // key | user | unlimited
+	// EffectiveAt 未到时刻时请求会被拒（KEY_NOT_YET_EFFECTIVE），与 expires_at 相对。
+	EffectiveAt *string `json:"effective_at"`
 }
 
 type capabilitiesResponse struct {
@@ -291,6 +302,9 @@ func buildCapabilitiesMedia(group *service.Group) capabilitiesMedia {
 
 // buildCapabilitiesLimits 只给配置值。window_usage 恒为 null（认证快照只带限额，
 // 用量在检查时另读）；key_quota_usd=0 用 quota_unlimited 消歧，避免被读成零额度。
+//
+// 容量契约部分算的是**有效上限**（取 key 与 user 两层中更严的那个，0 视为不限），
+// 并给出 limit_source 说明谁在生效——只报 key 列会骗人。
 func buildCapabilitiesLimits(apiKey *service.APIKey) capabilitiesLimits {
 	limits := capabilitiesLimits{
 		KeyQuotaUSD:     apiKey.Quota,
@@ -308,5 +322,43 @@ func buildCapabilitiesLimits(apiKey *service.APIKey) capabilitiesLimits {
 		limits.GroupWeeklyLimitUSD = group.WeeklyLimitUSD
 		limits.GroupMonthlyLimit = group.MonthlyLimitUSD
 	}
+
+	// 容量契约：有效上限 = min(key 值, user 池值)（0 视为不限）
+	limits.ConcurrencyRequest = apiKey.ConcurrencyRequest
+	poolCap := 0
+	if apiKey.User != nil {
+		poolCap = apiKey.User.Concurrency
+	}
+	limits.EffectiveConcurrencyLimit, limits.LimitSource = effectiveLimit(apiKey.ConcurrencyLimit, poolCap)
+
+	// RPM 是速率不是池：只取两层中更严的硬速率（不做 Σ 校验，见 design）。
+	userRPM := 0
+	if apiKey.User != nil {
+		// 用户级 RPM 在快照里是 User.RPMLimit。
+		userRPM = apiKey.User.RPMLimit
+	}
+	limits.EffectiveRPMLimit, _ = effectiveLimit(apiKey.RPMLimit, userRPM)
+	if apiKey.EffectiveAt != nil {
+		ts := apiKey.EffectiveAt.UTC().Format(time.RFC3339)
+		limits.EffectiveAt = &ts
+	}
 	return limits
+}
+
+// effectiveLimit 取两层中更严的上限，并说明生效来源。
+// 0 视为不限（沿用本仓 quota=0 语义）。返回 (有效值, 来源)。
+func effectiveLimit(keyLimit, poolLimit int) (int, string) {
+	switch {
+	case keyLimit > 0 && poolLimit > 0:
+		if keyLimit <= poolLimit {
+			return keyLimit, "key"
+		}
+		return poolLimit, "user"
+	case keyLimit > 0:
+		return keyLimit, "key"
+	case poolLimit > 0:
+		return poolLimit, "user"
+	default:
+		return 0, "unlimited"
+	}
 }
