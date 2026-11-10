@@ -59,9 +59,17 @@
 - [x] 5.1 本地快包：`go build ./...` + `go test ./internal/lanes/ ./internal/server/routes/` + `go vet`——
   验证：2026-11-10 实跑 `lanes` 9.899s / `routes` 12.165s 双 ok、`vet` exit=0；
   `gofmt -l` 对**新增两文件**为空（仓内 `audio_*.go`/`pool.go`/`websearch.go` 基线即不合规，非本次引入，未擅自改）
-- [ ] 5.2 快照与出片 → 滚 GitOps → ArgoCD 手动 sync——**未做**：需先定出片线配额（章程 Q1 未裁），
-  且本 change 未合并 main
-- [ ] 5.3 生产实证（真实 key 请求一次，记录 serving/permitted_only 计数与车道可用性）——**未做**：待 5.2
+- [x] 5.2 快照与出片 → 滚 GitOps → ArgoCD 手动 sync——**2026-11-10 完成**：`ciyuan-tag`=`ciyuan-v0.2.19-2`；
+  `fd-build-snapshot` 走 **git URL + `--ref feat/ciyuan-capabilities`**（纪律要干净 clone，不扫工作树），
+  可见性核对 private→private ✓；快照 `05dd166`；GHA run `42834400162` test+build-push **双绿**；
+  digest `8103c73a`（skopeo 实证 hkccr 与 ccr 一致）；GitOps `be8174e`（cherry-pick 到最新 origin/main，
+  同仓他人 `platform.yaml` 改动未纳入）；`cheap-ts/sub2api` rollout 绿。**Q1 未被触发**：私有池尚余
+  ~1838min（law-ai 线），无需为免费额度公开源码。**一处不一致待查**：清单推送后应用已自行同步，
+  未执行 runbook 的「ArgoCD 手动 sync（selfHeal=off）」——需核该 app 的 syncPolicy 是否与 runbook 矛盾
+- [x] 5.3 生产实证——**2026-11-10 完成**：`law-bench-ontology` key 取到完整 JSON——
+  `counts{serving:101,permitted_only:0}`、三车道 `available:true` 各 1 上游账号、`media.video.models:null`、
+  `quota_unlimited:true`、`window_usage:null`、响应无 `price`/`rate_multiplier`。**路由在位实证**：无 key → 401，
+  同前缀不存在的 `/v1/ciyuan/nonexistent` → 404。已存档至 paas 台账 §一 `ciyuan-v0.2.19-2` 行
 
 ## 6. 跨仓后续（不在本 change）
 
