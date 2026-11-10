@@ -157,7 +157,9 @@ func TestAccountRepository_SetGrokOAuthErrorIfCredentialsUnchanged_RequiresActiv
 	require.Contains(t, normalized, "type = $5")
 	require.Contains(t, normalized, "status = $6")
 	require.Contains(t, normalized, "credentials_hash = $9")
-	require.Contains(t, normalized, "NULLIF(BTRIM(a.credentials->>'refresh_token'), '') IS NULL")
+	// 该谓词已搬到 Go（先返回 false,nil），SQL 里 MUST 不再依赖明文列——
+	// 这是阶段四 drop 明文列的前提之一。
+	require.NotContains(t, normalized, "refresh_token")
 	require.Len(t, exec.execArgs, 1)
 	require.Equal(t, service.StatusActive, exec.execArgs[0][5])
 	require.Contains(t, exec.execArgs[0][6], `"_token_version":7`)
