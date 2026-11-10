@@ -197,9 +197,9 @@ func TestCredentialSQLDiff_OllamaEligibility(t *testing.T) {
 
 	// 期望值用 fixture 手工推导，而不是把 oldIDs 当期望——否则实现全错也会"相等"。
 	require.Equal(t, []int64{1, 5, 9, 19, 20}, oldIDs, "旧谓词的语义基线")
-	// 2.3 只换 base_url / account_mode 的来源，api_key 那段仍是 jsonb_typeof，
-	// 所以当前集合此时应与冻结快照**完全相同**；2.2 落地后才会少掉空 api_key 的 9。
-	require.Equal(t, []int64{1, 5, 9, 19, 20}, newIDs, "2.3 之后：与冻结快照逐行一致")
+	// 2.2 之后：空 api_key 的 9 不再合格（旧写法 jsonb_typeof('')='string' 算合格）。
+	// 这个收窄是刻意的：空 api_key 的账号在用量查询里永远查不到数据。
+	require.Equal(t, []int64{1, 5, 19, 20}, newIDs, "2.2 之后：空 api_key 的 9 被排除")
 }
 
 func TestCredentialSQLDiff_OpenCodeEligibility(t *testing.T) {
@@ -210,7 +210,7 @@ func TestCredentialSQLDiff_OpenCodeEligibility(t *testing.T) {
 	newIDs := selectIDs(t, db, opencodeEligibleCurrentSQL())
 
 	require.Equal(t, []int64{11, 13, 14, 16, 18}, oldIDs, "旧谓词的语义基线")
-	require.Equal(t, []int64{11, 13, 14, 16, 18}, newIDs, "2.3 之后：与冻结快照逐行一致（18 仍合格，2.2 落地后才排除）")
+	require.Equal(t, []int64{11, 13, 14, 16}, newIDs, "2.2 之后：空 api_key 的 18 被排除")
 }
 
 // TestCredentialSQLDiff_DocumentsEmptyAPIKeyNarrowing 钉住"新谓词只会比旧谓词**更严**"这条不变式。
