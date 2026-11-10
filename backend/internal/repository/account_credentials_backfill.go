@@ -36,10 +36,17 @@ type CredentialBackfillOptions struct {
 type CredentialBackfillResult struct {
 	AccountsScanned int
 	AccountsUpdated int
+	// AccountsSkipped 是"形态上无需回填"的行（例如凭据本来就是空的）——
+	// 它不是失败，CLI MUST NOT 因为它退出非零。
+	AccountsSkipped int
 	AccountsFailed  int
 	APIKeysScanned  int
 	APIKeysUpdated  int
-	APIKeysFailed   int
+	// APIKeysSkipped 是空 key 这类无法产生指纹的行。**不是失败**：
+	// 真实库里可能有历史遗留的空 key，把它算失败会让回填工具报错退出，
+	// 从而卡住本该通过的发布闸门。
+	APIKeysSkipped int
+	APIKeysFailed  int
 }
 
 const defaultCredentialBackfillBatchSize = 200
@@ -194,7 +201,10 @@ func backfillAccountCredentialColumns(
 	}
 }
 
-const apiKeyNeedsBackfillSQL = `(key_encrypted IS NULL OR key_hash IS NULL)`
+// apiKeyNeedsBackfillSQL 排除**空 key**：空串没有可标注的价值（不产生指纹、不产生密文），
+// 若把它算作"待回填"，计数永远归不了零 —— CLI 的收尾自检会因此一直 exit 1、
+// 并打印"阶段二 MUST NOT 上线"，把一个本来健康的库挡在发布门外面。
+const apiKeyNeedsBackfillSQL = `(key <> '' AND (key_encrypted IS NULL OR key_hash IS NULL))`
 
 func backfillAPIKeyColumns(
 	ctx context.Context,
@@ -252,7 +262,9 @@ func backfillAPIKeyColumns(
 			result.APIKeysScanned++
 			if r.key == "" {
 				// 空 key 不产生指纹：唯一索引允许多个 NULL，也不会误判重复。
-				result.APIKeysFailed++
+				// 记 Skipped 而不是 Failed——空 key 是**形态问题不是故障**，
+				// 算失败会让 CLI 退出 1 并卡住发布闸门。
+				result.APIKeysSkipped++
 				logf("[CredentialBackfill] api_key %d: empty key (skipped)", r.id)
 				continue
 			}

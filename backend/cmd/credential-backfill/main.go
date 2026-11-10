@@ -103,10 +103,14 @@ func main() {
 	}
 
 	fmt.Printf("[credential-backfill] 完成，耗时 %s\n", time.Since(started).Round(time.Millisecond))
-	fmt.Printf("  accounts: scanned=%d updated=%d failed=%d\n",
-		result.AccountsScanned, result.AccountsUpdated, result.AccountsFailed)
-	fmt.Printf("  api_keys: scanned=%d updated=%d failed=%d\n",
-		result.APIKeysScanned, result.APIKeysUpdated, result.APIKeysFailed)
+	fmt.Printf("  accounts: scanned=%d updated=%d skipped=%d failed=%d\n",
+		result.AccountsScanned, result.AccountsUpdated, result.AccountsSkipped, result.AccountsFailed)
+	fmt.Printf("  api_keys: scanned=%d updated=%d skipped=%d failed=%d\n",
+		result.APIKeysScanned, result.APIKeysUpdated, result.APIKeysSkipped, result.APIKeysFailed)
+	if result.APIKeysSkipped > 0 {
+		fmt.Printf("[credential-backfill] 注意：%d 个 api_key 是空的（无 key 可派生），已跳过、非失败。\n",
+			result.APIKeysSkipped)
+	}
 
 	if result.AccountsFailed > 0 || result.APIKeysFailed > 0 {
 		fmt.Println("[credential-backfill] 有失败行，见上面的逐行日志；这些行在阶段二切换后会被当成'凭据已变化'。")
