@@ -183,3 +183,14 @@ func TestCredentialHash_PinnedToKnownValue(t *testing.T) {
 	require.Equal(t, `{"api_key":"sk-abc"}`, string(canonical))
 	require.Equal(t, "935f9c4f77cb9d7dae4860c698582b62add05d911282e1a04c33bfd8f97f863b", sha256Hex(canonical))
 }
+
+// credentialHashOfJSONString 让 sqlmock 的期望值也能用生产的哈希实现算：
+// 传 JSON 字面量，内部解析成 map 后走 canonicalCredentialJSON + sha256Hex。
+// 这样测试期望与实现同源——手抄一个 hash 常量会在实现变更时静默失配。
+func credentialHashOfJSONString(raw string) string {
+	decoded := map[string]any{}
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		panic("credentialHashOfJSONString: 测试里的 JSON 字面量不合法: " + err.Error())
+	}
+	return credentialHashHex(decoded)
+}

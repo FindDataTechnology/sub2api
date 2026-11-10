@@ -225,3 +225,19 @@ func credentialAPIKeyHashArg(credentials map[string]any) any {
 	}
 	return *hash
 }
+
+// credentialHashHex 返回整份凭据规范化 JSON 的 sha256（hex），永不返回空。
+//
+// 与 credentials_hash 列的写入用**同一个** canonicalCredentialJSON，
+// 所以 SQL 里 `credentials_hash = $n` 与旧的 `credentials = $n::jsonb` 等价
+// ——前提是那一行已经回填过（回填是阶段二的硬前置，见 tasks 2.0d）。
+func credentialHashHex(credentials map[string]any) string {
+	canonical, err := canonicalCredentialJSON(credentials)
+	if err != nil {
+		// canonicalCredentialJSON 只对不可序列化的值失败（chan/func 等），
+		// 凭据里不会出现；真出现也不能静默当空文档——返回空串让 SQL 比较必然不匹配，
+		// 比悄悄命中一行错误数据安全。
+		return ""
+	}
+	return sha256Hex(canonical)
+}
