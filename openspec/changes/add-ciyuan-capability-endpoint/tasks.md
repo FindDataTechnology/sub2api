@@ -64,8 +64,10 @@
   可见性核对 private→private ✓；快照 `05dd166`；GHA run `42834400162` test+build-push **双绿**；
   digest `8103c73a`（skopeo 实证 hkccr 与 ccr 一致）；GitOps `be8174e`（cherry-pick 到最新 origin/main，
   同仓他人 `platform.yaml` 改动未纳入）；`cheap-ts/sub2api` rollout 绿。**Q1 未被触发**：私有池尚余
-  ~1838min（law-ai 线），无需为免费额度公开源码。**一处不一致待查**：清单推送后应用已自行同步，
-  未执行 runbook 的「ArgoCD 手动 sync（selfHeal=off）」——需核该 app 的 syncPolicy 是否与 runbook 矛盾
+  ~1838min（law-ai 线），无需为免费额度公开源码。**已核清**：该 app 的 `syncPolicy` =
+  `{"automated":{}}`——清单一变即自动同步，`selfHeal`/`prune` 均为 false（缺省）。所以 runbook 的
+  「必须手动 `argocd app sync`」是**冗余步骤**（已订正 runbook §7），而 `selfHeal=off` 的说法本身
+  是对的。另订正 `--context cheap` → 实际为 `cheap-ts`（旧上下文指向未起的隧道）
 - [x] 5.3 生产实证——**2026-11-10 完成**：`law-bench-ontology` key 取到完整 JSON——
   `counts{serving:101,permitted_only:0}`、三车道 `available:true` 各 1 上游账号、`media.video.models:null`、
   `quota_unlimited:true`、`window_usage:null`、响应无 `price`/`rate_multiplier`。**路由在位实证**：无 key → 401，
