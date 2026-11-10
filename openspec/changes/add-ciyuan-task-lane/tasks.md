@@ -10,9 +10,14 @@
 - [x] 0.1 确认迁移编号（**2026-11-11 完成**）：`feat/ciyuan-capabilities`（基于 main）里最大号 = **248**；
   `249_credential_at_rest_columns.sql` 属 `harden/credential-at-rest` 分支、尚未合并。
   → 本 change 用 **250** 起，避开在途分支并留 249 给先落地的一方；合并前须重核一次
-- [ ] 0.2 实测单账号吞吐与队列行为（决定 Q-a 的排队上限）：对某账号以 `Concurrency` 满载
-  发起 N 并发，记录 `queue_depth` / `queue_rejected_total` / 端到端耗时——验证：给出
-  「单账号每秒可完成多少请求」与「队列多深开始必然超 deadline」两个数
+- [x] 0.2 **按类测量可持续完成速率**（2026-11-11 完成，`(platform, model)` 类，3 天，分钟级 p95）：
+  `openai/deepseek-v4.1-flash` p50 **0.117 rps** / p95 **0.400** / 单分钟峰 71；free 档 p95 0.2-0.4；
+  embedding p95 0.133；`tencent/audio:tts` p95 0.083。**整类 p95 仅 0.4 rps（≈24 请求/分钟）**——
+  负载远未压满容量，`ErrQueueFull` 的成因是**瞬时撞在同一账号**，不是总量高。推论：按类排队即可
+  吃掉绝大部分 429；`util_target` 应由 p50 起向 p95 缓慢加性爬，不可直接取 p95×0.8。
+  **口径纪律**：MUST NOT 用 `account.Concurrency` 或账号数量推导容量（账号会变）
+- [ ] 0.2b 校准两层环不打架：给定内层 AIMD 的既有参数，选定外层周期与收敛系数，使外层
+  周期 ≫ 内层周期——验证：压测中两层同时收缩时不出现振幅放大的振荡（同尖峰下 err_ratio 单调收敛）
 - [x] 0.3 实测峰谷影响面（**2026-11-11 完成**）：按 UTC 小时统计 `deepseek-v4.1-flash` 近 7 天单位成本——
   高峰（01–03 / 06–09）**0.49–0.58 USD/MTok**，低谷 **0.29–0.38**，实测比 **≈1.9×**（与文档 2× 吻合，
   窗口与 `deepseekPeakMultiplierAt` 实现零漂移）。**收益基数**：高峰 7 天花 **$117.62 / 19,010 请求**，
@@ -24,8 +29,10 @@
 - [ ] 1.1 能力快照加 `pricing` 段（`peak` / `multiplier` / `next_offpeak_start` / `next_offpeak_end` / `timezone`），
   数据源只用 `PeakMultiplierAt` 与 `deepseekPeakMultiplierAt`——验证：高峰时段实调返回
   `multiplier=2.0`，低谷返回 `1.0`；不新增任何配置项
-- [ ] 1.2 能力快照加 `headroom` 段（按平台 `available_slots` / `in_use_slots`），不可得时 `null`
-  ——验证：单测覆盖「统计未装配 → null」与「已装配 → 数字」两态；**不得**用 0 冒充
+- [ ] 1.2 能力快照加 `capacity` 段：按 `(platform, model)` 类给 `sustainable_rps`（观测值）与
+  `confidence`（样本量档）；不可得时 `null`——**不暴露账号数、槽位数或 `Concurrency`**
+  ——验证：单测覆盖「观测不足 → null」与「充足 → 数值」两态；**不得**用 0 冒充；字段名避免
+  暗示与账号数量绑定
 - [ ] 1.3 契约文档同步（paas 侧 `add-ciyuan-capability-contract` 补一条口径：
   `headroom` 是 advisory，不承诺发起时仍成立）——验证：paas `validate --strict` 通过
 
@@ -49,8 +56,12 @@
   构造一个永远不会拿到槽位的任务，断言它在 deadline 后 T 秒内变 failed；查询端点返回原因
 - [ ] 3.3 失败分流：`ErrQueueFull` → 可重排；5xx/超时 → 退避重试；4xx（除 429）→ 直接 failed
   ——验证：表测四种失败各自落到预期状态，且 `task_attempts` 每次都有记录
-- [ ] 3.4 队列上界：任务总数上限 + 超过即拒绝新提交（返回明确错误，不入库）——验证：
-  打满上限后提交被拒且错误可读；上限值来自 0.2 的实测，不拍脑袋
+- [ ] 3.4 队列上界与可行性拒绝：提交时做 `queue_wait_estimate + est_duration ≤ deadline` 判定，
+  不可行当场拒（`TASK_INFEASIBLE_BY_DEADLINE` 并回传估算值）；另有任务总数上限
+  ——验证：两条负例（时间不可行 / 上限打满）都在**提交时**被拒且错误可读，不入库
+- [ ] 3.5 **I4 回归用例**：人为删除一个账号、并修改另一个账号的 `Concurrency`，断言任务车道
+  在 M 分钟内自愈且**零配置变更**——验证：用例在 CI 可跑（用 stub 执行器模拟拓扑变化），
+  断言调节后的 `admit_rps` 跟上新的实测容量
 
 ## S4 价格感知推迟
 
