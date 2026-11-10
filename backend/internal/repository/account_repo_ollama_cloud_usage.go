@@ -62,9 +62,9 @@ func (r *accountRepository) ListOllamaCloudUsageGroupAccounts(ctx context.Contex
 		FROM accounts
 		WHERE deleted_at IS NULL
 			AND `+ollamaCloudUsageEligibleSQL+`
-			AND credentials ->> 'api_key' = ANY($1)
+			AND credentials_api_key_hash = ANY($1)
 		ORDER BY id
-	`, pq.Array(keys))
+	`, pq.Array(credentialAPIKeyHashHexes(keys)))
 	if err != nil {
 		return nil, err
 	}
@@ -248,9 +248,9 @@ func (r *accountRepository) updateOllamaCloudUsageGroup(
 				updated_at = NOW()
 			WHERE deleted_at IS NULL
 				AND `+ollamaCloudUsageEligibleSQL+`
-				AND credentials ->> 'api_key' = $2
+				AND credentials_api_key_hash = $2
 				AND id = ANY($3)
-		`, string(encoded), apiKey, pq.Array(memberIDs))
+		`, string(encoded), credentialAPIKeyHashHex(apiKey), pq.Array(memberIDs))
 		if err != nil {
 			return err
 		}
@@ -309,10 +309,10 @@ func lockOllamaCloudUsageGroup(
 		FROM accounts
 		WHERE deleted_at IS NULL
 			AND `+ollamaCloudUsageEligibleSQL+`
-			AND credentials ->> 'api_key' = $1
+			AND credentials_api_key_hash = $1
 		ORDER BY id
 		FOR NO KEY UPDATE
-	`, apiKey, account.ID, account.Platform, account.Type, string(credentials), proxyID)
+	`, credentialAPIKeyHashHex(apiKey), account.ID, account.Platform, account.Type, string(credentials), proxyID)
 	if err != nil {
 		return nil, err
 	}

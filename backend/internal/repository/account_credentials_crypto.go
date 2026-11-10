@@ -186,3 +186,25 @@ func (r *accountRepository) credentialsFromEntity(m *dbent.Account) (map[string]
 func credentialPlaintextFallbackSQLPredicate(column string) string {
 	return "(" + column + " IS NULL OR " + column + " = '')"
 }
+
+// credentialAPIKeyHashHex 返回 api_key 的指纹（hex），空串返回空串。
+//
+// 为什么空串回空串而不是 nil：这些调用点把结果直接当 SQL 参数用，
+// `credential = ''` 与列里的 NULL 不相等——这与"空 api_key 不构成用量身份"
+// 的判断一致（旧写法 `->> 'api_key' = ''` 会匹配空串行，新写法匹配不到，
+// 这是 2.2 已知并已用差分钉住的收窄）。
+func credentialAPIKeyHashHex(apiKey string) string {
+	if apiKey == "" {
+		return ""
+	}
+	return sha256Hex([]byte(apiKey))
+}
+
+// credentialAPIKeyHashHexes 是批量版本，保持输入顺序。
+func credentialAPIKeyHashHexes(apiKeys []string) []string {
+	out := make([]string, 0, len(apiKeys))
+	for _, k := range apiKeys {
+		out = append(out, credentialAPIKeyHashHex(k))
+	}
+	return out
+}
