@@ -363,7 +363,10 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 
 	outByID := make(map[int64]*service.Account, len(entAccounts))
 	for _, entAcc := range entAccounts {
-		out := accountEntityToService(entAcc)
+		out, err := r.accountEntityToService(entAcc)
+		if err != nil {
+			return nil, err
+		}
 		if out == nil {
 			continue
 		}
@@ -3531,7 +3534,10 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 
 	outAccounts := make([]service.Account, 0, len(accounts))
 	for _, acc := range accounts {
-		out := accountEntityToService(acc)
+		out, err := r.accountEntityToService(acc)
+		if err != nil {
+			return nil, err
+		}
 		if out == nil {
 			continue
 		}
@@ -3748,7 +3754,40 @@ func buildSchedulerGroupPayload(groupIDs []int64) any {
 	return map[string]any{"group_ids": groupIDs}
 }
 
-func accountEntityToService(m *dbent.Account) *service.Account {
+// accountEntityToService 是**加解密的唯一边界**（读侧）：DB 行 -> 领域实体。
+//
+// 读路径规则见 design D1 / D3，实现见 credentialsFromEntity。
+func (r *accountRepository) accountEntityToService(m *dbent.Account) (*service.Account, error) {
+	if m == nil {
+		return nil, nil
+	}
+	credentials, err := r.credentialsFromEntity(m)
+	if err != nil {
+		return nil, err
+	}
+	return accountEntityToServiceCore(m, credentials), nil
+}
+
+// accountEntityToServiceWithoutCredentials 供**只需要账号标识**的调用方使用
+// （目前只有用量日志的 loadAccounts：它的 DTO 只取 ID 与 Name，
+// 注释原文就是"避免泄露敏感字段"）。
+//
+// 刻意传 nil 而不是解出凭据：那条路径既不解密、也不把凭据塞进返回的结构体，
+// 顺带消掉一条无谓的凭据传播面。解密只发生在真正需要凭据的地方。
+func accountEntityToServiceWithoutCredentials(m *dbent.Account) *service.Account {
+	return accountEntityToServiceCore(m, nil)
+}
+
+// accountEntityToService 是**加解密的唯一边界**：DB 行 -> 领域实体。
+//
+// 读路径规则（design D1 / D3）：
+//   - 密文列非空  -> 解密后反序列化（唯一正确的读法）
+//   - 密文列为空  -> 回落明文列 + 计数（迁移窗口内的过渡态）
+//   - 密文列非空但没配加密器 -> **报错**，绝不把密文当明文交给调用方
+//
+// 为什么必须报错而不是回落：密文当成明文发上游，等于把 base64 乱码当 API key，
+// 会以"上游 401"这种完全误导的形态暴露，而真正的病因（配错加密器）查不到。
+func accountEntityToServiceCore(m *dbent.Account, credentials map[string]any) *service.Account {
 	if m == nil {
 		return nil
 	}
@@ -3761,7 +3800,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		Notes:                   m.Notes,
 		Platform:                m.Platform,
 		Type:                    m.Type,
-		Credentials:             copyJSONMap(m.Credentials),
+		Credentials:             credentials,
 		Extra:                   copyJSONMap(m.Extra),
 		ProxyID:                 m.ProxyID,
 		ProxyFallbackOriginID:   m.ProxyFallbackOriginID,
@@ -4219,7 +4258,11 @@ func (r *accountRepository) ListShadowsByParent(ctx context.Context, parentID in
 	}
 	out := make([]*service.Account, 0, len(rows))
 	for _, m := range rows {
-		out = append(out, accountEntityToService(m))
+		converted, err := r.accountEntityToService(m)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, converted)
 	}
 	return out, nil
 }

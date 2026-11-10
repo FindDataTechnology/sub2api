@@ -4,6 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"sync/atomic"
+
+	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
 // 凭据落盘加密的列派生逻辑（阶段一：双写）。
@@ -99,4 +104,67 @@ func (r *accountRepository) credentialCryptoColumnsFor(credentials map[string]an
 	}
 	columns.Encrypted = &encrypted
 	return columns, nil
+}
+
+// credentialPlaintextFallbacks 统计"密文列为空、回落读明文列"的次数。
+//
+// 两点必须说清，否则这个数字会被误用：
+//  1. 它是**进程内**计数，重启即归零。所以它只适合做告警/观测；
+//     判断"存量是否迁完"的闸门 MUST 用数据库计数
+//     （`SELECT count(*) FROM accounts WHERE credentials_encrypted IS NULL`），
+//     那个才是重启不丢的事实。
+//  2. 只统计"确实有明文可回落"的行。凭据本来就是空的账号不计入，
+//     否则空账号多的实例会永远看起来"没迁完"。
+var credentialPlaintextFallbacks atomic.Int64
+
+// CredentialPlaintextFallbackCount 返回本进程累计回落次数（见上面两点说明）。
+func CredentialPlaintextFallbackCount() int64 {
+	return credentialPlaintextFallbacks.Load()
+}
+
+// resetCredentialPlaintextFallbackCount 仅供测试。
+func resetCredentialPlaintextFallbackCount() {
+	credentialPlaintextFallbacks.Store(0)
+}
+
+// credentialsFromEntity 按"优先密文、回落明文"解出凭据。
+//
+// 这是 design D1 里那个唯一的加解密边界在**读侧**的实现。
+func (r *accountRepository) credentialsFromEntity(m *dbent.Account) (map[string]any, error) {
+	if m == nil {
+		return nil, nil
+	}
+
+	if m.CredentialsEncrypted != nil && *m.CredentialsEncrypted != "" {
+		if r == nil || r.cryptor == nil {
+			// D1a 的负例：有密文却没加密器。绝不能回落明文——那会把
+			// "配置错了"伪装成"一切正常"，而且密文本身会被当成凭据发出去。
+			return nil, fmt.Errorf(
+				"account %d has encrypted credentials but no encryptor is configured: "+
+					"refusing to treat ciphertext as plaintext", m.ID)
+		}
+		plaintext, err := r.cryptor.Decrypt(*m.CredentialsEncrypted)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt credentials for account %d: %w", m.ID, err)
+		}
+		decoded := map[string]any{}
+		if err := json.Unmarshal([]byte(plaintext), &decoded); err != nil {
+			return nil, fmt.Errorf("unmarshal decrypted credentials for account %d: %w", m.ID, err)
+		}
+		return decoded, nil
+	}
+
+	// 回落：迁移窗口内的过渡态。有内容才算一次"未迁移"。
+	if len(m.Credentials) > 0 {
+		credentialPlaintextFallbacks.Add(1)
+		logger.LegacyPrintf("repository.credential",
+			"[CredentialAtRest] plaintext fallback: account=%d has no credentials_encrypted yet", m.ID)
+	}
+	return copyJSONMap(m.Credentials), nil
+}
+
+// credentialPlaintextFallbackSQLPredicate 是给 SQL 层用的"该行尚未迁移"判据。
+// 保留成函数是为了让 Stage 2 改写 SQL 时只有一个地方定义这个语义。
+func credentialPlaintextFallbackSQLPredicate(column string) string {
+	return "(" + column + " IS NULL OR " + column + " = '')"
 }
