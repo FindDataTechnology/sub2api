@@ -51,29 +51,39 @@ CREATE TABLE accounts (
 );
 `
 
-// 旧谓词（当前生产用的，直接引用生产常量）
-func ollamaEligibleOldSQL() string { return ollamaCloudUsageEligibleSQL }
-
-// 新谓词：与旧谓词逐条对位，只把取值来源换掉。
-const opencodeGoUsageEligibleMetaSQL = `
-	(
-		(platform = 'opencode_go'
-			AND COALESCE(btrim(credentials_meta ->> 'account_mode') <> 'zen', true))
-		OR (platform IN (` + opencodeGoUsageMountPlatformsSQL + `)
-			AND ` + opencodeGoBaseURLMatchSQLPrefix + `credentials_meta ->> 'base_url'` + opencodeGoBaseURLMatchSQLSuffix + `)
-	)
-	AND type = 'apikey'
-	AND credentials_api_key_hash IS NOT NULL
-`
-
-const ollamaCloudUsageEligibleMetaSQL = `
+// 旧谓词：**冻结的改动前快照**，刻意不引用生产常量。
+//
+// 原因：差分测试要拿"改动前的写法"当基准。如果这里引用生产常量，那么一改生产，
+// 基准就跟着一起动，测试退化成"新对新"——永远绿、什么都证明不了。
+// 只有**列引用**被冻结成字面量（那正是本迁移要动的东西）；
+// 平台白名单与 base_url 正则仍引用生产常量（它们不是本迁移的对象，
+// 让基准跟着它们走是对的）。
+const ollamaCloudUsageEligibleLegacySQL = `
 	platform IN (` + ollamaCloudUsagePlatformsSQL + `)
 	AND type = 'apikey'
-	AND ` + ollamaCloudBaseURLMatchSQLPrefix + `credentials_meta ->> 'base_url'` + ollamaCloudBaseURLMatchSQLSuffix + `
-	AND credentials_api_key_hash IS NOT NULL
+	AND ` + ollamaCloudBaseURLMatchSQLPrefix + `credentials ->> 'base_url'` + ollamaCloudBaseURLMatchSQLSuffix + `
+	AND jsonb_typeof(credentials -> 'api_key') = 'string'
 `
 
-func opencodeEligibleOldSQL() string { return opencodeGoUsageEligibleSQL }
+// 新谓词：引用生产常量，即"现在实际生效的写法"。
+func ollamaEligibleOldSQL() string { return ollamaCloudUsageEligibleLegacySQL }
+func ollamaEligibleCurrentSQL() string { return ollamaCloudUsageEligibleSQL }
+
+// 新谓词：与旧谓词逐条对位，只把取值来源换掉。
+// OpenCode 的冻结快照，理由同上。
+const opencodeGoUsageEligibleLegacySQL = `
+	(
+		(platform = 'opencode_go'
+			AND COALESCE(btrim(credentials ->> 'account_mode') <> 'zen', true))
+		OR (platform IN (` + opencodeGoUsageMountPlatformsSQL + `)
+			AND ` + opencodeGoBaseURLMatchSQLPrefix + `credentials ->> 'base_url'` + opencodeGoBaseURLMatchSQLSuffix + `)
+	)
+	AND type = 'apikey'
+	AND jsonb_typeof(credentials -> 'api_key') = 'string'
+`
+
+func opencodeEligibleOldSQL() string     { return opencodeGoUsageEligibleLegacySQL }
+func opencodeEligibleCurrentSQL() string { return opencodeGoUsageEligibleSQL }
 
 type credentialDiffFixture struct {
 	id         int64
@@ -183,11 +193,13 @@ func TestCredentialSQLDiff_OllamaEligibility(t *testing.T) {
 	seedCredentialDiffRows(t, db)
 
 	oldIDs := selectIDs(t, db, ollamaEligibleOldSQL())
-	newIDs := selectIDs(t, db, ollamaCloudUsageEligibleMetaSQL)
+	newIDs := selectIDs(t, db, ollamaEligibleCurrentSQL())
 
 	// 期望值用 fixture 手工推导，而不是把 oldIDs 当期望——否则实现全错也会"相等"。
 	require.Equal(t, []int64{1, 5, 9, 19, 20}, oldIDs, "旧谓词的语义基线")
-	require.Equal(t, []int64{1, 5, 19, 20}, newIDs, "新谓词：只少了空 api_key 的 9")
+	// 2.3 只换 base_url / account_mode 的来源，api_key 那段仍是 jsonb_typeof，
+	// 所以当前集合此时应与冻结快照**完全相同**；2.2 落地后才会少掉空 api_key 的 9。
+	require.Equal(t, []int64{1, 5, 9, 19, 20}, newIDs, "2.3 之后：与冻结快照逐行一致")
 }
 
 func TestCredentialSQLDiff_OpenCodeEligibility(t *testing.T) {
@@ -195,50 +207,52 @@ func TestCredentialSQLDiff_OpenCodeEligibility(t *testing.T) {
 	seedCredentialDiffRows(t, db)
 
 	oldIDs := selectIDs(t, db, opencodeEligibleOldSQL())
-	newIDs := selectIDs(t, db, opencodeGoUsageEligibleMetaSQL)
+	newIDs := selectIDs(t, db, opencodeEligibleCurrentSQL())
 
 	require.Equal(t, []int64{11, 13, 14, 16, 18}, oldIDs, "旧谓词的语义基线")
-	require.Equal(t, []int64{11, 13, 14, 16}, newIDs, "新谓词：只少了空 api_key 的 18")
+	require.Equal(t, []int64{11, 13, 14, 16, 18}, newIDs, "2.3 之后：与冻结快照逐行一致（18 仍合格，2.2 落地后才排除）")
 }
 
-// TestCredentialSQLDiff_DocumentsEmptyAPIKeyNarrowing 把上面两处差异**显式钉住**。
+// TestCredentialSQLDiff_DocumentsEmptyAPIKeyNarrowing 钉住"新谓词只会比旧谓词**更严**"这条不变式。
 //
-// 新谓词比旧谓词严格一处：`api_key` 为空串的行。旧写法
-// `jsonb_typeof(credentials -> 'api_key') = 'string'` 对空串返回 true，
-// 新写法按指纹是否为 NULL 判断，空串不产生指纹。
+// 两个方向都要成立：
+//   - 新谓词 MUST NOT 比旧谓词多选任何行（否则会清理到本来不该碰的账号）；
+//   - 允许的差异**只能**来自 `api_key` 为空串的行。旧写法
+//     `jsonb_typeof(credentials -> 'api_key') = 'string'` 对空串返回 true，
+//     新写法按指纹是否为 NULL 判断，空串不产生指纹。
 //
-// 判定：这个收窄是**对的**。空 api_key 的账号在用量查询里永远查不到数据，
-// 把它算作"合格身份"只会让它参与组查询却返回空。但它是行为变化，
-// 所以必须有测试把它写下来，而不是让它在上线后靠"用量好像少了"被发现。
+// 写法刻意不硬编码差异集合的当前大小：2.3（换 meta 列）不改变选择结果，
+// 2.2（换指纹列）才把空 api_key 行排除。这条测试在两个阶段都必须绿，
+// 只是差异集合从空变成 {9}/{18}。
 func TestCredentialSQLDiff_DocumentsEmptyAPIKeyNarrowing(t *testing.T) {
 	db := credentialDiffDB(t)
 	fixtures := seedCredentialDiffRows(t, db)
 
-	var expectedOllamaDiff, expectedOpenCodeDiff []int64
-	for _, f := range fixtures {
-		if !f.emptyAPIKey {
-			continue
-		}
-		if len(selectIDs(t, db, ollamaEligibleOldSQL())) == 0 {
-			t.Fatal("fixture 未生效")
-		}
-		oldOllama := containsID(selectIDs(t, db, ollamaEligibleOldSQL()), f.id)
-		newOllama := containsID(selectIDs(t, db, ollamaCloudUsageEligibleMetaSQL), f.id)
-		oldOpenCode := containsID(selectIDs(t, db, opencodeEligibleOldSQL()), f.id)
-		newOpenCode := containsID(selectIDs(t, db, opencodeGoUsageEligibleMetaSQL), f.id)
+	oldOllama := selectIDs(t, db, ollamaEligibleOldSQL())
+	newOllama := selectIDs(t, db, ollamaEligibleCurrentSQL())
+	oldOpenCode := selectIDs(t, db, opencodeEligibleOldSQL())
+	newOpenCode := selectIDs(t, db, opencodeEligibleCurrentSQL())
 
-		if oldOllama && !newOllama {
-			expectedOllamaDiff = append(expectedOllamaDiff, f.id)
+	emptyAPIKeyIDs := map[int64]bool{}
+	for _, f := range fixtures {
+		if f.emptyAPIKey {
+			emptyAPIKeyIDs[f.id] = true
 		}
-		if oldOpenCode && !newOpenCode {
-			expectedOpenCodeDiff = append(expectedOpenCodeDiff, f.id)
-		}
-		// 反向：新谓词 MUST NOT 比旧谓词多选中任何行
-		require.False(t, newOllama && !oldOllama, "id=%d：新谓词比旧谓词多选了行", f.id)
-		require.False(t, newOpenCode && !oldOpenCode, "id=%d：新谓词比旧谓词多选了行", f.id)
 	}
-	require.Equal(t, []int64{9}, expectedOllamaDiff)
-	require.Equal(t, []int64{18}, expectedOpenCodeDiff)
+
+	checkOnlyNarrows := func(label string, oldIDs, newIDs []int64) {
+		for _, id := range newIDs {
+			require.True(t, containsID(oldIDs, id), "%s：新谓词多选了 id=%d，绝不允许", label, id)
+		}
+		for _, id := range oldIDs {
+			if containsID(newIDs, id) {
+				continue
+			}
+			require.True(t, emptyAPIKeyIDs[id], "%s：id=%d 被排除，但它不是空 api_key 行——这不是本迁移允许的差异", label, id)
+		}
+	}
+	checkOnlyNarrows("ollama", oldOllama, newOllama)
+	checkOnlyNarrows("opencode", oldOpenCode, newOpenCode)
 }
 
 func containsID(ids []int64, want int64) bool {
