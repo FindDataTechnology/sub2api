@@ -42,6 +42,7 @@ CREATE TABLE accounts (
 	name                     text NOT NULL DEFAULT '',
 	platform                 text NOT NULL,
 	type                     text NOT NULL,
+	extra                    jsonb NOT NULL DEFAULT '{}'::jsonb,
 	credentials              jsonb NOT NULL DEFAULT '{}'::jsonb,
 	credentials_meta         jsonb NOT NULL DEFAULT '{}'::jsonb,
 	credentials_encrypted    text,
@@ -299,4 +300,244 @@ func mustCanonical(t *testing.T, v map[string]any) []byte {
 	raw, err := canonicalCredentialJSON(v)
 	require.NoError(t, err)
 	return raw
+}
+
+// ── UpdateCredentials / BulkUpdate 的 CASE 分支所用的叶子谓词 ──────────────────
+//
+// 为什么只测叶子而不测整段 CASE：
+// 阶段二对这些 CASE 的改动**只替换叶子**（把列引用换成 meta / 指纹），
+// AND / OR / CASE 求值顺序一字不动。组合逻辑不变时，叶子等价 ⇒ 整体等价。
+// 而整段 CASE 因为内联在 raw string 与常量拼接混排的 SQL 里，抽成常量会破坏
+// 引号结构（我试过，直接把文件搞到编译不过），硬抽的风险大于收益。
+//
+// CASE 求值顺序（OpenCode 必须先于 Ollama）属于与列切换正交的既有约束，
+// 已有独立测试与源码注释守着，这里不重复。
+
+// seedCredentialDiffRowsWithExtra 与 seedCredentialDiffRows 相同，但额外写入 extra，
+// 供"哪些受管键会被清掉"的观察用。
+func seedCredentialDiffRowsWithExtra(t *testing.T, db *sql.DB, extras map[int64]string) {
+	t.Helper()
+	repo := newAccountRepositoryWithSQL(nil, nil, nil)
+	for _, f := range credentialDiffFixtures() {
+		columns, err := repo.credentialCryptoColumnsFor(f.creds)
+		require.NoError(t, err)
+		extra := "{}"
+		if e, ok := extras[f.id]; ok {
+			extra = e
+		}
+		_, err = db.Exec(`
+			INSERT INTO accounts (id, platform, type, credentials, credentials_meta, credentials_hash, credentials_api_key_hash, extra)
+			VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8::jsonb)`,
+			f.id, f.platform, f.accountTyp, mustJSON(t, f.creds), mustJSON(t, columns.Meta),
+			*columns.Hash, columns.APIKeyHash, extra)
+		require.NoError(t, err, "seed id=%d", f.id)
+	}
+}
+
+// TestCredentialDiffLeaf_WholeDocumentChangedIsDistinct
+//
+// CASE 的顶层守卫：整份凭据有没有变。
+// 旧：`credentials IS DISTINCT FROM $1::jsonb`
+// 新：`credentials_hash IS DISTINCT FROM $2`
+func TestCredentialDiffLeaf_WholeDocumentChangedIsDistinct(t *testing.T) {
+	db := credentialDiffDB(t)
+	seedCredentialDiffRows(t, db)
+
+	cases := []struct {
+		name     string
+		rowID    int64
+		incoming map[string]any
+		want     bool
+	}{
+		{"内容与键序都相同", 1, map[string]any{"api_key": "sk-a", "base_url": "https://ollama.com"}, false},
+		{"只有键序不同", 1, map[string]any{"base_url": "https://ollama.com", "api_key": "sk-a"}, false},
+		{"内容不同", 1, map[string]any{"api_key": "sk-a2", "base_url": "https://ollama.com"}, true},
+		{"多了一个键", 1, map[string]any{"api_key": "sk-a", "base_url": "https://ollama.com", "extra": 1}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := mustJSON(t, tc.incoming)
+			hash := sha256Hex(mustCanonical(t, tc.incoming))
+
+			var oldChanged, newChanged bool
+			require.NoError(t, db.QueryRow(
+				`SELECT credentials IS DISTINCT FROM $1::jsonb FROM accounts WHERE id = $2`,
+				payload, tc.rowID).Scan(&oldChanged))
+			require.NoError(t, db.QueryRow(
+				`SELECT credentials_hash IS DISTINCT FROM $1 FROM accounts WHERE id = $2`,
+				hash, tc.rowID).Scan(&newChanged))
+
+			require.Equal(t, tc.want, oldChanged, "旧谓词")
+			require.Equal(t, tc.want, newChanged, "新谓词")
+			require.Equal(t, oldChanged, newChanged, "新旧必须一致")
+		})
+	}
+}
+
+// TestCredentialDiffLeaf_APIKeyChangedIsDistinct
+//
+// CASE 里判断"api_key 变了没有"：决定要不要清受管用量快照。
+// 旧：`credentials -> 'api_key' IS DISTINCT FROM $1::jsonb -> 'api_key'`（jsonb 层）
+// 新：`credentials_api_key_hash IS DISTINCT FROM $2`
+//
+// 注意语义差别与它为什么不影响结果：旧写法比较 jsonb（缺失为 SQL NULL），
+// 新写法比较指纹（缺失为 NULL）；`NULL IS DISTINCT FROM NULL` 在两边都是 false，
+// 所以"两边都缺"仍然一致。
+func TestCredentialDiffLeaf_APIKeyChangedIsDistinct(t *testing.T) {
+	db := credentialDiffDB(t)
+	seedCredentialDiffRows(t, db)
+
+	cases := []struct {
+		name       string
+		rowID      int64
+		incoming   map[string]any
+		wantChange bool
+	}{
+		{"相同 key", 1, map[string]any{"api_key": "sk-a", "base_url": "https://ollama.com"}, false},
+		{"换了 key", 1, map[string]any{"api_key": "sk-a2", "base_url": "https://ollama.com"}, true},
+		{"两边都没有 key", 2, map[string]any{"base_url": "https://ollama.com"}, false},
+		{"旧有新无", 1, map[string]any{"base_url": "https://ollama.com"}, true},
+		{"旧无新有", 2, map[string]any{"api_key": "sk-new", "base_url": "https://ollama.com"}, true},
+		{"空串对空串", 9, map[string]any{"api_key": "", "base_url": "https://ollama.com"}, false},
+		{"空串换真 key", 9, map[string]any{"api_key": "sk-real", "base_url": "https://ollama.com"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := mustJSON(t, tc.incoming)
+			incomingHash := credentialAPIKeyHash(tc.incoming)
+			var newArg any
+			if incomingHash != nil {
+				newArg = *incomingHash
+			}
+
+			var oldChanged, newChanged bool
+			require.NoError(t, db.QueryRow(
+				`SELECT credentials -> 'api_key' IS DISTINCT FROM $1::jsonb -> 'api_key' FROM accounts WHERE id = $2`,
+				payload, tc.rowID).Scan(&oldChanged))
+			require.NoError(t, db.QueryRow(
+				`SELECT credentials_api_key_hash IS DISTINCT FROM $1 FROM accounts WHERE id = $2`,
+				newArg, tc.rowID).Scan(&newChanged))
+
+			require.Equal(t, tc.wantChange, oldChanged, "旧谓词")
+			require.Equal(t, tc.wantChange, newChanged, "新谓词")
+			require.Equal(t, oldChanged, newChanged, "新旧必须一致")
+		})
+	}
+}
+
+// TestCredentialDiffLeaf_OllamaBaseURLGroupChanged
+//
+// Ollama 清理分支的组身份谓词：
+// 旧 `NOT (ollamaMatch(credentials) AND ollamaMatch($1::jsonb))`
+// 新 `NOT (ollamaMatch(credentials_meta) AND ollamaMatch($2::jsonb))`
+// 只要两边都不再匹配 ollama.com 基址（或旧行本来就不匹配），组身份就算变了。
+func TestCredentialDiffLeaf_OllamaBaseURLGroupChanged(t *testing.T) {
+	db := credentialDiffDB(t)
+	seedCredentialDiffRows(t, db)
+
+	oldExpr := `NOT (` +
+		ollamaCloudBaseURLMatchesSQL("credentials ->> 'base_url'") +
+		` AND ` + ollamaCloudBaseURLMatchesSQL("$1::jsonb ->> 'base_url'") + `)`
+	newExpr := `NOT (` +
+		ollamaCloudBaseURLMatchesSQL("credentials_meta ->> 'base_url'") +
+		` AND ` + ollamaCloudBaseURLMatchesSQL("$2::jsonb ->> 'base_url'") + `)`
+
+	cases := []struct {
+		name     string
+		rowID    int64
+		incoming map[string]any
+	}{
+		{"两边都是 ollama 基址", 1, map[string]any{"api_key": "sk-a", "base_url": "https://ollama.com"}},
+		{"旧是、新不是", 1, map[string]any{"api_key": "sk-a", "base_url": "https://example.com"}},
+		{"旧不是、新是", 3, map[string]any{"api_key": "sk-c", "base_url": "https://ollama.com"}},
+		{"两边都不是", 3, map[string]any{"api_key": "sk-c", "base_url": "https://example.com"}},
+		{"新侧缺 base_url", 1, map[string]any{"api_key": "sk-a"}},
+		{"旧侧缺 base_url", 8, map[string]any{"api_key": "sk-h", "base_url": "https://ollama.com"}},
+		{"大小写与空白", 1, map[string]any{"api_key": "sk-a", "base_url": "  https://WWW.OLLAMA.com:443/v1  "}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := mustJSON(t, tc.incoming)
+			incomingMeta := mustJSON(t, credentialMetaSubset(tc.incoming))
+
+			// 这个叶子是 **NULL 传播**的：任一侧 base_url 缺失，NOT(... AND NULL)
+			// 结果是 NULL 而不是 false。生产靠 WHERE 把 NULL 当假来工作，
+			// 所以这里必须比对两件事：结果是否为真、是否为 NULL。
+			// 只比 COALESCE(...,false) 会掩盖"NULL 变成 false"这类漂移。
+			var oldIsTrue, oldIsNull, newIsTrue, newIsNull bool
+			// 旧表达式里 $1 = 入参凭据（与生产一致），所以 id 只能是 $2；
+			// 新表达式里 $2 = 入参 meta，id 用 $1。
+			require.NoError(t, db.QueryRow(
+				`SELECT (`+oldExpr+`) IS TRUE, (`+oldExpr+`) IS NULL FROM accounts WHERE id = $2`,
+				payload, tc.rowID).Scan(&oldIsTrue, &oldIsNull))
+			require.NoError(t, db.QueryRow(
+				`SELECT (`+newExpr+`) IS TRUE, (`+newExpr+`) IS NULL FROM accounts WHERE id = $1`,
+				tc.rowID, incomingMeta).Scan(&newIsTrue, &newIsNull))
+
+			require.Equal(t, oldIsTrue, newIsTrue, "真值必须一致")
+			require.Equal(t, oldIsNull, newIsNull, "NULL 性必须一致（NULL 与 false 在 WHERE 里等价，但语义不同）")
+		})
+	}
+}
+
+// TestCredentialDiffLeaf_OpenCodeAccountModeIsZen
+//
+// OpenCode 清理分支里判断"目标身份还是不是 Go 订阅"：
+// 旧 `COALESCE(btrim($1::jsonb ->> 'account_mode') <> 'zen', true)`
+// 新 `COALESCE(btrim($2::jsonb ->> 'account_mode') <> 'zen', true)`
+//
+// COALESCE 把"缺字段"归一为 true（默认 Go 订阅）——这层默认逻辑不能因为
+// 换了列而改变，否则 opencode_go 账号会在 account_mode 缺失时被判成 Zen。
+func TestCredentialDiffLeaf_OpenCodeAccountModeIsZen(t *testing.T) {
+	db := credentialDiffDB(t)
+	seedCredentialDiffRows(t, db)
+
+	oldExpr := `COALESCE(btrim($1::jsonb ->> 'account_mode') <> 'zen', true)`
+	// 右侧没有 FROM 子句，参数必须从 $1 起编（写 $2 会让 $1 类型不可判定）。
+	newExpr := `COALESCE(btrim($1::jsonb ->> 'account_mode') <> 'zen', true)`
+
+	variants := []map[string]any{
+		{"api_key": "sk-x"},
+		{"api_key": "sk-x", "account_mode": "zen"},
+		{"api_key": "sk-x", "account_mode": "go"},
+		{"api_key": "sk-x", "account_mode": "  zen  "},
+		{"api_key": "sk-x", "account_mode": "ZEN"},
+		{"api_key": "sk-x", "account_mode": nil},
+	}
+	for i, incoming := range variants {
+		payload := mustJSON(t, incoming)
+		incomingMeta := mustJSON(t, credentialMetaSubset(incoming))
+		var oldV, newV bool
+		require.NoError(t, db.QueryRow(`SELECT `+oldExpr, payload).Scan(&oldV))
+		require.NoError(t, db.QueryRow(`SELECT `+newExpr, incomingMeta).Scan(&newV))
+		require.Equal(t, oldV, newV, "variant %d 新旧必须一致", i)
+	}
+}
+
+// TestCredentialDiffLeaf_NullHashMakesEverythingLookChanged 是**为什么回填必须
+// 早于阶段二**的实证。
+//
+// 未回填的行 hash 为 NULL，而 `NULL IS DISTINCT FROM x` 恒为真：
+// 于是"整份凭据没变"也会被判成"变了"→ 命中清理分支 → 受管快照被误清。
+// 这条测试不修任何东西，它只是把这个陷阱变成可执行的证据。
+func TestCredentialDiffLeaf_NullHashMakesEverythingLookChanged(t *testing.T) {
+	db := credentialDiffDB(t)
+	seedCredentialDiffRows(t, db)
+
+	// 人为把 id=1 的 hash 清掉，模拟"未回填"
+	_, err := db.Exec(`UPDATE accounts SET credentials_hash = NULL WHERE id = 1`)
+	require.NoError(t, err)
+
+	sameDoc := map[string]any{"api_key": "sk-a", "base_url": "https://ollama.com"}
+	payload := mustJSON(t, sameDoc)
+	hash := sha256Hex(mustCanonical(t, sameDoc))
+
+	var oldChanged, newChanged bool
+	require.NoError(t, db.QueryRow(
+		`SELECT credentials IS DISTINCT FROM $1::jsonb FROM accounts WHERE id = 1`, payload).Scan(&oldChanged))
+	require.NoError(t, db.QueryRow(
+		`SELECT credentials_hash IS DISTINCT FROM $1 FROM accounts WHERE id = 1`, hash).Scan(&newChanged))
+
+	require.False(t, oldChanged, "旧谓词：文档其实没变")
+	require.True(t, newChanged, "新谓词在 hash 为 NULL 时必然判成'已变更'——这就是必须先回填的原因")
 }
