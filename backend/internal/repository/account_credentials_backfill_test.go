@@ -1,0 +1,215 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"os"
+	"testing"
+
+	_ "github.com/lib/pq"
+	"github.com/stretchr/testify/require"
+)
+
+// 存量回填的真 PG 测试（无 DSN 时跳过）。
+//
+// 运行：
+//
+//	createdb sub2api_backfill_drill
+//	SUB2API_CREDENTIAL_DIFF_DSN='postgres:///sub2api_backfill_drill?sslmode=disable' \
+//	  go test ./internal/repository/ -run 'CredentialBackfill' -v
+
+const backfillDrillDDL = `
+DROP TABLE IF EXISTS accounts;
+DROP TABLE IF EXISTS api_keys;
+CREATE TABLE accounts (
+	id                       bigserial PRIMARY KEY,
+	platform                 text NOT NULL DEFAULT 'openai',
+	type                     text NOT NULL DEFAULT 'apikey',
+	credentials              jsonb NOT NULL DEFAULT '{}'::jsonb,
+	credentials_meta         jsonb NOT NULL DEFAULT '{}'::jsonb,
+	credentials_encrypted    text,
+	credentials_hash         varchar(64),
+	credentials_api_key_hash varchar(64)
+);
+CREATE TABLE api_keys (
+	id            bigserial PRIMARY KEY,
+	key           varchar(128) NOT NULL,
+	key_hash      varchar(64),
+	key_encrypted text
+);
+`
+
+func backfillDrillDB(t *testing.T) *sql.DB {
+	t.Helper()
+	dsn := os.Getenv("SUB2API_CREDENTIAL_DIFF_DSN")
+	if dsn == "" {
+		t.Skip("SUB2API_CREDENTIAL_DIFF_DSN 未设置；回填演练需要真 PostgreSQL")
+	}
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	require.NoError(t, db.Ping())
+	t.Cleanup(func() { _ = db.Close() })
+	_, err = db.Exec(backfillDrillDDL)
+	require.NoError(t, err)
+	return db
+}
+
+func seedBackfillDrill(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`
+		INSERT INTO accounts (id, platform, type, credentials) VALUES
+			(1, 'openai', 'apikey', '{"api_key":"sk-a","base_url":"https://ollama.com"}'),
+			(2, 'opencode_go', 'apikey', '{"api_key":"sk-b","account_mode":"go"}'),
+			(3, 'anthropic', 'oauth', '{"access_token":"at","refresh_token":"rt","base_url":"https://x"}'),
+			(4, 'openai', 'apikey', '{}');
+		INSERT INTO api_keys (id, key) VALUES (10, 'sk-cust-1'), (11, 'sk-cust-2');
+	`)
+	require.NoError(t, err)
+
+	// 先造一行"schema 里不存在"的坏数据是不可行的（jsonb 会拒绝），
+	// 所以坏行用 api_keys 的空 key 表示，见下面的断言。
+}
+
+func countBackfillPending(t *testing.T, db *sql.DB) (accounts, apiKeys int) {
+	t.Helper()
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM accounts WHERE `+credentialNeedsBackfillSQL).Scan(&accounts))
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM api_keys WHERE `+apiKeyNeedsBackfillSQL).Scan(&apiKeys))
+	return accounts, apiKeys
+}
+
+// TestCredentialBackfill_FillsAllMissingColumns 核心正向：回填后不再有"缺派生列"的行，
+// 且哈希与运行时计算完全一致（这是阶段二切比较的前提）。
+func TestCredentialBackfill_FillsAllMissingColumns(t *testing.T) {
+	db := backfillDrillDB(t)
+	seedBackfillDrill(t, db)
+	cryptor := credentialTestEncryptor(t)
+
+	beforeAccounts, beforeKeys := countBackfillPending(t, db)
+	require.Equal(t, 4, beforeAccounts)
+	require.Equal(t, 2, beforeKeys)
+
+	result, err := BackfillCredentialColumns(context.Background(), db, cryptor, CredentialBackfillOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 4, result.AccountsUpdated)
+	require.Equal(t, 2, result.APIKeysUpdated)
+	require.Zero(t, result.AccountsFailed)
+	require.Zero(t, result.APIKeysFailed)
+
+	afterAccounts, afterKeys := countBackfillPending(t, db)
+	require.Zero(t, afterAccounts, "回填后不该还有缺派生列的账号")
+	require.Zero(t, afterKeys, "回填后不该还有缺派生列的 api_key")
+
+	// 哈希必须与运行时同一套实现算出的一致
+	var hash string
+	require.NoError(t, db.QueryRow(`SELECT credentials_hash FROM accounts WHERE id = 1`).Scan(&hash))
+	expected, err := CredentialCryptoColumnsFor(map[string]any{
+		"api_key": "sk-a", "base_url": "https://ollama.com",
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, *expected.Hash, hash)
+
+	// meta 白名单只带 base_url（account_mode 不存在于 id=1）
+	var meta string
+	require.NoError(t, db.QueryRow(`SELECT credentials_meta::text FROM accounts WHERE id = 1`).Scan(&meta))
+	require.JSONEq(t, `{"base_url":"https://ollama.com"}`, meta)
+
+	// 密文必须能解回原文档
+	var encrypted string
+	require.NoError(t, db.QueryRow(`SELECT credentials_encrypted FROM accounts WHERE id = 1`).Scan(&encrypted))
+	plaintext, err := cryptor.Decrypt(encrypted)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"api_key":"sk-a","base_url":"https://ollama.com"}`, plaintext)
+
+	// 空凭据账号：hash 是 `{}` 的哈希（不是 NULL），meta 为空对象
+	var emptyHash string
+	require.NoError(t, db.QueryRow(`SELECT credentials_hash FROM accounts WHERE id = 4`).Scan(&emptyHash))
+	emptyExpected, err := CredentialCryptoColumnsFor(map[string]any{}, nil)
+	require.NoError(t, err)
+	require.Equal(t, *emptyExpected.Hash, emptyHash)
+
+	// api_key 指纹
+	var keyHash string
+	require.NoError(t, db.QueryRow(`SELECT key_hash FROM api_keys WHERE id = 10`).Scan(&keyHash))
+	require.Equal(t, sha256Hex([]byte("sk-cust-1")), keyHash)
+}
+
+// TestCredentialBackfill_IsIdempotent 重复执行必须不再改动任何行——
+// 否则每次运维都重写一遍密文（非确定性）会让所有乐观并发比较失效。
+func TestCredentialBackfill_IsIdempotent(t *testing.T) {
+	db := backfillDrillDB(t)
+	seedBackfillDrill(t, db)
+	cryptor := credentialTestEncryptor(t)
+
+	first, err := BackfillCredentialColumns(context.Background(), db, cryptor, CredentialBackfillOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 4, first.AccountsUpdated)
+
+	var encBefore string
+	require.NoError(t, db.QueryRow(`SELECT credentials_encrypted FROM accounts WHERE id = 1`).Scan(&encBefore))
+
+	second, err := BackfillCredentialColumns(context.Background(), db, cryptor, CredentialBackfillOptions{})
+	require.NoError(t, err)
+	require.Zero(t, second.AccountsScanned, "第二次不该扫到任何待回填行")
+	require.Zero(t, second.AccountsUpdated)
+	require.Zero(t, second.APIKeysUpdated)
+
+	var encAfter string
+	require.NoError(t, db.QueryRow(`SELECT credentials_encrypted FROM accounts WHERE id = 1`).Scan(&encAfter))
+	require.Equal(t, encBefore, encAfter, "幂等：密文不该被重写（非确定性加密会变）")
+}
+
+// TestCredentialBackfill_DryRunWritesNothing 演练模式必须零写入。
+func TestCredentialBackfill_DryRunWritesNothing(t *testing.T) {
+	db := backfillDrillDB(t)
+	seedBackfillDrill(t, db)
+	cryptor := credentialTestEncryptor(t)
+
+	result, err := BackfillCredentialColumns(context.Background(), db, cryptor, CredentialBackfillOptions{DryRun: true})
+	require.NoError(t, err)
+	require.Equal(t, 4, result.AccountsUpdated, "dry-run 也要报告将处理多少行")
+
+	accounts, keys := countBackfillPending(t, db)
+	require.Equal(t, 4, accounts, "dry-run 不该写库")
+	require.Equal(t, 2, keys, "dry-run 不该写库")
+}
+
+// TestCredentialBackfill_RequiresEncryptor 没有加密器时必须直接拒绝：
+// 否则会补上 meta/指纹但密文仍 NULL，跑出一个"看起来迁了一半"的状态，
+// 阶段二切换后读路径永远回落明文。
+func TestCredentialBackfill_RequiresEncryptor(t *testing.T) {
+	db := backfillDrillDB(t)
+	seedBackfillDrill(t, db)
+
+	_, err := BackfillCredentialColumns(context.Background(), db, nil, CredentialBackfillOptions{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "encryptor is required")
+
+	accounts, keys := countBackfillPending(t, db)
+	require.Equal(t, 4, accounts)
+	require.Equal(t, 2, keys)
+}
+
+// TestCredentialBackfill_LimitAndBatching 分页 + 限制：小批量能跑完，Limit 能截断。
+func TestCredentialBackfill_LimitAndBatching(t *testing.T) {
+	db := backfillDrillDB(t)
+	seedBackfillDrill(t, db)
+	cryptor := credentialTestEncryptor(t)
+
+	// 批大小 1 + 限 2 行：只回填 2 个账号，剩 2 个仍未迁
+	result, err := BackfillCredentialColumns(context.Background(), db, cryptor, CredentialBackfillOptions{
+		BatchSize: 1,
+		Limit:     2,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, result.AccountsUpdated)
+
+	accounts, _ := countBackfillPending(t, db)
+	require.Equal(t, 2, accounts)
+
+	// 再跑一次不限量，必须把剩下的补完（证明 keyset 分页没有跳过行）
+	rest, err := BackfillCredentialColumns(context.Background(), db, cryptor, CredentialBackfillOptions{BatchSize: 1})
+	require.NoError(t, err)
+	require.Equal(t, 2, rest.AccountsUpdated)
+	remaining, _ := countBackfillPending(t, db)
+	require.Zero(t, remaining)
+}
