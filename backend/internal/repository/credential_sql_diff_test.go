@@ -555,3 +555,37 @@ func TestCredentialDiffLeaf_NullHashMakesEverythingLookChanged(t *testing.T) {
 	require.False(t, oldChanged, "旧谓词：文档其实没变")
 	require.True(t, newChanged, "新谓词在 hash 为 NULL 时必然判成'已变更'——这就是必须先回填的原因")
 }
+
+// TestCredentialDiffLeaf_RefreshTokenPresenceViaMeta（站点 A 方案 ①）
+//
+// 旧谓词读明文的 refresh_token，新谓词读 credentials_meta 里的派生事实。
+// 这条在真 PG 上比对"两边选中的 id 集合"，是"语义没变"的证据；
+// "改了"的证据是 TestListOAuthRefreshCandidatePage_UsesMetaDerivedFlag（文本断言）。
+func TestCredentialDiffLeaf_RefreshTokenPresenceViaMeta(t *testing.T) {
+	db := credentialDiffDB(t)
+	seedCredentialDiffRows(t, db)
+
+	// 共享 fixture 里没有带 refresh_token 的行——不补一行的话"两边都为空"也会
+	// 让 Equal 通过，等于什么都没验。这里插两条专用行（有 token / token 为空串）。
+	repo := newAccountRepositoryWithSQL(nil, nil, nil)
+	for id, creds := range map[int64]map[string]any{
+		901: {"refresh_token": "rt-1", "access_token": "at-1"},
+		902: {"refresh_token": "", "access_token": "at-2"},
+	} {
+		columns, err := repo.credentialCryptoColumnsFor(creds)
+		require.NoError(t, err)
+		_, err = db.Exec(`
+			INSERT INTO accounts (id, platform, type, credentials, credentials_meta, credentials_hash, credentials_api_key_hash)
+			VALUES ($1, 'grok', 'oauth', $2::jsonb, $3::jsonb, $4, $5)`,
+			id, mustJSON(t, creds), mustJSON(t, columns.Meta), *columns.Hash, columns.APIKeyHash)
+		require.NoError(t, err, "seed id=%d", id)
+	}
+
+	oldIDs := selectIDs(t, db,
+		`credentials ? 'refresh_token' AND btrim(credentials->>'refresh_token') <> ''`)
+	newIDs := selectIDs(t, db,
+		`credentials_meta @> '{"has_refresh_token": true}'`)
+
+	require.Equal(t, []int64{901}, oldIDs, "旧谓词：只有 refresh_token 非空的那条")
+	require.Equal(t, oldIDs, newIDs, "新旧谓词必须选同一批行")
+}

@@ -109,10 +109,12 @@ func TestCredentialBackfill_FillsAllMissingColumns(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, *expected.Hash, hash)
 
-	// meta 白名单只带 base_url（account_mode 不存在于 id=1）
+	// meta 只带 base_url（account_mode 不存在于 id=1）+ 派生事实 has_refresh_token=false
+	// （id=1 的凭据里没有 refresh_token）。回填工具走同一个 credentialMetaSubset，
+	// 所以它也必然带上这个事实——这正是"回填与运行时同源"的一个可观测断言。
 	var meta string
 	require.NoError(t, db.QueryRow(`SELECT credentials_meta::text FROM accounts WHERE id = 1`).Scan(&meta))
-	require.JSONEq(t, `{"base_url":"https://ollama.com"}`, meta)
+	require.JSONEq(t, `{"base_url":"https://ollama.com","has_refresh_token":false}`, meta)
 
 	// 密文必须能解回原文档
 	var encrypted string

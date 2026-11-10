@@ -1412,9 +1412,11 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 			AND type = 'oauth'`
 	}
 	if options.RequireRefreshToken {
+		// 读 credentials_meta 里的派生事实（见 REPORT-refresh-token-presence.md §2.5 方案 ①）。
+		// 原来的 `credentials ? 'refresh_token'` 本就是冗余的：键存在但值为空串时会被
+		// 下一行否掉，真正生效的只有"非空"判定，而它现在由这个布尔值表达。
 		query += `
-			AND credentials ? 'refresh_token'
-			AND btrim(credentials->>'refresh_token') <> ''`
+			AND credentials_meta @> '{"has_refresh_token": true}'`
 	}
 	if options.ExcludeRetryCooldown {
 		query += `

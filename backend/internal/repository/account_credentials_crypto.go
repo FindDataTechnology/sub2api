@@ -22,7 +22,7 @@ import (
 // 这里只产出"要写进新列的值"，不改任何既有读写行为——明文列照旧写，
 // 因此本阶段的每次写入都是可回滚的。
 
-// credentialMetaWhitelist 是允许进入 credentials_meta 明文列的子键白名单。
+// credentialMetaWhitelist 是允许从凭据里**原样复制**进 credentials_meta 的子键白名单。
 //
 // **必须保持极窄**：这一列是明文、可被 SQL 直接筛选、也随备份外泄。
 // 只允许放"生产 SQL 确实要筛选、且本身不是秘密"的键。当前生产 SQL 只提取
@@ -32,6 +32,14 @@ var credentialMetaWhitelist = map[string]struct{}{
 	"base_url":     {},
 	"account_mode": {},
 }
+
+// credentialMetaKeyHasRefreshToken 是写进 credentials_meta 的**派生事实**，
+// 不是从凭据里复制的子键，所以它不在 credentialMetaWhitelist 里。
+//
+// 为什么需要它：加密之后密文不透明，SQL 无法判断 refresh_token（密钥子键，
+// 不许进明文列）是否存在，而后台 OAuth 刷新候选筛选只需要"有没有"这个布尔事实。
+// 它泄漏的只是"该账号持有 refresh token"，不含密钥本身。
+const credentialMetaKeyHasRefreshToken = "has_refresh_token"
 
 // CredentialCryptoColumns 是一条账号写入需要落到新列上的四个值。
 // 指针为 nil 表示该列写 NULL（尚未迁移 / 未配置加密器）。
@@ -49,12 +57,16 @@ type CredentialCryptoColumns struct {
 // credentialMetaSubset 从凭据里挑出白名单子键。返回空 map 而不是 nil——
 // 列是 NOT NULL DEFAULT '{}'，写 nil 会把整份 meta 清空。
 func credentialMetaSubset(credentials map[string]any) map[string]any {
-	out := make(map[string]any, len(credentialMetaWhitelist))
+	out := make(map[string]any, len(credentialMetaWhitelist)+1)
 	for key := range credentialMetaWhitelist {
 		if value, ok := credentials[key]; ok {
 			out[key] = value
 		}
 	}
+	// **始终写入**（含 false）：让 meta 自描述——"这行是否已带此事实"可以用
+	// `NOT (credentials_meta ? 'has_refresh_token')` 一条 SQL 查完，回填闸门就靠它。
+	// 用 credentialHasRefreshToken 保证与 SQL `->>` + BTRIM 同语义（含非字符串值）。
+	out[credentialMetaKeyHasRefreshToken] = credentialHasRefreshToken(credentials)
 	return out
 }
 
