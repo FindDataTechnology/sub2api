@@ -241,3 +241,23 @@ func credentialHashHex(credentials map[string]any) string {
 	}
 	return sha256Hex(canonical)
 }
+
+// credentialHashOfRawJSON 从**数据库读出的明文 JSON** 算整文档哈希。
+//
+// 用途：Grok 的 CAS 语句把"读到的快照"原样作为比较基准。快照是 jsonb 的文本形态，
+// 必须先解析成 map 再走 canonicalCredentialJSON，才能与写路径写入 credentials_hash
+// 的那份哈希同源。直接哈希原始字节是不行的——JSON 键序/空白差异会让哈希对不上。
+//
+// 解析失败返回空串：空串与任何真实哈希都不相等，CAS 必然不命中，属安全失败方向。
+func credentialHashOfRawJSON(raw string) string {
+	if raw == "" {
+		return credentialHashHex(nil)
+	}
+	decoded := map[string]any{}
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		logger.LegacyPrintf("repository.credential",
+			"[CredentialAtRest] cannot canonicalize credentials snapshot for hashing: %v", err)
+		return ""
+	}
+	return credentialHashHex(decoded)
+}

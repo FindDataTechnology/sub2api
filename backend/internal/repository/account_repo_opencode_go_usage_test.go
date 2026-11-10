@@ -53,7 +53,7 @@ func TestUpdateOpenCodeGoUsageSnapshotWritesSnapshotOnly(t *testing.T) {
 	require.NoError(t, err)
 	mock.ExpectBegin()
 	mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
-		WithArgs(credentialAPIKeyHashHex("key"), account.ID, account.Platform, account.Type, string(credentials), nil).
+		WithArgs(credentialAPIKeyHashHex("key"), account.ID, account.Platform, account.Type, string(credentials), nil, credentialHashOfRawJSON(string(credentials))).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "anchor_matches", "auto_refresh", "snapshot"}).
 			AddRow(account.ID, true, `true`, string(previousSnapshotJSON)))
 	mock.ExpectExec(`(?s)`+regexp.QuoteMeta("UPDATE accounts")).
