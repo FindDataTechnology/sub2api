@@ -26,6 +26,10 @@ var capacityGate *service.KeyCapacityGate
 // SetCapacityGate 由路由装配层在启动时注入一次。
 func SetCapacityGate(g *service.KeyCapacityGate) { capacityGate = g }
 
+// timeNow 是生效时刻判定的时钟。单独抽出来是为了测试能控制"现在"，
+// 而不是靠 sleep 或依赖真实时间（后者在 CI 上必然间歇性失败）。
+var timeNow = time.Now
+
 // acquireKeyCapacity 返回 (是否放行, 归因层, release)。
 // 归因层取值 "" | "user" | "key" —— 直接进错误体，让调用方知道是哪一层挡的。
 func acquireKeyCapacity(apiKey *service.APIKey) (bool, string, func()) {
@@ -162,6 +166,17 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			apiKey.Status != service.StatusAPIKeyQuotaExhausted {
 			MarkIngressRejected(c, IngressRejectAPIKeyDisabled)
 			AbortWithError(c, 401, "API_KEY_DISABLED", "API key is disabled")
+			return
+		}
+
+		// 生效时刻（add-key-capacity-contract）：未到点 → 拒绝，但**不用 401**。
+		// 401 语义是"身份无效"，而这里是身份有效、只是时间未到；用 401 会让调用方
+		// 误判为 key 无效去重新申请，实际只需等到点。
+		// 放在状态检查之后、IP 检查之前：时间问题比 IP 问题更基础，且不泄露 IP 策略。
+		if apiKey.EffectiveAt != nil && timeNow().Before(*apiKey.EffectiveAt) {
+			MarkIngressRejected(c, IngressRejectKeyNotEffective)
+			AbortWithError(c, http.StatusForbidden, "KEY_NOT_YET_EFFECTIVE",
+				"API key is not yet effective (effective_at="+apiKey.EffectiveAt.UTC().Format(time.RFC3339)+")")
 			return
 		}
 
