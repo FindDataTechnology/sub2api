@@ -26,6 +26,18 @@ type APIKeyAuthSnapshot struct {
 	RateLimit5h float64 `json:"rate_limit_5h"`
 	RateLimit1d float64 `json:"rate_limit_1d"`
 	RateLimit7d float64 `json:"rate_limit_7d"`
+
+	// ===== 容量契约（add-key-capacity-contract，快照 v27 起）=====
+	// user 是池（见 User.Concurrency），key 是池内席位：
+	//   ConcurrencyRequest 保底（额度保留，不保证饱和吞吐）
+	//   ConcurrencyLimit   该 key 硬顶（0 = 不额外限制，可借支到池上限）
+	//   RPMLimit           每分钟请求上限（0 = 不限）
+	//   EffectiveAt        生效时刻（nil = 立即生效）
+	// 四字段必须随快照缓存，否则准入热路径只能回源 DB —— 这正是升 v27 的原因。
+	ConcurrencyRequest int        `json:"concurrency_request"`
+	ConcurrencyLimit   int        `json:"concurrency_limit"`
+	RPMLimit           int        `json:"rpm_limit"`
+	EffectiveAt        *time.Time `json:"effective_at,omitempty"`
 }
 
 // APIKeyAuthUserSnapshot 用户快照

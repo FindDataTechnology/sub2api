@@ -18,7 +18,12 @@ import (
 // 必须再升一版：v25(fork)=group rerank_price_per_request（ciyuan lanes, tasks 3.1；v24 旧快照 rerank 价 nil 计零），
 // v25(upstream)=group image_count_billing 开关（image 端点按张计费）。
 // 线上现存 v25 快照（仅 rerank 价）按版本不符拒绝重建，防止 image_count_billing 读 nil。
-const apiKeyAuthSnapshotVersion = 26
+//
+// v27: add-key-capacity-contract —— APIKeyAuthSnapshot 新增 key 容量契约四字段
+// （concurrency_request / concurrency_limit / rpm_limit / effective_at）。
+// 不升这一版的后果是**静默失效**：线上存量 v26 快照按旧形状反序列化，新字段零值参与准入，
+// 于是「限了 5 并发」的 key 表现为不限——与 v25 撞号那次同型，故必须升。
+const apiKeyAuthSnapshotVersion = 27
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -354,6 +359,12 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 		RateLimit5h: apiKey.RateLimit5h,
 		RateLimit1d: apiKey.RateLimit1d,
 		RateLimit7d: apiKey.RateLimit7d,
+
+		ConcurrencyRequest: apiKey.ConcurrencyRequest,
+		ConcurrencyLimit:   apiKey.ConcurrencyLimit,
+		RPMLimit:           apiKey.RPMLimit,
+		EffectiveAt:        apiKey.EffectiveAt,
+
 		User: APIKeyAuthUserSnapshot{
 			ID:                         apiKey.User.ID,
 			Status:                     apiKey.User.Status,
@@ -465,6 +476,12 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 		RateLimit5h: snapshot.RateLimit5h,
 		RateLimit1d: snapshot.RateLimit1d,
 		RateLimit7d: snapshot.RateLimit7d,
+
+		ConcurrencyRequest: snapshot.ConcurrencyRequest,
+		ConcurrencyLimit:   snapshot.ConcurrencyLimit,
+		RPMLimit:           snapshot.RPMLimit,
+		EffectiveAt:        snapshot.EffectiveAt,
+
 		User: &User{
 			ID:                         snapshot.User.ID,
 			Status:                     snapshot.User.Status,

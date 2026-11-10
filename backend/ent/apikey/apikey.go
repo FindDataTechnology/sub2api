@@ -43,6 +43,14 @@ const (
 	FieldQuotaUsed = "quota_used"
 	// FieldExpiresAt holds the string denoting the expires_at field in the database.
 	FieldExpiresAt = "expires_at"
+	// FieldConcurrencyRequest holds the string denoting the concurrency_request field in the database.
+	FieldConcurrencyRequest = "concurrency_request"
+	// FieldConcurrencyLimit holds the string denoting the concurrency_limit field in the database.
+	FieldConcurrencyLimit = "concurrency_limit"
+	// FieldRpmLimit holds the string denoting the rpm_limit field in the database.
+	FieldRpmLimit = "rpm_limit"
+	// FieldEffectiveAt holds the string denoting the effective_at field in the database.
+	FieldEffectiveAt = "effective_at"
 	// FieldRateLimit5h holds the string denoting the rate_limit_5h field in the database.
 	FieldRateLimit5h = "rate_limit_5h"
 	// FieldRateLimit1d holds the string denoting the rate_limit_1d field in the database.
@@ -109,6 +117,10 @@ var Columns = []string{
 	FieldQuota,
 	FieldQuotaUsed,
 	FieldExpiresAt,
+	FieldConcurrencyRequest,
+	FieldConcurrencyLimit,
+	FieldRpmLimit,
+	FieldEffectiveAt,
 	FieldRateLimit5h,
 	FieldRateLimit1d,
 	FieldRateLimit7d,
@@ -156,6 +168,12 @@ var (
 	DefaultQuota float64
 	// DefaultQuotaUsed holds the default value on creation for the "quota_used" field.
 	DefaultQuotaUsed float64
+	// DefaultConcurrencyRequest holds the default value on creation for the "concurrency_request" field.
+	DefaultConcurrencyRequest int
+	// DefaultConcurrencyLimit holds the default value on creation for the "concurrency_limit" field.
+	DefaultConcurrencyLimit int
+	// DefaultRpmLimit holds the default value on creation for the "rpm_limit" field.
+	DefaultRpmLimit int
 	// DefaultRateLimit5h holds the default value on creation for the "rate_limit_5h" field.
 	DefaultRateLimit5h float64
 	// DefaultRateLimit1d holds the default value on creation for the "rate_limit_1d" field.
@@ -236,6 +254,26 @@ func ByQuotaUsed(opts ...sql.OrderTermOption) OrderOption {
 // ByExpiresAt orders the results by the expires_at field.
 func ByExpiresAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldExpiresAt, opts...).ToFunc()
+}
+
+// ByConcurrencyRequest orders the results by the concurrency_request field.
+func ByConcurrencyRequest(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldConcurrencyRequest, opts...).ToFunc()
+}
+
+// ByConcurrencyLimit orders the results by the concurrency_limit field.
+func ByConcurrencyLimit(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldConcurrencyLimit, opts...).ToFunc()
+}
+
+// ByRpmLimit orders the results by the rpm_limit field.
+func ByRpmLimit(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRpmLimit, opts...).ToFunc()
+}
+
+// ByEffectiveAt orders the results by the effective_at field.
+func ByEffectiveAt(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldEffectiveAt, opts...).ToFunc()
 }
 
 // ByRateLimit5h orders the results by the rate_limit_5h field.
