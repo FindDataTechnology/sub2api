@@ -9,6 +9,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 // 凭据落盘加密的列派生逻辑（阶段一：双写）。
@@ -28,9 +29,13 @@ var credentialMetaWhitelist = map[string]struct{}{
 	"account_mode": {},
 }
 
-// credentialCryptoColumns 是一条账号写入需要落到新列上的四个值。
+// CredentialCryptoColumns 是一条账号写入需要落到新列上的四个值。
 // 指针为 nil 表示该列写 NULL（尚未迁移 / 未配置加密器）。
-type credentialCryptoColumns struct {
+//
+// 导出是为了让存量回填工具（cmd/credential-backfill）复用**完全同一套**派生逻辑：
+// 回填与运行时如果各算各的，哈希就会对不上，而那种不一致只会表现为
+// "乐观并发莫名总是判定已变更"。
+type CredentialCryptoColumns struct {
 	Meta       map[string]any // credentials_meta：白名单子键的明文副本，永远写
 	Encrypted  *string        // credentials_encrypted：AES-256-GCM 密文，无 cryptor 时为 nil
 	Hash       *string        // credentials_hash：sha256(规范化明文)，永远写
@@ -83,24 +88,37 @@ func credentialAPIKeyHash(credentials map[string]any) *string {
 //
 // cryptor 为 nil 时只跳过加密列（其余三列照写：meta 和两个指纹都不需要密钥，
 // 提前写入能让阶段二的 SQL 改写有数据可依）。
-func (r *accountRepository) credentialCryptoColumnsFor(credentials map[string]any) (credentialCryptoColumns, error) {
+func (r *accountRepository) credentialCryptoColumnsFor(credentials map[string]any) (CredentialCryptoColumns, error) {
+	return CredentialCryptoColumnsFor(credentials, r.cryptorOrNil())
+}
+
+// cryptorOrNil 让 nil 仓储也能安全取 cryptor（测试与只读路径会传 nil 仓储）。
+func (r *accountRepository) cryptorOrNil() service.SecretEncryptor {
+	if r == nil {
+		return nil
+	}
+	return r.cryptor
+}
+
+// CredentialCryptoColumnsFor 是派生逻辑的**唯一实现**，供仓储写路径与存量回填共用。
+func CredentialCryptoColumnsFor(credentials map[string]any, cryptor service.SecretEncryptor) (CredentialCryptoColumns, error) {
 	canonical, err := canonicalCredentialJSON(credentials)
 	if err != nil {
-		return credentialCryptoColumns{}, err
+		return CredentialCryptoColumns{}, err
 	}
 	hash := sha256Hex(canonical)
 
-	columns := credentialCryptoColumns{
+	columns := CredentialCryptoColumns{
 		Meta:       credentialMetaSubset(credentials),
 		Hash:       &hash,
 		APIKeyHash: credentialAPIKeyHash(credentials),
 	}
-	if r == nil || r.cryptor == nil {
+	if cryptor == nil {
 		return columns, nil
 	}
-	encrypted, err := r.cryptor.Encrypt(string(canonical))
+	encrypted, err := cryptor.Encrypt(string(canonical))
 	if err != nil {
-		return credentialCryptoColumns{}, err
+		return CredentialCryptoColumns{}, err
 	}
 	columns.Encrypted = &encrypted
 	return columns, nil
