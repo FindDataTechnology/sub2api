@@ -213,6 +213,27 @@ func credentialAPIKeyHashHexes(apiKeys []string) []string {
 	return out
 }
 
+// credentialHasRefreshToken 判断凭据里是否有非空 refresh_token。
+//
+// **必须与 SQL 侧 `NULLIF(BTRIM(credentials->>'refresh_token'), '') IS NULL` 的反面逐字等价**，
+// 因为这个判定现在由 Go 承担（见 SetGrokOAuthErrorIfCredentialsUnchanged 的等价改写）。
+// 对齐的细节：
+//   - 键缺失 / 值为 JSON null  -> `->>` 得 SQL NULL -> 视为"没有"
+//   - 字符串                   -> BTRIM 去首尾空白后非空才算"有"
+//   - 其它类型（数字/布尔/对象/数组）-> `->>` 得到非空的文本表示 -> 视为"有"
+//     例如 refresh_token: 123 在 SQL 下得到 '123'，BTRIM 后非空；这里也必须判 true，
+//     否则 Go 与 SQL 会给出相反结论（那种不一致表现为"有些账号能刷新、有些不能"）。
+func credentialHasRefreshToken(credentials map[string]any) bool {
+	raw, ok := credentials["refresh_token"]
+	if !ok || raw == nil {
+		return false
+	}
+	if text, isString := raw.(string); isString {
+		return strings.TrimSpace(text) != ""
+	}
+	return true
+}
+
 // credentialAPIKeyHashArg 返回可直接当 SQL 参数用的 api_key 指纹：
 // 有 api_key → hex 字符串；没有 → **无类型 nil**（SQL NULL）。
 //

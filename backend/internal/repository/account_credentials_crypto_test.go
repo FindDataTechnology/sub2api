@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -193,4 +194,69 @@ func credentialHashOfJSONString(raw string) string {
 		panic("credentialHashOfJSONString: 测试里的 JSON 字面量不合法: " + err.Error())
 	}
 	return credentialHashHex(decoded)
+}
+
+// 站点 B 的等价改写测试（见 REPORT-refresh-token-presence.md §1）。
+//
+// 原 SQL 在 `credentials_hash = sha256(入参)` 之外还要求"行上的 refresh_token 为空"。
+// 前者成立时后者是入参的纯函数，所以可以在 Go 侧提前返回。这组测试守两件事：
+// 判定本身的语义与 SQL 逐字等价，以及提前返回时**一次 SQL 都不发**。
+
+func TestCredentialHasRefreshToken_MatchesSQLSemantics(t *testing.T) {
+	cases := []struct {
+		name string
+		cred map[string]any
+		want bool
+	}{
+		{"键缺失", map[string]any{"access_token": "a"}, false},
+		{"值为 JSON null", map[string]any{"refresh_token": nil}, false},
+		{"空串", map[string]any{"refresh_token": ""}, false},
+		{"只有空白", map[string]any{"refresh_token": " \t\n "}, false},
+		{"正常值", map[string]any{"refresh_token": "rt-1"}, true},
+		// 下面两类是 SQL 侧 `->>` 会把非字符串值转成非空文本的情形。
+		// 若这里判 false，Go 与 SQL 会给出相反结论——表现为"有些账号能刷新、有些不能"。
+		{"数字", map[string]any{"refresh_token": 123}, true},
+		{"布尔", map[string]any{"refresh_token": false}, true},
+		{"空对象", map[string]any{"refresh_token": map[string]any{}}, true},
+		{"空数组", map[string]any{"refresh_token": []any{}}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, credentialHasRefreshToken(tc.cred))
+		})
+	}
+}
+
+// 入参带非空 refresh_token 时：必须直接返回 (false, nil)，且**不发任何 SQL**。
+// 这正是原 SQL 里那条谓词恒假、影响 0 行的等价表现。
+func TestSetGrokOAuthErrorIfCredentialsUnchanged_NonEmptyRefreshTokenShortCircuits(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+	applied, err := repo.SetGrokOAuthErrorIfCredentialsUnchanged(
+		context.Background(),
+		42,
+		map[string]any{"refresh_token": "rt-still-valid", "_token_version": int64(3)},
+		"boom",
+	)
+	require.NoError(t, err)
+	require.False(t, applied, "refresh_token 非空时该变更不适用，与原 SQL 0 行受影响一致")
+	require.Empty(t, exec.execQueries, "必须一次 SQL 都不发（提前返回）")
+}
+
+// 反向保证：入参 refresh_token 为空时，仍然照常发 SQL。
+// 没有这条，"永远不发 SQL" 的错误实现也会让上面那条测试绿。
+func TestSetGrokOAuthErrorIfCredentialsUnchanged_EmptyRefreshTokenStillRunsSQL(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+	applied, err := repo.SetGrokOAuthErrorIfCredentialsUnchanged(
+		context.Background(),
+		42,
+		map[string]any{"access_token": "a", "_token_version": int64(3)},
+		"boom",
+	)
+	require.NoError(t, err)
+	require.True(t, applied)
+	require.Len(t, exec.execQueries, 1, "入参没有 refresh_token 时行为必须与改动前一致")
 }

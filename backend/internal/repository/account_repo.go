@@ -1622,6 +1622,16 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 	if r == nil || r.sql == nil {
 		return false, errors.New("account repository SQL executor is not configured")
 	}
+	// 等价改写（原 SQL 里这条谓词是冗余的，见 REPORT-refresh-token-presence.md §1）：
+	// 语句已要求 `a.credentials_hash = sha256(expectedCredentials)`，命中即意味着行上的
+	// 文档就是 expectedCredentials，于是"refresh_token 是否为空"完全由入参决定——
+	// 它是入参的纯函数，与数据库里的那一行无关。
+	//   - 入参 refresh_token 非空  -> 原谓词恒假 -> 0 行受影响 -> 返回 (false, nil)
+	//   - 入参 refresh_token 为空  -> 原谓词恒真 -> 行为完全不变
+	// 提前返回省一次往返，也让这条语句不再依赖明文列（阶段四 drop 明文的前提）。
+	if credentialHasRefreshToken(expectedCredentials) {
+		return false, nil
+	}
 	expectedJSON, err := json.Marshal(normalizeJSONMap(expectedCredentials))
 	if err != nil {
 		return false, err
@@ -1639,7 +1649,6 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 			AND a.type = $5
 			AND a.status = $6
 			AND a.credentials_hash = $9
-			AND NULLIF(BTRIM(a.credentials->>'refresh_token'), '') IS NULL
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
