@@ -201,7 +201,7 @@ func TestBuildCapabilitiesMedia(t *testing.T) {
 		AllowImageGeneration:      true,
 		AllowBatchImageGeneration: false,
 		VideoModelPrices: map[string]map[string]float64{
-			"seedance-pro": {"720p": 0.1},
+			"seedance-pro":  {"720p": 0.1},
 			"seedance-lite": {"480p": 0.05},
 		},
 	})
@@ -261,3 +261,76 @@ func TestServeCapabilities_NoPriceOrMultiplierKeys(t *testing.T) {
 }
 
 func float64Ptr(v float64) *float64 { return &v }
+
+// ── 容量契约：有效上限必须如实暴露（add-key-capacity-contract）─────────────
+
+func TestEffectiveLimit_PicksStricterAndNamesSource(t *testing.T) {
+	cases := []struct {
+		name      string
+		keyLimit  int
+		poolLimit int
+		want      int
+		wantSrc   string
+	}{
+		{"都不限", 0, 0, 0, "unlimited"},
+		{"只有 key", 2, 0, 2, "key"},
+		{"只有池", 0, 5, 5, "user"},
+		{"key 更严", 2, 5, 2, "key"},
+		{"池更严", 8, 5, 5, "user"},
+		{"相等归 key", 5, 5, 5, "key"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, src := effectiveLimit(tc.keyLimit, tc.poolLimit)
+			require.Equal(t, tc.want, got)
+			require.Equal(t, tc.wantSrc, src)
+		})
+	}
+}
+
+func TestCapabilitiesLimits_NeverClaimsUnlimitedWhenPoolCaps(t *testing.T) {
+	// 这是最关键的一条：key 列 0 但 user 池 5，必须报 5 + user。
+	// 报"不限"就是骗人 —— 调用方会按不限规划并发然后撞 429。
+	apiKey := &service.APIKey{
+		User: &service.User{Concurrency: 5},
+	}
+	limits := buildCapabilitiesLimits(apiKey)
+
+	require.Equal(t, 5, limits.EffectiveConcurrencyLimit)
+	require.Equal(t, "user", limits.LimitSource)
+	require.NotEqual(t, "unlimited", limits.LimitSource, "池有限制时不得声称不限")
+}
+
+func TestCapabilitiesLimits_KeyLimitWins(t *testing.T) {
+	apiKey := &service.APIKey{
+		ConcurrencyRequest: 1,
+		ConcurrencyLimit:   2,
+		User:               &service.User{Concurrency: 10},
+	}
+	limits := buildCapabilitiesLimits(apiKey)
+
+	require.Equal(t, 2, limits.EffectiveConcurrencyLimit)
+	require.Equal(t, "key", limits.LimitSource)
+	require.Equal(t, 1, limits.ConcurrencyRequest)
+}
+
+func TestCapabilitiesLimits_BackwardCompatibleDefaults(t *testing.T) {
+	// 存量 key（0/0，user 不限）必须仍是 unlimited，行为零变化
+	limits := buildCapabilitiesLimits(&service.APIKey{User: &service.User{Concurrency: 0}})
+	require.Equal(t, 0, limits.EffectiveConcurrencyLimit)
+	require.Equal(t, "unlimited", limits.LimitSource)
+	require.Nil(t, limits.EffectiveAt)
+}
+
+func TestCapabilitiesLimits_RPMLimitTakesStricter(t *testing.T) {
+	limits := buildCapabilitiesLimits(&service.APIKey{
+		RPMLimit: 100,
+		User:     &service.User{RPMLimit: 60},
+	})
+	require.Equal(t, 60, limits.EffectiveRPMLimit, "取两层中更严的速率")
+}
+
+func TestCapabilitiesLimits_RPMUnlimitedWhenBothZero(t *testing.T) {
+	limits := buildCapabilitiesLimits(&service.APIKey{User: &service.User{}})
+	require.Equal(t, 0, limits.EffectiveRPMLimit)
+}
