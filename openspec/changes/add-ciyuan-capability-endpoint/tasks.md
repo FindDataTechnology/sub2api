@@ -24,10 +24,12 @@
   三条用例（白名单孤儿 → `allowlist`、无映射回落 → `platform_default`、白名单关闭 → 同 default 口径）
 - [x] 2.3 `kind` 只标可确定的（`service.IsEmbeddingModelID` → `embedding`，其余 `unknown`）——验证：
   `TestModelKind`；**不出现**猜出来的 chat/image/video
-- [ ] 2.4 key 未绑分组时走全量 `ListSchedulable` 口径、`allowlist_enabled=false`——**实现已落**
-  （`LanesCapabilityModels` 在 `apiKey.Group == nil` 时 `groupID=nil` → `ListSchedulable`；
-  `buildCapabilitiesKey` 不填 group 段）；**单测未落**：该分支在 handler 包，`GatewayService` 无现成 fake，
-  需连带造一个 gateway fake 才能断言。留给 PR 评审时决定「补 fake」还是「接受构造性论证」
+- [x] 2.4 key 未绑分组时走全量 `ListSchedulable` 口径、`allowlist_enabled=false`——验证：
+  `TestLanesCapabilityModels_UnboundKeyFallsBackToAllSchedulable`（断言 `groupID=nil` 时看到全量账号映射而非空集）、
+  `TestLanesCapabilityModels_NilServiceDegrades`（网关服务缺失 → 双 nil 不 panic）。
+  **这个测试当场逮到真缺口**：既有 `gatewayModelsAccountRepoStub` 只实现了 `ListSchedulableByGroupID`，
+  嵌入的 `AccountRepository` 是 nil 接口 → 未绑分组分支一跑就 SIGSEGV。补 `ListSchedulable` 后转绿，
+  证明该分支此前**从未被执行过**（不是「测过了」）
 
 ## 3. 车道 / 媒体 / 额度
 
