@@ -148,7 +148,7 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	if scoped := r.accountTransactionScope(ctx); scoped != r {
 		return scoped.Create(ctx, account)
 	}
-	if err := createAccountRecord(ctx, r.client, account); err != nil {
+	if err := createAccountRecord(ctx, r.client, account, r); err != nil {
 		return err
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
@@ -157,9 +157,16 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	return nil
 }
 
-func createAccountRecord(ctx context.Context, client *dbent.Client, account *service.Account) error {
+// createAccountRecord 创建账号行。cryptor 为 nil 时新列只落 meta 与两个指纹、
+// 密文列写 NULL——这正是加解密改造前的行为，所以调用方传 nil 等价于旧逻辑。
+func createAccountRecord(ctx context.Context, client *dbent.Client, account *service.Account, crypto *accountRepository) error {
 	if account == nil {
 		return service.ErrAccountNilInput
+	}
+
+	credColumns, err := crypto.credentialCryptoColumnsFor(account.Credentials)
+	if err != nil {
+		return err
 	}
 
 	builder := client.Account.Create().
@@ -168,6 +175,10 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		SetPlatform(account.Platform).
 		SetType(account.Type).
 		SetCredentials(normalizeJSONMap(account.Credentials)).
+		SetCredentialsMeta(credColumns.Meta).
+		SetNillableCredentialsEncrypted(credColumns.Encrypted).
+		SetNillableCredentialsHash(credColumns.Hash).
+		SetNillableCredentialsAPIKeyHash(credColumns.APIKeyHash).
 		SetExtra(normalizeJSONMap(account.Extra)).
 		SetConcurrency(account.Concurrency).
 		SetPriority(account.Priority).
@@ -254,7 +265,7 @@ func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account
 		return err
 	}
 
-	if err := createAccountRecord(ctx, txClient, account); err != nil {
+	if err := createAccountRecord(ctx, txClient, account, r); err != nil {
 		return err
 	}
 	if len(groups) > 0 {
@@ -562,12 +573,23 @@ func (r *accountRepository) updateLockedAccount(
 		schedulable = false
 	}
 
+	// 双写：明文列照旧写，同时刷新 meta / 两个指纹 / 密文。
+	// cryptor 为 nil（测试或未配置）时**显式清空密文列**而不是留着不动——
+	// 留着会留下"明文已改、密文是旧的"的行，阶段二按密文读就会读到过期凭据。
+	credColumns, err := r.credentialCryptoColumnsFor(account.Credentials)
+	if err != nil {
+		return nil, err
+	}
+
 	builder := client.Account.UpdateOneID(account.ID).
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
 		SetPlatform(account.Platform).
 		SetType(account.Type).
 		SetCredentials(normalizeJSONMap(account.Credentials)).
+		SetCredentialsMeta(credColumns.Meta).
+		SetNillableCredentialsHash(credColumns.Hash).
+		SetNillableCredentialsAPIKeyHash(credColumns.APIKeyHash).
 		SetExtra(extra).
 		SetConcurrency(account.Concurrency).
 		SetPriority(account.Priority).
@@ -575,6 +597,12 @@ func (r *accountRepository) updateLockedAccount(
 		SetErrorMessage(account.ErrorMessage).
 		SetSchedulable(schedulable).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
+
+	if credColumns.Encrypted != nil {
+		builder.SetCredentialsEncrypted(*credColumns.Encrypted)
+	} else {
+		builder.ClearCredentialsEncrypted()
+	}
 
 	if explicitRateMultiplier != nil {
 		builder.SetRateMultiplier(*explicitRateMultiplier)
@@ -1660,10 +1688,23 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 	if err != nil {
 		return false, err
 	}
+	// 双写派生列。这是整份替换（不是合并），所以派生值可以在这里算准。
+	credColumns, err := r.credentialCryptoColumnsFor(credentials)
+	if err != nil {
+		return false, err
+	}
+	metaJSON, err := json.Marshal(credColumns.Meta)
+	if err != nil {
+		return false, err
+	}
 	result, err := r.sql.ExecContext(ctx, `
 		WITH updated AS (
 		UPDATE accounts AS a
 		SET credentials = $1::jsonb,
+			credentials_meta = $8::jsonb,
+			credentials_encrypted = $9,
+			credentials_hash = $10,
+			credentials_api_key_hash = $11,
 			updated_at = NOW()
 		WHERE a.id = $2
 			AND a.deleted_at IS NULL
@@ -1683,6 +1724,10 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 		string(expectedJSON),
 		expectedProxyID,
 		service.SchedulerOutboxEventAccountChanged,
+		metaJSON,
+		credColumns.Encrypted,
+		credColumns.Hash,
+		credColumns.APIKeyHash,
 	)
 	if err != nil {
 		return false, err
@@ -3164,6 +3209,17 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb")
 		args = append(args, payload)
 		idx++
+		// 这里是 SQL 侧合并，Go 拿不到"合并后的完整文档"，所以派生列在这里
+		// **无法算出真值**。显式置回"未派生"状态：密文与两个指纹置 NULL、
+		// meta 置空对象。读路径据此回落明文列；留着过期的派生值比置空危险得多
+		// ——那会让阶段二按密文读到一份和明文不一致的旧凭据。
+		// 阶段二会把这段改成事务内 SELECT ... FOR UPDATE + Go 端合并，届时算出真值。
+		setClauses = append(setClauses,
+			"credentials_meta = '{}'::jsonb",
+			"credentials_encrypted = NULL",
+			"credentials_hash = NULL",
+			"credentials_api_key_hash = NULL",
+		)
 	}
 
 	ollamaGroupIdentityChanges := make([]string, 0, 2)
