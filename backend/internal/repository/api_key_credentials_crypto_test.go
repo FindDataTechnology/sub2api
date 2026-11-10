@@ -147,3 +147,76 @@ func TestAPIKeyRepository_DeleteRewritesDerivedColumns(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, decrypted, "__deleted__")
 }
+
+// ── 3.5b：鉴权查找改按 key_hash ──────────────────────────────────────────────
+//
+// 这组测试守三条互补的语义，任何一条退化成"查不到"或"都能查到"都是事故。
+
+func TestLookupAPIKey_HashPathFindsKey(t *testing.T) {
+	cryptor := credentialTestEncryptor(t)
+	repo, _ := apiKeyScratchRepo(t, cryptor)
+	ctx := context.Background()
+
+	key := &service.APIKey{UserID: 1, Key: "sk-hash-hit", Name: "k", Status: service.StatusActive}
+	require.NoError(t, repo.Create(ctx, key))
+
+	found, err := repo.GetByKeyForAuth(ctx, "sk-hash-hit")
+	require.NoError(t, err)
+	require.Equal(t, key.ID, found.ID)
+	require.Equal(t, "sk-hash-hit", found.Key, "命中后返回体仍带明文（调用方要拿它做掩码/日志）")
+}
+
+func TestLookupAPIKey_WrongKeyNotFound(t *testing.T) {
+	cryptor := credentialTestEncryptor(t)
+	repo, _ := apiKeyScratchRepo(t, cryptor)
+	ctx := context.Background()
+
+	key := &service.APIKey{UserID: 1, Key: "sk-right", Name: "k", Status: service.StatusActive}
+	require.NoError(t, repo.Create(ctx, key))
+
+	_, err := repo.GetByKeyForAuth(ctx, "sk-wrong")
+	require.ErrorIs(t, err, service.ErrAPIKeyNotFound, "错 key 必须查不到")
+}
+
+// 指纹为 NULL 的行（回填窗口内）仍必须能认证到，且计数 +1。
+func TestLookupAPIKey_FallsBackWhenHashMissing(t *testing.T) {
+	cryptor := credentialTestEncryptor(t)
+	repo, db := apiKeyScratchRepo(t, cryptor)
+	ctx := context.Background()
+
+	key := &service.APIKey{UserID: 1, Key: "sk-legacy", Name: "k", Status: service.StatusActive}
+	require.NoError(t, repo.Create(ctx, key))
+	// 模拟"回填还没跑到这一行"
+	_, err := db.Exec(`UPDATE api_keys SET key_hash = NULL WHERE id = $1`, key.ID)
+	require.NoError(t, err)
+
+	resetAPIKeyPlaintextLookupFallbackCount()
+	found, err := repo.GetByKeyForAuth(ctx, "sk-legacy")
+	require.NoError(t, err)
+	require.Equal(t, key.ID, found.ID)
+	require.Equal(t, int64(1), APIKeyPlaintextLookupFallbackCount(), "回落必须可见")
+}
+
+// **最严的一条**：指纹命中但明文不等 —— 必须拒绝，且**不许**再回落明文给它第二次机会。
+// 若回落，一条"指纹算错/人工改库"的坏行就会变成可认证。
+func TestLookupAPIKey_HashMatchButPlaintextDiffersIsRejected(t *testing.T) {
+	cryptor := credentialTestEncryptor(t)
+	repo, db := apiKeyScratchRepo(t, cryptor)
+	ctx := context.Background()
+
+	key := &service.APIKey{UserID: 1, Key: "sk-victim", Name: "k", Status: service.StatusActive}
+	require.NoError(t, repo.Create(ctx, key))
+
+	// 模拟"指纹过期"：明文被改（例如人工改库/旧写入漏带指纹），但 key_hash 仍指向旧值。
+	// 注意不能改成"两行共享同一指纹"——key_hash 上有唯一索引，那样根本写不进去。
+	_, err := db.Exec(`UPDATE api_keys SET key = 'sk-rotated-out-of-band' WHERE id = $1`, key.ID)
+	require.NoError(t, err)
+
+	resetAPIKeyPlaintextLookupFallbackCount()
+	// 用**旧** key 查：指纹仍能命中这一行，但明文已经不是它了 ⇒ 必须拒绝
+	_, lookupErr := repo.GetByKeyForAuth(ctx, "sk-victim")
+	require.ErrorIs(t, lookupErr, service.ErrAPIKeyNotFound,
+		"指纹命中但明文不等时必须判查不到，绝不放行")
+	require.Zero(t, APIKeyPlaintextLookupFallbackCount(),
+		"这种情况也不能回落明文——否则等于给它第二次命中机会")
+}
