@@ -181,7 +181,7 @@ func TestListOllamaCloudUsageGroupAccountsUsesOneStrictBatchQuery(t *testing.T) 
 	require.Contains(t, query, "credentials ->> 'api_key' = ANY($1)")
 	require.Contains(t, query, "platform IN ('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek', 'minimax')")
 	require.Contains(t, query, "jsonb_typeof(credentials -> 'api_key') = 'string'")
-	require.Contains(t, query, ollamaCloudBaseURLMatchesSQL("credentials ->> 'base_url'"))
+	require.Contains(t, query, ollamaCloudBaseURLMatchesSQL("credentials_meta ->> 'base_url'"))
 	require.NotContains(t, query, "~*")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -209,7 +209,7 @@ func TestListDueOllamaCloudUsageAccountsFiltersOrdersAndLimits(t *testing.T) {
 		"status = 'active'",
 		"platform IN ('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek', 'minimax')",
 		"type = 'apikey'",
-		ollamaCloudBaseURLMatchesSQL("credentials ->> 'base_url'"),
+		ollamaCloudBaseURLMatchesSQL("credentials_meta ->> 'base_url'"),
 		"jsonb_typeof(extra -> 'ollama_cloud_usage_session') = 'string'",
 		`extra @> '{"ollama_cloud_usage_auto_refresh": true}'::jsonb`,
 		"MAX(last_used_at) AS group_last_used_at",
@@ -248,7 +248,12 @@ func TestBulkUpdateOllamaIdentityCleanupIsValueConditional(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, exec.execQueries)
 	query := normalizeSQLWhitespace(exec.execQueries[0])
-	require.Contains(t, query, "NOT ("+ollamaCloudBaseURLMatchesSQL("credentials ->> 'base_url'"))
+	// 2.3：base_url 改从 credentials_meta 取。这里同时断言"不许再出现旧的列引用"，
+	// 避免有人只改一边、或回退时这条测试仍然绿。
+	// 谓词语义是否等价，由 credential_sql_diff_test.go 的真 PG 差分承担——
+	// 文本断言本身证明不了"选中同一批行"。
+	require.NotContains(t, query, "credentials ->> 'base_url'")
+	require.Contains(t, query, "NOT ("+ollamaCloudBaseURLMatchesSQL("credentials_meta ->> 'base_url'"))
 	require.Contains(t, query, ollamaCloudBaseURLMatchesSQL("$1::jsonb ->> 'base_url'"))
 	require.NotContains(t, query, "~*")
 	require.Contains(t, query, "platform IN ('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek', 'minimax') AND type = 'apikey'")

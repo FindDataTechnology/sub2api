@@ -22,7 +22,7 @@ const (
 	ollamaCloudUsageEligibleSQL  = `
 	platform IN (` + ollamaCloudUsagePlatformsSQL + `)
 	AND type = 'apikey'
-	AND ` + ollamaCloudBaseURLMatchSQLPrefix + `credentials ->> 'base_url'` + ollamaCloudBaseURLMatchSQLSuffix + `
+	AND ` + ollamaCloudBaseURLMatchSQLPrefix + `credentials_meta ->> 'base_url'` + ollamaCloudBaseURLMatchSQLSuffix + `
 	AND jsonb_typeof(credentials -> 'api_key') = 'string'
 `
 )
