@@ -3,12 +3,15 @@ package repository
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,9 +57,12 @@ func TestCredentialMetaSubset_OnlyWhitelistedKeys(t *testing.T) {
 	}
 	got := credentialMetaSubset(creds)
 
+	// has_refresh_token 是**派生事实**（该凭据带 refresh_token: "rt"），
+	// 不属于"从凭据复制的子键"，但同样要出现在 meta 里。
 	require.Equal(t, map[string]any{
-		"base_url":     "https://api.example.com",
-		"account_mode": "zen",
+		"base_url":          "https://api.example.com",
+		"account_mode":      "zen",
+		"has_refresh_token": true,
 	}, got)
 
 	// 反向断言：白名单外的键一个都不许出现（用逐个检查，避免将来白名单扩大时
@@ -67,12 +73,14 @@ func TestCredentialMetaSubset_OnlyWhitelistedKeys(t *testing.T) {
 	}
 }
 
-// TestCredentialMetaSubset_ReturnsEmptyMapNotNil 列是 NOT NULL DEFAULT '{}'，
-// 返回 nil 会把整份 meta 清空（显式 NULL 会违反非空约束）。
-func TestCredentialMetaSubset_ReturnsEmptyMapNotNil(t *testing.T) {
+// TestCredentialMetaSubset_AlwaysCarriesDerivedFlag：即使凭据里没有任何白名单子键，
+// meta 也必须带派生事实，且不能返回 nil（显式 NULL 会违反非空约束）。
+func TestCredentialMetaSubset_AlwaysCarriesDerivedFlag(t *testing.T) {
 	got := credentialMetaSubset(map[string]any{"api_key": "sk-x"})
 	require.NotNil(t, got)
-	require.Empty(t, got)
+	// 不含任何凭据子键（api_key 是密钥、不许进明文列），但**始终**带派生事实。
+	// 列是 NOT NULL DEFAULT '{}'，返回 nil 会把整份 meta 清空。
+	require.Equal(t, map[string]any{"has_refresh_token": false}, got)
 }
 
 // TestCredentialHash_IsKeyOrderIndependent 乐观并发比较依赖"内容相同 ⇒ 哈希相同"。
@@ -131,7 +139,7 @@ func TestCredentialCryptoColumnsFor_NilCryptorStillWritesDerivedColumns(t *testi
 	require.NotNil(t, columns.Hash)
 	require.Equal(t, sha256OfJSON(t, creds), *columns.Hash)
 	require.NotNil(t, columns.APIKeyHash)
-	require.Equal(t, map[string]any{"base_url": "https://x"}, columns.Meta)
+	require.Equal(t, map[string]any{"base_url": "https://x", "has_refresh_token": true}, columns.Meta)
 }
 
 // TestCredentialCryptoColumnsFor_WithCryptorRoundTrips 有加密器时必须真加密，
@@ -259,4 +267,42 @@ func TestSetGrokOAuthErrorIfCredentialsUnchanged_EmptyRefreshTokenStillRunsSQL(t
 	require.NoError(t, err)
 	require.True(t, applied)
 	require.Len(t, exec.execQueries, 1, "入参没有 refresh_token 时行为必须与改动前一致")
+}
+
+// TestListOAuthRefreshCandidatePage_UsesMetaDerivedFlag（站点 A 方案 ①）
+//
+// 这条只证明"SQL 里确实换成了读 meta 的派生事实"——差分仪器证明的是"语义没变"，
+// 两者缺一不可：只跑差分的话，代码完全没改也会绿。
+func TestListOAuthRefreshCandidatePage_UsesMetaDerivedFlag(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
+	exec.queryRows = emptyQueryRowsMatching(t, "(?s)SELECT")
+	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+	_, _ = repo.ListOAuthRefreshCandidatePage(context.Background(), service.OAuthRefreshPageOptions{
+		Platforms:           []string{service.PlatformGrok},
+		Limit:               10,
+		RequireRefreshToken: true,
+	})
+
+	require.NotEmpty(t, exec.queryQueries, "应当发出一次候选查询")
+	query := normalizeSQLWhitespace(exec.queryQueries[0])
+	require.Contains(t, query, `credentials_meta @> '{"has_refresh_token": true}'`)
+	// 反向锁：不许再残留**对 credentials 列**的 refresh_token 子键提取。
+	// 注意不能直接断言 "不含 refresh_token"：新的 meta key 名字里也带这个词
+	// （'{"has_refresh_token": true}'），断太宽会误伤自己。
+	require.NotContains(t, query, "credentials ? 'refresh_token'")
+	require.NotContains(t, query, "credentials->>'refresh_token'")
+}
+
+// emptyQueryRowsMatching 让 recordingSQLExecutor 的"回读/查询"返回空结果集，
+// 同时按 pattern 校验发出的 SQL（sqlmock 的默认 regexp matcher）。
+func emptyQueryRowsMatching(t *testing.T, pattern string) func(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectQuery(pattern).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	return func(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+		return db.QueryContext(ctx, query, args...)
+	}
 }

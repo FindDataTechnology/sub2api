@@ -52,14 +52,12 @@ func productionRepositorySources(t *testing.T) map[string]string {
 
 // TestCredentialSQLStructure_OnlyKnownSubkeySitesRemain 钉死剩余的子键提取清单。
 func TestCredentialSQLStructure_OnlyKnownSubkeySitesRemain(t *testing.T) {
-	allowed := map[string][]string{
-		// 站点 A：ListOAuthRefreshCandidatePage 的 refresh_token 过滤仍在——方案待裁决，
-		// 见 REPORT-refresh-token-presence.md §2。站点 B 那处已改成 Go 侧早返回，
-		// 所以这里只剩这一条。
-		"account_repo.go": {
-			"AND btrim(credentials->>'refresh_token') <> ''`",
-		},
-	}
+	// 站点 A（方案 ①）落地后，生产侧对 credentials 列的子键提取应当**归零**：
+	//   - api_key 的取值类 → 已改走指纹分组
+	//   - SetGrokOAuthError 那处 → 已改成 Go 侧早返回
+	//   - ListOAuthRefreshCandidatePage 那处 → 已读 credentials_meta 的派生事实
+	// 所以这里不再有白名单条目；新增任何一处都会让本测试变红。
+	allowed := map[string][]string{}
 
 	var unexpected []string
 	total := 0
@@ -93,9 +91,9 @@ func TestCredentialSQLStructure_OnlyKnownSubkeySitesRemain(t *testing.T) {
 	// 站点 A：ListOAuthRefreshCandidatePage 的 refresh_token 过滤仍在（待裁决方案，见
 	// REPORT-refresh-token-presence.md §2）。注意它的下一行 `credentials ? 'refresh_token'`
 	// 是另一条同源谓词，同样属白名单。
-	require.Equal(t, 1, total,
-		"剩余子键提取应为 1 处：ListOAuthRefreshCandidatePage 的 refresh_token 过滤。"+
-			"（SetGrokOAuthError 那处已改成 Go 侧早返回；api_key 的取值类已改走指纹分组）")
+	require.Equal(t, 0, total,
+		"生产侧对 credentials 列的子键提取应当归零——这是阶段四 drop 明文列的前置。"+
+			"（三处已分别改走指纹分组 / Go 侧早返回 / meta 派生事实；新增任何一处都会变红）")
 }
 
 // TestCredentialSQLStructure_NoWholeDocumentComparisonsLeft 整文档等值比较必须清零。

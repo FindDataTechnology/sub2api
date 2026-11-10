@@ -314,8 +314,11 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T)
 	require.Contains(t, normalized, "platform = ANY($1)")
 	require.NotContains(t, normalized, "platform IN ('anthropic'",
 		"candidate platforms must come from the refresher registry instead of a second hard-coded list")
-	require.Contains(t, normalized, "credentials ? 'refresh_token'")
-	require.Contains(t, normalized, "btrim(credentials->>'refresh_token') <> ''")
+	// 站点 A 方案 ①：候选筛选改读 credentials_meta 里的派生事实（加密后密文不透明，
+	// SQL 无法判断密钥子键是否存在）。断言同时要求旧谓词不再出现。
+	require.Contains(t, normalized, `credentials_meta @> '{"has_refresh_token": true}'`)
+	require.NotContains(t, normalized, "credentials ? 'refresh_token'")
+	require.NotContains(t, normalized, "credentials->>'refresh_token'")
 	require.Contains(t, normalized, "temp_unschedulable_until > NOW()")
 	require.Contains(t, normalized, "temp_unschedulable_reason LIKE 'token refresh retry exhausted:%'")
 	require.Contains(t, normalized, "IS NOT TRUE",
