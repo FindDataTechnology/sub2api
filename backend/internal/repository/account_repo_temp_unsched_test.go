@@ -397,6 +397,13 @@ type recordingSQLExecutor struct {
 	afterExec   func()
 	execQueries []string
 	execArgs    [][]any
+
+	// queryRows / queryQueries / queryArgs 让需要"回读"的路径（BulkUpdate 合并后
+	// 重新推导派生列）在单测里也能跑。为 nil 时保持旧行为（返回 ErrNoRows），
+	// 这样不关心回读的既有用例完全不受影响。
+	queryRows    func(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	queryQueries []string
+	queryArgs    [][]any
 }
 
 func (e *recordingSQLExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
@@ -412,5 +419,25 @@ func (e *recordingSQLExecutor) ExecContext(ctx context.Context, query string, ar
 }
 
 func (e *recordingSQLExecutor) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if e.queryRows != nil {
+		e.queryQueries = append(e.queryQueries, query)
+		e.queryArgs = append(e.queryArgs, append([]any(nil), args...))
+		return e.queryRows(ctx, query, args...)
+	}
 	return nil, sql.ErrNoRows
+}
+
+// emptyCredentialQueryRows 让 recordingSQLExecutor 的"回读"返回**空结果集**而不是
+// ErrNoRows——真实执行器在"没有匹配行"时就是返回空结果集。
+// 返回 ErrNoRows 会让 BulkUpdate 的合并后推导误以为是故障。
+func emptyCredentialQueryRows(t *testing.T) func(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectQuery("SELECT id, credentials").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "credentials"}))
+	return func(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+		return db.QueryContext(ctx, query, args...)
+	}
 }

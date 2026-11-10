@@ -3207,6 +3207,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	// JSONB 需要合并而非覆盖，使用 raw SQL 保持旧行为。
 	credentialPlaceholder := ""
 	apiKeyHashPlaceholder := ""
+	deriveAfterMerge := false
 	if len(updates.Credentials) > 0 {
 		payload, err := json.Marshal(updates.Credentials)
 		if err != nil {
@@ -3224,14 +3225,12 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			args = append(args, credentialAPIKeyHashArg(updates.Credentials))
 			idx++
 		}
-		// 这里是 SQL 侧合并，Go 拿不到"合并后的完整文档"，所以派生列在这里
-		// **无法算出真值**。显式置回"未派生"状态：密文与两个指纹置 NULL、
-		// meta 置空对象。读路径据此回落明文列；留着过期的派生值比置空危险得多
-		// ——那会让阶段二按密文读到一份和明文不一致的旧凭据。
-		// 阶段二会把这段改成事务内 SELECT ... FOR UPDATE + Go 端合并，届时算出真值。
+		// 这里是 SQL 侧合并，Go 拿不到"合并后的完整文档"，所以派生列无法在**写之前**
+		// 算出真值。先置回"未派生"状态（保证不会留下与明文不一致的过期派生值），
+		// 合并语句执行后在同一事务里回读明文重新推导（见 deriveCredentialColumnsAfterMerge）。
+		deriveAfterMerge = true
 		setClauses = append(setClauses,
 			"credentials_meta = '{}'::jsonb",
-			"credentials_encrypted = NULL",
 			"credentials_hash = NULL",
 			"credentials_api_key_hash = NULL",
 		)
@@ -3402,6 +3401,13 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
+	}
+	if deriveAfterMerge {
+		// 同一事务内回读合并后的明文并重算派生列。失败必须整体回滚——
+		// 留下"明文已合并、派生列是空的"行会让阶段四之后读不到凭据。
+		if err := deriveCredentialColumnsAfterMerge(ctx, exec, r.cryptorOrNil(), ids); err != nil {
+			return 0, err
+		}
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {

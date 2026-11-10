@@ -245,6 +245,7 @@ func TestListDueOllamaCloudUsageAccountsFiltersOrdersAndLimits(t *testing.T) {
 
 func TestBulkUpdateOllamaIdentityCleanupIsValueConditional(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	exec.queryRows = emptyCredentialQueryRows(t)
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
