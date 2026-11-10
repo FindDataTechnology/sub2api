@@ -354,3 +354,129 @@ func TestMigration250_HasRefreshTokenMatchesPlaintext(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM accounts`).Scan(&rows))
 	require.Equal(t, 7, rows)
 }
+
+// TestBackfillRehearsal_ProductionScale 是阶段三 3.1/3.2 的**演练**：
+// 用生产规模的合成数据（accounts 49 行 / api_keys 167 行，形态按实测分布造）
+// 跑一遍回填，然后验证"抽样解密逐字节相等"与"NULL 计数为 0"这两条闸门。
+//
+// 为什么要在本机演练：生产上跑之前，唯一能提前发现"工具/密钥/形态"问题的地方
+// 就是这里。尤其要覆盖那些**看似空壳**的行（空凭据、只有 access_token 的 oauth、
+// 已 tombstone 的 key），它们在真实库里都会被回填碰到。
+func TestBackfillRehearsal_ProductionScale(t *testing.T) {
+	db := backfillDrillDB(t)
+	cryptor := credentialTestEncryptor(t)
+	ctx := context.Background()
+
+	// ── 造数据：形态对齐 2026-11-10 实测 ──
+	// 43 active（27 个 sk- 前缀 + 12 其他前缀 + 4 oauth token）+ 6 error 行
+	_, err := db.Exec(`
+		INSERT INTO accounts (id, platform, type, credentials)
+		SELECT g,
+			CASE WHEN g % 3 = 0 THEN 'openai' WHEN g % 3 = 1 THEN 'anthropic' ELSE 'grok' END,
+			CASE WHEN g % 7 = 0 THEN 'oauth' ELSE 'apikey' END,
+			CASE
+				WHEN g % 7 = 0 THEN jsonb_build_object(
+					'access_token', 'at-' || g,
+					'refresh_token', CASE WHEN g % 14 = 0 THEN 'rt-' || g ELSE '' END,
+					'_token_version', g)
+				WHEN g <= 27 THEN jsonb_build_object('api_key', 'sk-' || g, 'base_url', 'https://api' || g || '.example/v1')
+				WHEN g <= 39 THEN jsonb_build_object('api_key', 'key-' || g, 'account_mode', 'go',
+					'base_url', 'https://opencode.ai/zen/go')
+				ELSE '{}'::jsonb
+			END
+		FROM generate_series(1, 49) AS g;
+	`)
+	require.NoError(t, err)
+
+	// 167 个客户 key：164 有效 + 3 个空串（真实库里存在过的形态）
+	_, err = db.Exec(`
+		INSERT INTO api_keys (id, key)
+		SELECT g, CASE WHEN g <= 164 THEN 'sk-cust-' || g ELSE '' END
+		FROM generate_series(1, 167) AS g;
+	`)
+	require.NoError(t, err)
+
+	// 记录回填前的明文，用于事后逐字节比对
+	type snapshot struct {
+		id    int64
+		plain []byte
+	}
+	var accountPlain []snapshot
+	rows, err := db.Query(`SELECT id, credentials FROM accounts ORDER BY id`)
+	require.NoError(t, err)
+	for rows.Next() {
+		var s snapshot
+		require.NoError(t, rows.Scan(&s.id, &s.plain))
+		accountPlain = append(accountPlain, s)
+	}
+	require.NoError(t, rows.Err())
+	_ = rows.Close()
+	require.Len(t, accountPlain, 49)
+
+	// 前提断言：起点必须是"全部待回填"。若不成立，说明这条测试跑在脏库上
+	// （上一轮遗留 / 并行复用同一个库），后续所有数字都会失去意义——先红在这里更好查。
+	pendingBeforeA, pendingBeforeK, err := CountCredentialBackfillPending(ctx, db)
+	require.NoError(t, err)
+	require.Equal(t, int64(49), pendingBeforeA, "起点必须是全部待回填（脏库？）")
+	// 空 key 不计入待回填（它们没有可派生的东西），所以是 164 而非 167
+	require.Equal(t, int64(164), pendingBeforeK)
+
+	// ── 演练：dry-run 必须先"什么都不写" ──
+	dry, err := BackfillCredentialColumns(ctx, db, cryptor, CredentialBackfillOptions{DryRun: true})
+	require.NoError(t, err)
+	require.Equal(t, 49, dry.AccountsUpdated, "dry-run 要能报出将处理多少行")
+	// 3 个空 key 不产生指纹，dry-run 也把它们算作"跳过"，
+	// 所以这里报的是将**成功处理**的行数（164），不是表行数（167）。
+	require.Equal(t, 164, dry.APIKeysUpdated)
+	pendingA, pendingK, err := CountCredentialBackfillPending(ctx, db)
+	require.NoError(t, err)
+	require.Equal(t, int64(49), pendingA, "dry-run 不许写库")
+	require.Equal(t, int64(164), pendingK, "空 key 不在待回填集合里")
+
+	// ── 真跑 ──
+	res, err := BackfillCredentialColumns(ctx, db, cryptor, CredentialBackfillOptions{BatchSize: 20})
+	require.NoError(t, err)
+	require.Zero(t, res.AccountsFailed)
+	// 空 key 是"跳过"不是"失败"：算失败会让 CLI 退出 1 并卡住发布闸门。
+	require.Zero(t, res.APIKeysFailed)
+	// 空 key 现在被"待回填"判据排除，工具根本扫不到它们 ⇒ skipped 为 0。
+	// （Skipped 计数器保留作为防御：若 SELECT 与 UPDATE 之间 key 被清空，仍会记一次。）
+	require.Zero(t, res.APIKeysSkipped)
+	require.Equal(t, 49, res.AccountsUpdated)
+	require.Equal(t, 164, res.APIKeysUpdated, "3 个空 key 应被跳过（不产生指纹）")
+
+	// ── 闸门 1（3.2）：NULL 计数为 0 ──
+	var nullAccounts, nullKeys int
+	require.NoError(t, db.QueryRow(
+		`SELECT count(*) FROM accounts WHERE credentials_encrypted IS NULL OR credentials_hash IS NULL`).Scan(&nullAccounts))
+	require.NoError(t, db.QueryRow(
+		`SELECT count(*) FROM api_keys WHERE key_encrypted IS NULL OR key_hash IS NULL`).Scan(&nullKeys))
+	require.Zero(t, nullAccounts, "回填后 accounts 不应有缺派生列的行")
+	require.Equal(t, 3, nullKeys, "只有那 3 个空 key 允许无指纹/无密文")
+
+	// ── 闸门 2（3.1）：**逐行**解密并与回填前明文逐字节比对（不是抽样，是全量） ──
+	for _, s := range accountPlain {
+		var encrypted string
+		require.NoError(t, db.QueryRow(`SELECT credentials_encrypted FROM accounts WHERE id = $1`, s.id).Scan(&encrypted))
+		plaintext, err := cryptor.Decrypt(encrypted)
+		require.NoError(t, err, "account %d 密文必须可解", s.id)
+		require.JSONEq(t, string(s.plain), plaintext, "account %d 解密结果必须与回填前明文一致", s.id)
+	}
+
+	// ── 闸门 3：幂等，且密文不被重写（AES-GCM 非确定性，重写会让所有等值比较失效） ──
+	var firstCipher string
+	require.NoError(t, db.QueryRow(`SELECT credentials_encrypted FROM accounts WHERE id = 1`).Scan(&firstCipher))
+	again, err := BackfillCredentialColumns(ctx, db, cryptor, CredentialBackfillOptions{})
+	require.NoError(t, err)
+	require.Zero(t, again.AccountsScanned)
+	require.Zero(t, again.APIKeysScanned, "空 key 必须被排除在待回填之外，否则计数永远归不了零")
+
+	// 收尾自检必须归零：CLI 就是靠这个决定要不要 exit 1 拦住发布
+	finalA, finalK, err := CountCredentialBackfillPending(ctx, db)
+	require.NoError(t, err)
+	require.Zero(t, finalA)
+	require.Zero(t, finalK, "仍有待回填会把健康的库挡在发布门外")
+	var secondCipher string
+	require.NoError(t, db.QueryRow(`SELECT credentials_encrypted FROM accounts WHERE id = 1`).Scan(&secondCipher))
+	require.Equal(t, firstCipher, secondCipher)
+}
