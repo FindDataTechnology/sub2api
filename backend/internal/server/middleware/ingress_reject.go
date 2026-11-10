@@ -29,6 +29,9 @@ const (
 	IngressRejectInvalidAuthRateLimited IngressRejectReason = "invalid_auth_rate_limited"
 	IngressRejectAPIKeyAuthOverloaded   IngressRejectReason = "api_key_auth_overloaded"
 	IngressRejectModelNotAllowed        IngressRejectReason = "model_not_allowed"
+	// IngressRejectKeyCapacity：key 容量契约超限（add-key-capacity-contract）。
+	// 与"上游满"（账号池）区分开——这是调用方自己超了额度，归因在自己的 key/user 上。
+	IngressRejectKeyCapacity IngressRejectReason = "key_capacity_exceeded"
 )
 
 const ingressRejectReasonContextKey = "ingress_reject_reason"

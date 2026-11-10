@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -17,8 +18,43 @@ import (
 
 const maxAPIKeyAuthorizationHeaderBytes = service.MaxAPIKeyCredentialBytes + 128
 
+// capacityGate 是 key 容量闸（add-key-capacity-contract）。
+// 用包级注入而不是改构造函数签名：本中间件的构造点被大量测试使用，
+// 改签名会把无关测试一起卷进改动面。nil = 未装配 = fail-open（限流器故障不得全站 429）。
+var capacityGate *service.KeyCapacityGate
+
+// SetCapacityGate 由路由装配层在启动时注入一次。
+func SetCapacityGate(g *service.KeyCapacityGate) { capacityGate = g }
+
+// acquireKeyCapacity 返回 (是否放行, 归因层, release)。
+// 归因层取值 "" | "user" | "key" —— 直接进错误体，让调用方知道是哪一层挡的。
+func acquireKeyCapacity(apiKey *service.APIKey) (bool, string, func()) {
+	if apiKey == nil || capacityGate == nil {
+		return true, "", func() {}
+	}
+	var userID int64
+	var poolCap int
+	if apiKey.User != nil {
+		userID = apiKey.User.ID
+		poolCap = apiKey.User.Concurrency
+	}
+	decision, release := capacityGate.TryAcquireCapacity(userID, apiKey.ID, poolCap, apiKey.ConcurrencyLimit)
+	if !decision.Allowed {
+		return false, decision.Scope, func() {}
+	}
+	return true, "", release
+}
+
 // NewAPIKeyAuthMiddleware 创建 API Key 认证中间件
 func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) APIKeyAuthMiddleware {
+	// 容量闸在此处装配一次（add-key-capacity-contract）。
+	// 计数为进程内原子：生产 1 副本（2026-11-11 实测）故精确；扩副本必须换共享计数，
+	// 否则各实例独立计数会把总量放大 N 倍——届时 state 端点须回报计数后端类型。
+	// 对账：每 30s 扫一次，60s 未释放即判泄漏并回收（**并记账**，泄漏要可见）。
+	gate := service.NewKeyCapacityGate()
+	gate.StartCapacityReconciler(30*time.Second, 60*time.Second)
+	SetCapacityGate(gate)
+
 	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg))
 }
 
@@ -265,6 +301,26 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 					return
 				}
 			}
+		}
+
+		// ── 6.5 容量闸（add-key-capacity-contract）───────────────────
+		// 位置：鉴权通过之后、分组 allowlist 门之前 —— key 的容量契约先于分组语义，
+		// 且超限时不该先做一次 allowlist 计算。
+		//
+		// 两级硬顶：池（user.Concurrency）与该 key 硬顶（ConcurrencyLimit）。
+		// 0 表示不限（沿用本仓 quota=0 语义），故存量 key（0/0）行为零变化。
+		// fail-open：闸未装配时放行 —— 限流器故障不得变成全站 429。
+		//
+		// release 必须 defer：泄漏一次该 key 就永久少一个并发且外部看不出来。
+		// 回收由周期性对账兜底，并在 state 端点回报 leaked 计数（泄漏要可见）。
+		if allowed, scope, release := acquireKeyCapacity(apiKey); !allowed {
+			MarkIngressRejected(c, IngressRejectKeyCapacity)
+			AbortWithError(c, http.StatusTooManyRequests,
+				"KEY_CAPACITY_EXCEEDED",
+				"key capacity exceeded (scope="+scope+"); retry later")
+			return
+		} else {
+			defer release()
 		}
 
 		// ── 7. 设置上下文 → Next ─────────────────────────────────────
