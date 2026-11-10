@@ -27,6 +27,9 @@ import (
 type apiKeyRepository struct {
 	client *dbent.Client
 	sql    sqlExecutor
+	// cryptor 负责 key_encrypted 的加解密。nil 是合法值 = 只写 key_hash、密文列留 NULL。
+	// 与 accounts 同一模式（design D1a）：不改既有构造函数签名，避免 17 个调用点跟着动。
+	cryptor service.SecretEncryptor
 }
 
 func NewAPIKeyRepository(client *dbent.Client, sqlDB *sql.DB) service.APIKeyRepository {
@@ -34,7 +37,18 @@ func NewAPIKeyRepository(client *dbent.Client, sqlDB *sql.DB) service.APIKeyRepo
 }
 
 func newAPIKeyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *apiKeyRepository {
-	return &apiKeyRepository{client: client, sql: sqlq}
+	return newAPIKeyRepositoryWithSQLCrypto(client, sqlq, nil)
+}
+
+// NewAPIKeyRepositoryCrypto 是带加密器的生产构造入口（wire 用）。
+// 不传加密器时 key_encrypted 保持 NULL，只有 key_hash 会写——那是可接受的中间态
+// （阶段三 3.5b 才依赖密文），但生产不应该是这个状态。
+func NewAPIKeyRepositoryCrypto(client *dbent.Client, sqlDB *sql.DB, cryptor service.SecretEncryptor) service.APIKeyRepository {
+	return newAPIKeyRepositoryWithSQLCrypto(client, sqlDB, cryptor)
+}
+
+func newAPIKeyRepositoryWithSQLCrypto(client *dbent.Client, sqlq sqlExecutor, cryptor service.SecretEncryptor) *apiKeyRepository {
+	return &apiKeyRepository{client: client, sql: sqlq, cryptor: cryptor}
 }
 
 func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
@@ -62,6 +76,19 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 	}
 	if len(key.IPBlacklist) > 0 {
 		builder.SetIPBlacklist(key.IPBlacklist)
+	}
+
+	// 阶段三 3.5a：新发的 key 必须同时落指纹（以及配了加密器时的密文），
+	// 否则按 key_hash 查找会在"新建的 key"上立刻失效（回填只补存量）。
+	keyHash, keyEncrypted, cryptoErr := apiKeyDerivedColumns(key.Key, r.cryptor)
+	if cryptoErr != nil {
+		return cryptoErr
+	}
+	if keyHash != "" {
+		builder.SetKeyHash(keyHash)
+	}
+	if keyEncrypted != nil {
+		builder.SetKeyEncrypted(*keyEncrypted)
 	}
 
 	created, err := builder.Save(ctx)
@@ -350,11 +377,26 @@ func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 	// 存在唯一键约束 生成tombstone key 用来释放原key，长度远小于 128，满足 schema 限制
 	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
 	// 显式软删除：避免依赖 Hook 行为，确保 deleted_at 一定被设置。
-	affected, err := r.client.APIKey.Update().
+	// tombstone 会改写明文 key，所以派生列 MUST 一起改：
+	// 留着旧指纹等于"已删除的 key 仍能被 key_hash 命中"。
+	tombstoneHash, tombstoneEncrypted, cryptoErr := apiKeyDerivedColumns(tombstoneKey, r.cryptor)
+	if cryptoErr != nil {
+		return cryptoErr
+	}
+	update := r.client.APIKey.Update().
 		Where(apikey.IDEQ(id), apikey.DeletedAtIsNil()).
 		SetKey(tombstoneKey).
-		SetDeletedAt(time.Now()).
-		Save(ctx)
+		SetDeletedAt(time.Now())
+	if tombstoneHash != "" {
+		update = update.SetKeyHash(tombstoneHash)
+	}
+	if tombstoneEncrypted != nil {
+		update = update.SetKeyEncrypted(*tombstoneEncrypted)
+	} else {
+		// 没有加密器时显式清空，避免留下与明文不一致的旧密文
+		update = update.ClearKeyEncrypted()
+	}
+	affected, err := update.Save(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return service.ErrAPIKeyNotFound

@@ -136,7 +136,9 @@ func credentialDiffDB(t *testing.T) *sql.DB {
 	require.NoError(t, db.Ping())
 	t.Cleanup(func() { _ = db.Close() })
 
-	_, err = db.Exec(`DROP TABLE IF EXISTS accounts; ` + credentialDiffTableDDL)
+	// 整 schema 重置：同包的 api_keys 测试会用 ent migrate 建完整 schema 并留下外键，
+	// 逐表 `DROP TABLE accounts`（无 CASCADE）会被依赖对象挡住。
+	_, err = db.Exec(`DROP SCHEMA public CASCADE; CREATE SCHEMA public; ` + credentialDiffTableDDL)
 	require.NoError(t, err)
 	return db
 }
