@@ -35,11 +35,47 @@
 - **THEN** 错误体带 `limit_kind=concurrency` 与 `limit_scope`（`key` | `user` | `group`）
 - **THEN** 调用方能据此判断是削减自己的并发还是申请更高额度
 
+### Requirement: 两级准入（全局硬顶 + 该 key 硬顶），总额不可绕过
+
+准入 SHALL 只判两条：
+
+```
+(池容量 == 0 ∨ userInflight < 池容量)     // ① 全局硬顶
+∧ (硬顶 == 0 ∨ keyInflight < 硬顶)          // ② 该 key 硬顶
+```
+
+系统 MUST 保证：无论用户创建多少把 key，该用户合计并发 MUST NOT 超过池容量。
+
+#### Scenario: 多 key 不能绕过池容量
+- **WHEN** 池容量 5，用户创建 10 把 key（各自 request=0、limit=0）
+- **THEN** 该用户合计并发 MUST NOT 超过 5
+- **THEN** 不存在「10 把 key 各跑 5」
+
+#### Scenario: 硬顶独立生效
+- **WHEN** 池容量 5，key A 设 `concurrency_limit: 2`，其余 key 空闲
+- **THEN** A 最多用 2，MUST NOT 用满 5
+
+### Requirement: 保底的语义是额度保留，不是吞吐保证
+
+`concurrency_request` SHALL 只保证该 key 的额度不被他人申请占用（`Σrequest ≤ 池容量`），
+系统 MUST NOT 承诺「池饱和时保底内的请求仍被放行」——池是硬顶，饱和即拒。
+若调用方需要吞吐保证，SHALL 通过设置 `limit = request` 获得严格独占。
+
+#### Scenario: 保底不等于可通行
+- **WHEN** 池容量 5，key A request=3 limit=0，其他 key 正占满池
+- **THEN** A 的请求会被拒（池满），其 request 不构成通行权
+- **THEN** 该行为 MUST 在错误体与文档中如实说明，MUST NOT 宣称「保底可用」
+
+#### Scenario: limit=request 得到严格独占
+- **WHEN** 池容量 5，key A request=3 limit=3，其他 key 占满其余 2
+- **THEN** A 始终能用到 3（别人的占用无法挤占），且不超过 3
+
 ### Requirement: key 级准入与超限语义
 
 系统 SHALL 在 `apiKeyAuth` 之后、分组白名单门之前，按 key 的 `concurrency_limit` 与
-`rpm_limit` 做准入。超限 MUST 返回与既有 429 同形的错误体，并 MUST 带
-`retry_after` 与 `limit_kind`（`concurrency` | `rpm`），使调用方能区分"我方限流"与"上游满"。
+`rpm_limit` 做准入。超限 MUST 返回与既有 429 同形的错误体，并 MUST 带 `retry_after`、`limit_kind`
+（`concurrency` | `rpm`）与 `limit_scope`（`key` | `user`），使调用方能区分
+"我超了这把 key" / "我超了账号总额度" / "上游满了"。
 
 #### Scenario: 并发超限
 - **WHEN** 某 key 的进行中请求数达到 `concurrency_limit`
