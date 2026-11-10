@@ -257,8 +257,24 @@ func TestAccountRepository_UpdateGrokOAuthCredentialsIfUnchanged_UsesExactAttemp
 	require.Contains(t, normalized, "credentials = $5::jsonb")
 	require.Contains(t, normalized, "proxy_id IS NOT DISTINCT FROM $6")
 	require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
-	require.Len(t, exec.execArgs[0], 7)
+	// 双写派生列（阶段一）：整份替换能算准派生值，所以这里必须真写而非置空。
+	require.Contains(t, normalized, "credentials_hash = $10")
+	require.Contains(t, normalized, "credentials_api_key_hash = $11")
+	require.Len(t, exec.execArgs[0], 11)
 	require.Equal(t, &proxyID, exec.execArgs[0][5])
+
+	// $9 是密文列：repo 用 newAccountRepositoryWithSQL 构造（cryptor=nil），
+	// 所以必须为 nil —— 不是空串。"nil 就写 NULL" 是刻意的：让读路径回落明文，
+	// 而不是把空串当密文去解密。
+	require.Nil(t, exec.execArgs[0][8])
+
+	// $10 是 sha256(规范化明文)，$11 是 sha256(api_key)。
+	// 这份凭据没有 api_key，所以 $11 必须是 nil 而不是空串的 sha256。
+	hash, ok := exec.execArgs[0][9].(*string)
+	require.True(t, ok, "credentials_hash 必须是指针，nil 才表示列写 NULL")
+	require.NotNil(t, hash)
+	require.Len(t, *hash, 64)
+	require.Nil(t, exec.execArgs[0][10], "无 api_key 时指纹必须是 NULL")
 }
 
 func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T) {

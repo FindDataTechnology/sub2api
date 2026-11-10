@@ -1,0 +1,185 @@
+package repository
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/stretchr/testify/require"
+)
+
+// credentialTestEncryptor 在本文件内自建加密器，而不是复用 aes_encryptor_test.go 的
+// helper —— 那个文件带 `//go:build unit` 标签，复用会让本文件的测试也被迫只在
+// 携带 unit tag 时才编译，等于默认测试跑不到。
+func credentialTestEncryptor(t *testing.T) *AESEncryptor {
+	t.Helper()
+	enc, err := NewAESEncryptor(&config.Config{
+		Totp: config.TotpConfig{EncryptionKey: strings.Repeat("42", 32)},
+	})
+	require.NoError(t, err)
+	concrete, ok := enc.(*AESEncryptor)
+	require.True(t, ok)
+	return concrete
+}
+
+// 凭据落盘加密（阶段一）的派生列测试。
+// 见 openspec/changes/harden-sub2api-credential-storage/design.md D2 / D7。
+
+func sha256OfJSON(t *testing.T, v map[string]any) string {
+	t.Helper()
+	payload, err := json.Marshal(v)
+	require.NoError(t, err)
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
+}
+
+// TestCredentialMetaSubset_OnlyWhitelistedKeys 白名单是"默认保密、显式放行"，
+// 所以任何没被显式列入的非密钥子键也 MUST NOT 进明文列。
+func TestCredentialMetaSubset_OnlyWhitelistedKeys(t *testing.T) {
+	creds := map[string]any{
+		"base_url":     "https://api.example.com",
+		"account_mode": "zen",
+		// 下面这些都不是白名单：即使不含密钥也不许进明文列
+		"model_mapping": map[string]any{"a": "b"},
+		"region":        "cn",
+		"api_protocol":  "openai",
+		// 密钥类：绝对不进
+		"api_key":       "sk-secret",
+		"secret_id":     "sid",
+		"refresh_token": "rt",
+	}
+	got := credentialMetaSubset(creds)
+
+	require.Equal(t, map[string]any{
+		"base_url":     "https://api.example.com",
+		"account_mode": "zen",
+	}, got)
+
+	// 反向断言：白名单外的键一个都不许出现（用逐个检查，避免将来白名单扩大时
+	// 上面的 Equal 被顺手改宽而无人注意）
+	for _, forbidden := range []string{"api_key", "secret_id", "refresh_token", "model_mapping", "region", "api_protocol"} {
+		_, present := got[forbidden]
+		require.False(t, present, "%s 不该进 credentials_meta 明文列", forbidden)
+	}
+}
+
+// TestCredentialMetaSubset_ReturnsEmptyMapNotNil 列是 NOT NULL DEFAULT '{}'，
+// 返回 nil 会把整份 meta 清空（显式 NULL 会违反非空约束）。
+func TestCredentialMetaSubset_ReturnsEmptyMapNotNil(t *testing.T) {
+	got := credentialMetaSubset(map[string]any{"api_key": "sk-x"})
+	require.NotNil(t, got)
+	require.Empty(t, got)
+}
+
+// TestCredentialHash_IsKeyOrderIndependent 乐观并发比较依赖"内容相同 ⇒ 哈希相同"。
+// Go 的 map 遍历顺序随机，所以这条测试必须多跑几轮才有意义——单轮可能碰巧相同。
+func TestCredentialHash_IsKeyOrderIndependent(t *testing.T) {
+	canonical, err := canonicalCredentialJSON(map[string]any{
+		"b": 2, "a": 1, "c": map[string]any{"z": 26, "y": 25},
+	})
+	require.NoError(t, err)
+
+	for i := 0; i < 50; i++ {
+		again, err := canonicalCredentialJSON(map[string]any{
+			"c": map[string]any{"y": 25, "z": 26}, "a": 1, "b": 2,
+		})
+		require.NoError(t, err)
+		require.Equal(t, string(canonical), string(again), "同一内容不同键序必须产出相同规范 JSON")
+	}
+
+	// 内容不同必须不同哈希——否则乐观并发会把"已改"判成"没改"
+	other, err := canonicalCredentialJSON(map[string]any{"a": 1, "b": 3})
+	require.NoError(t, err)
+	require.NotEqual(t, sha256Hex(canonical), sha256Hex(other))
+}
+
+func TestCanonicalCredentialJSON_NilIsEmptyObject(t *testing.T) {
+	got, err := canonicalCredentialJSON(nil)
+	require.NoError(t, err)
+	require.Equal(t, "{}", string(got))
+}
+
+func TestCredentialAPIKeyHash_PresentAndAbsent(t *testing.T) {
+	present := credentialAPIKeyHash(map[string]any{"api_key": "sk-abc"})
+	require.NotNil(t, present)
+	expected := sha256.Sum256([]byte("sk-abc"))
+	require.Equal(t, hex.EncodeToString(expected[:]), *present)
+
+	// 空串、类型不对、没有这个键 —— 三种都必须返回 nil（列写 NULL）
+	require.Nil(t, credentialAPIKeyHash(map[string]any{"api_key": ""}))
+	require.Nil(t, credentialAPIKeyHash(map[string]any{"api_key": 123}))
+	require.Nil(t, credentialAPIKeyHash(map[string]any{"refresh_token": "rt"}))
+	require.Nil(t, credentialAPIKeyHash(nil))
+}
+
+// TestCredentialCryptoColumnsFor_NilCryptorStillWritesDerivedColumns
+//
+// cryptor 为 nil 时只跳过**密文**列：meta 与两个指纹都不需要密钥，
+// 提前写入能让阶段二的 SQL 改写有数据可依，也让"未迁移"的含义收窄到只有密文列。
+func TestCredentialCryptoColumnsFor_NilCryptorStillWritesDerivedColumns(t *testing.T) {
+	repo := newAccountRepositoryWithSQL(nil, nil, nil)
+	creds := map[string]any{"api_key": "sk-abc", "base_url": "https://x", "refresh_token": "rt"}
+
+	columns, err := repo.credentialCryptoColumnsFor(creds)
+	require.NoError(t, err)
+
+	require.Nil(t, columns.Encrypted, "无加密器时密文列必须写 NULL，不能写空串")
+	require.NotNil(t, columns.Hash)
+	require.Equal(t, sha256OfJSON(t, creds), *columns.Hash)
+	require.NotNil(t, columns.APIKeyHash)
+	require.Equal(t, map[string]any{"base_url": "https://x"}, columns.Meta)
+}
+
+// TestCredentialCryptoColumnsFor_WithCryptorRoundTrips 有加密器时必须真加密，
+// 且密文能解回同一份规范化 JSON。
+func TestCredentialCryptoColumnsFor_WithCryptorRoundTrips(t *testing.T) {
+	encryptor := credentialTestEncryptor(t)
+	repo := newAccountRepositoryWithSQLCrypto(nil, nil, nil, encryptor)
+	creds := map[string]any{"api_key": "sk-abc", "refresh_token": "rt"}
+
+	columns, err := repo.credentialCryptoColumnsFor(creds)
+	require.NoError(t, err)
+	require.NotNil(t, columns.Encrypted)
+	require.NotEmpty(t, *columns.Encrypted)
+
+	// 密文里 MUST 看不到明文密钥
+	require.NotContains(t, *columns.Encrypted, "sk-abc")
+
+	plaintext, err := encryptor.Decrypt(*columns.Encrypted)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"api_key":"sk-abc","refresh_token":"rt"}`, plaintext)
+}
+
+// TestCredentialCryptoColumnsFor_CiphertextIsNonDeterministic
+//
+// 这是 D2 里那个"必须改用哈希比较"的理由本身：AES-GCM 带随机 nonce，
+// 同一明文两次加密的密文不同，所以密文绝不能用于等值比较。
+// 若哪天有人把加密改成确定性实现，这条会变红——那是需要重新审视 D2 的信号。
+func TestCredentialCryptoColumnsFor_CiphertextIsNonDeterministic(t *testing.T) {
+	encryptor := credentialTestEncryptor(t)
+	repo := newAccountRepositoryWithSQLCrypto(nil, nil, nil, encryptor)
+	creds := map[string]any{"api_key": "sk-same"}
+
+	first, err := repo.credentialCryptoColumnsFor(creds)
+	require.NoError(t, err)
+	second, err := repo.credentialCryptoColumnsFor(creds)
+	require.NoError(t, err)
+
+	require.NotEqual(t, *first.Encrypted, *second.Encrypted, "同一明文两次加密的密文必须不同")
+	require.Equal(t, *first.Hash, *second.Hash, "但哈希必须相同——否则等值比较无从谈起")
+}
+
+// TestCredentialHash_PinnedToKnownValue 把哈希算法钉死。
+//
+// 换算法（比如 blake2）会让所有已落库的 hash 与自己不再匹配，那是必须显式决策的
+// 数据迁移，不能悄悄发生——这条测试就是那个"必须显式"的闸门。
+// 期望值由 `printf '%s' '{"api_key":"sk-abc"}' | shasum -a 256` 独立算出。
+func TestCredentialHash_PinnedToKnownValue(t *testing.T) {
+	canonical, err := canonicalCredentialJSON(map[string]any{"api_key": "sk-abc"})
+	require.NoError(t, err)
+	require.Equal(t, `{"api_key":"sk-abc"}`, string(canonical))
+	require.Equal(t, "935f9c4f77cb9d7dae4860c698582b62add05d911282e1a04c33bfd8f97f863b", sha256Hex(canonical))
+}
