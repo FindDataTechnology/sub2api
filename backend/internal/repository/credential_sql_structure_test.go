@@ -53,17 +53,6 @@ func productionRepositorySources(t *testing.T) map[string]string {
 // TestCredentialSQLStructure_OnlyKnownSubkeySitesRemain 钉死剩余的子键提取清单。
 func TestCredentialSQLStructure_OnlyKnownSubkeySitesRemain(t *testing.T) {
 	allowed := map[string][]string{
-		// (a) api_key 取值类：必须把 api_key 本身取出来，指纹替不了
-		"account_repo_ollama_cloud_usage.go": {
-			"credentials ->> 'api_key' AS api_key,",
-			"SELECT credentials ->> 'api_key' AS api_key,",
-			"GROUP BY credentials ->> 'api_key'",
-		},
-		"account_repo_opencode_go_usage.go": {
-			"credentials ->> 'api_key' AS api_key,",
-			"SELECT credentials ->> 'api_key' AS api_key,",
-			"GROUP BY credentials ->> 'api_key'",
-		},
 		// (b) refresh_token 存在性判断
 		"account_repo.go": {
 			"btrim(credentials->>'refresh_token') <> ''",
@@ -100,8 +89,9 @@ func TestCredentialSQLStructure_OnlyKnownSubkeySitesRemain(t *testing.T) {
 	sort.Strings(unexpected)
 	require.Empty(t, unexpected,
 		"出现了清单外的 `credentials -> ...` 子键提取。阶段二之后这类新增几乎一定是漏改：%v", unexpected)
-	require.Equal(t, 8, total,
-		"剩余子键提取应为 8 处（api_key 6 + refresh_token 2）。数量变化必须是有意的，先改本测试再改代码")
+	require.Equal(t, 2, total,
+		"剩余子键提取应为 2 处（都是 refresh_token 的存在性判断）。"+
+			"api_key 的取值类已改走指纹分组，若这里又变成 8 处说明被改回去了")
 }
 
 // TestCredentialSQLStructure_NoWholeDocumentComparisonsLeft 整文档等值比较必须清零。
