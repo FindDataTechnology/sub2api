@@ -18,9 +18,12 @@ import (
 //	SUB2API_CREDENTIAL_DIFF_DSN='postgres:///sub2api_backfill_drill?sslmode=disable' \
 //	  go test ./internal/repository/ -run 'CredentialBackfill' -v
 
+// 每个用例都从"干净 schema"开始：这些 scratch 测试共用一个库，
+// 而建过完整 ent schema 的用例会留下外键，届时 `DROP TABLE accounts`（无 CASCADE）
+// 会被依赖对象挡住。整 schema 重置比逐表删更稳，也不依赖表之间的依赖顺序。
 const backfillDrillDDL = `
-DROP TABLE IF EXISTS accounts;
-DROP TABLE IF EXISTS api_keys;
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
 CREATE TABLE accounts (
 	id                       bigserial PRIMARY KEY,
 	platform                 text NOT NULL DEFAULT 'openai',
