@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 
@@ -136,29 +137,75 @@ func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (stri
 }
 
 func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.APIKey, error) {
-	m, err := r.activeQuery().
-		Where(apikey.KeyEQ(key)).
-		WithUser(func(q *dbent.UserQuery) {
-			q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
-				gq.Select(group.FieldID)
-			})
-		}).
-		WithGroup().
-		Only(ctx)
+	apply := func(q *dbent.APIKeyQuery) *dbent.APIKeyQuery {
+		return q.
+			WithUser(func(q *dbent.UserQuery) {
+				q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
+					gq.Select(group.FieldID)
+				})
+			}).
+			WithGroup()
+	}
+	m, err := r.lookupAPIKeyByHashThenPlaintext(ctx, key, apply)
+	if err != nil {
+		return nil, err
+	}
+	return apiKeyEntityToService(m), nil
+}
+
+// lookupAPIKeyByHashThenPlaintext 是鉴权路径的唯一查找实现（阶段三 3.5b）。
+//
+// 顺序（顺序即语义）：
+//  1. 先按 key_hash 定位——这是加密落盘之后**唯一**不依赖明文列的查找方式；
+//  2. 命中后 MUST 再拿明文做一次常量时间比对。指纹只是索引，不是凭据：
+//     指纹与明文脱节（旧数据算错、写路径漏带、人工改库）时必须判"查不到"，
+//     绝不能因为指纹撞上就放行。这是"选可验证更严的一侧"。
+//  3. 指纹没命中 → 回落明文查找（该行尚未回填指纹），并计数。
+//     回填完成、且所有写路径都带指纹之后，这个分支可以删掉。
+func (r *apiKeyRepository) lookupAPIKeyByHashThenPlaintext(
+	ctx context.Context,
+	key string,
+	apply func(*dbent.APIKeyQuery) *dbent.APIKeyQuery,
+) (*dbent.APIKey, error) {
+	if key == "" {
+		return nil, service.ErrAPIKeyNotFound
+	}
+
+	hash := sha256Hex([]byte(key))
+	byHash, err := apply(r.activeQuery().Where(apikey.KeyHashEQ(hash))).Only(ctx)
+	switch {
+	case err == nil:
+		if !constantTimeEqualAPIKey(byHash.Key, key) {
+			// 指纹命中但明文不等：拒绝，而不是回落明文给它第二次机会。
+			// 回落会让"指纹算错的坏行"变成可认证，那正是要防的方向。
+			logger.LegacyPrintf("repository.apikey",
+				"[APIKeyLookup] key_hash matched but plaintext differs (id=%d); rejecting", byHash.ID)
+			return nil, service.ErrAPIKeyNotFound
+		}
+		return byHash, nil
+	case !dbent.IsNotFound(err):
+		return nil, err
+	}
+
+	byPlaintext, err := apply(r.activeQuery().Where(apikey.KeyEQ(key))).Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return nil, service.ErrAPIKeyNotFound
 		}
 		return nil, err
 	}
-	return apiKeyEntityToService(m), nil
+	apiKeyPlaintextLookupFallbacks.Add(1)
+	logger.LegacyPrintf("repository.apikey",
+		"[APIKeyLookup] plaintext fallback: id=%d has no usable key_hash yet", byPlaintext.ID)
+	return byPlaintext, nil
 }
 
 func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
-	m, err := r.activeQuery().
-		Where(apikey.KeyEQ(key)).
-		Select(
+	apply := func(q *dbent.APIKeyQuery) *dbent.APIKeyQuery {
+		return q.Select(
 			apikey.FieldID,
+			// 复核需要明文：指纹只用于定位，命中后必须再比对一次（见 lookup 的注释）
+			apikey.FieldKey,
 			apikey.FieldUserID,
 			apikey.FieldGroupID,
 			apikey.FieldName,
@@ -172,100 +219,98 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 			apikey.FieldRateLimit1d,
 			apikey.FieldRateLimit7d,
 		).
-		WithUser(func(q *dbent.UserQuery) {
-			q.Select(
-				user.FieldID,
-				user.FieldEmail,
-				user.FieldUsername,
-				user.FieldStatus,
-				user.FieldRole,
-				user.FieldBalance,
-				user.FieldConcurrency,
-				user.FieldBalanceNotifyEnabled,
-				user.FieldRestrictPublicGroups,
-				user.FieldBalanceNotifyThresholdType,
-				user.FieldBalanceNotifyThreshold,
-				user.FieldBalanceNotifyExtraEmails,
-				user.FieldTotalRecharged,
-				user.FieldSignupSource,
-				user.FieldLastLoginAt,
-				user.FieldLastActiveAt,
-				user.FieldRpmLimit,
-			)
-			q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
-				gq.Select(group.FieldID)
+			WithUser(func(q *dbent.UserQuery) {
+				q.Select(
+					user.FieldID,
+					user.FieldEmail,
+					user.FieldUsername,
+					user.FieldStatus,
+					user.FieldRole,
+					user.FieldBalance,
+					user.FieldConcurrency,
+					user.FieldBalanceNotifyEnabled,
+					user.FieldRestrictPublicGroups,
+					user.FieldBalanceNotifyThresholdType,
+					user.FieldBalanceNotifyThreshold,
+					user.FieldBalanceNotifyExtraEmails,
+					user.FieldTotalRecharged,
+					user.FieldSignupSource,
+					user.FieldLastLoginAt,
+					user.FieldLastActiveAt,
+					user.FieldRpmLimit,
+				)
+				q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
+					gq.Select(group.FieldID)
+				})
+			}).
+			WithGroup(func(q *dbent.GroupQuery) {
+				q.Select(
+					group.FieldID,
+					group.FieldName,
+					group.FieldPlatform,
+					group.FieldIsExclusive,
+					group.FieldStatus,
+					group.FieldSubscriptionType,
+					group.FieldRateMultiplier,
+					group.FieldDailyLimitUsd,
+					group.FieldWeeklyLimitUsd,
+					group.FieldMonthlyLimitUsd,
+					group.FieldAllowImageGeneration,
+					group.FieldAllowBatchImageGeneration,
+					group.FieldImageCountBilling,
+					group.FieldImageRateIndependent,
+					group.FieldImageRateMultiplier,
+					group.FieldImagePrice1k,
+					group.FieldImagePrice2k,
+					group.FieldImagePrice4k,
+					group.FieldVideoRateIndependent,
+					group.FieldVideoRateMultiplier,
+					group.FieldVideoPrice480p,
+					group.FieldVideoPrice720p,
+					group.FieldVideoPrice1080p,
+					group.FieldVideoModelPrices,
+					group.FieldWebSearchPricePerCall,
+					group.FieldRerankPricePerRequest,
+					group.FieldSearchPricePer1k,
+					group.FieldAudioRealtimePricePerMin,
+					group.FieldAudioTtsPricePerMillionChars,
+					group.FieldAudioSttPricePerHour,
+					group.FieldLongContextPricingEnabled,
+					group.FieldModelPricing,
+					group.FieldClaudeCodeOnly,
+					group.FieldFallbackGroupID,
+					group.FieldFallbackGroupIDOnInvalidRequest,
+					group.FieldModelRoutingEnabled,
+					group.FieldModelRouting,
+					group.FieldMcpXMLInject,
+					group.FieldSupportedModelScopes,
+					group.FieldAllowMessagesDispatch,
+					group.FieldAllowLive,
+					group.FieldForceOpenaiFast,
+					group.FieldFreeOpenaiFast,
+					group.FieldDefaultMappedModel,
+					group.FieldMessagesDispatchModelConfig,
+					group.FieldModelAllowlist,
+					group.FieldCodexModelsManifestConfig,
+					group.FieldRpmLimit,
+					group.FieldMaxReasoningEffort,
+					group.FieldMaxReasoningEffortOverLimit,
+					group.FieldReasoningEffortMappings,
+					group.FieldPeakRateEnabled,
+					group.FieldPeakStart,
+					group.FieldPeakEnd,
+					group.FieldPeakRateMultiplier,
+					// 分组利润控制：认证快照是调度门 enable 判定的直接来源，
+					// 漏选会让门静默失效；新增快照分组字段时必须同步本投影，
+					// 集成测试对账兜底。
+					group.FieldProfitControlEnabled,
+					group.FieldProfitMinMargin,
+					group.FieldProfitSafetyBuffer,
+				)
 			})
-		}).
-		WithGroup(func(q *dbent.GroupQuery) {
-			q.Select(
-				group.FieldID,
-				group.FieldName,
-				group.FieldPlatform,
-				group.FieldIsExclusive,
-				group.FieldStatus,
-				group.FieldSubscriptionType,
-				group.FieldRateMultiplier,
-				group.FieldDailyLimitUsd,
-				group.FieldWeeklyLimitUsd,
-				group.FieldMonthlyLimitUsd,
-				group.FieldAllowImageGeneration,
-				group.FieldAllowBatchImageGeneration,
-				group.FieldImageCountBilling,
-				group.FieldImageRateIndependent,
-				group.FieldImageRateMultiplier,
-				group.FieldImagePrice1k,
-				group.FieldImagePrice2k,
-				group.FieldImagePrice4k,
-				group.FieldVideoRateIndependent,
-				group.FieldVideoRateMultiplier,
-				group.FieldVideoPrice480p,
-				group.FieldVideoPrice720p,
-				group.FieldVideoPrice1080p,
-				group.FieldVideoModelPrices,
-				group.FieldWebSearchPricePerCall,
-				group.FieldRerankPricePerRequest,
-				group.FieldSearchPricePer1k,
-				group.FieldAudioRealtimePricePerMin,
-				group.FieldAudioTtsPricePerMillionChars,
-				group.FieldAudioSttPricePerHour,
-				group.FieldLongContextPricingEnabled,
-				group.FieldModelPricing,
-				group.FieldClaudeCodeOnly,
-				group.FieldFallbackGroupID,
-				group.FieldFallbackGroupIDOnInvalidRequest,
-				group.FieldModelRoutingEnabled,
-				group.FieldModelRouting,
-				group.FieldMcpXMLInject,
-				group.FieldSupportedModelScopes,
-				group.FieldAllowMessagesDispatch,
-				group.FieldAllowLive,
-				group.FieldForceOpenaiFast,
-				group.FieldFreeOpenaiFast,
-				group.FieldDefaultMappedModel,
-				group.FieldMessagesDispatchModelConfig,
-				group.FieldModelAllowlist,
-				group.FieldCodexModelsManifestConfig,
-				group.FieldRpmLimit,
-				group.FieldMaxReasoningEffort,
-				group.FieldMaxReasoningEffortOverLimit,
-				group.FieldReasoningEffortMappings,
-				group.FieldPeakRateEnabled,
-				group.FieldPeakStart,
-				group.FieldPeakEnd,
-				group.FieldPeakRateMultiplier,
-				// 分组利润控制：认证快照是调度门 enable 判定的直接来源，
-				// 漏选会让门静默失效；新增快照分组字段时必须同步本投影，
-				// 集成测试对账兜底。
-				group.FieldProfitControlEnabled,
-				group.FieldProfitMinMargin,
-				group.FieldProfitSafetyBuffer,
-			)
-		}).
-		Only(ctx)
+	}
+	m, err := r.lookupAPIKeyByHashThenPlaintext(ctx, key, apply)
 	if err != nil {
-		if dbent.IsNotFound(err) {
-			return nil, service.ErrAPIKeyNotFound
-		}
 		return nil, err
 	}
 	return apiKeyEntityToService(m), nil
