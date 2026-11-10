@@ -26,6 +26,9 @@ var capacityGate *service.KeyCapacityGate
 // SetCapacityGate 由路由装配层在启动时注入一次。
 func SetCapacityGate(g *service.KeyCapacityGate) { capacityGate = g }
 
+// CapacityGate 暴露当前装配的容量闸，供 state 端点回报运行时计数（只读）。
+func CapacityGate() *service.KeyCapacityGate { return capacityGate }
+
 // timeNow 是生效时刻判定的时钟。单独抽出来是为了测试能控制"现在"，
 // 而不是靠 sleep 或依赖真实时间（后者在 CI 上必然间歇性失败）。
 var timeNow = time.Now

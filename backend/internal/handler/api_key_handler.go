@@ -177,6 +177,45 @@ func (h *APIKeyHandler) GetByID(c *gin.Context) {
 	response.Success(c, dto.APIKeyFromService(key).Localized(c.GetHeader("Accept-Language")))
 }
 
+// State 回报该 key 的容量状态：库里的配置、鉴权链实际看到的值、运行时在飞数、
+// 以及"配置是否已生效"。
+//
+// 存在理由：认证快照有 L1(15s)/L2(300s) 缓存，改完 concurrency 后运维只能等 15 秒猜。
+// 这个端点把"猜"变成"看"。
+// GET /api/v1/keys/:id/state
+func (h *APIKeyHandler) State(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	keyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid key ID")
+		return
+	}
+
+	state, err := h.apiKeyService.GetKeyCapacityState(c.Request.Context(), keyID, middleware2.CapacityGate())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	// 越权返回 404（不泄露存在性），与 GetByID 一致
+	if state == nil {
+		response.NotFound(c, "API key not found")
+		return
+	}
+	owner, gerr := h.apiKeyService.GetByID(c.Request.Context(), keyID)
+	if gerr != nil || owner == nil || owner.UserID != subject.UserID {
+		response.NotFound(c, "API key not found")
+		return
+	}
+
+	response.Success(c, state)
+}
+
 // Create handles creating a new API key
 // POST /api/v1/api-keys
 func (h *APIKeyHandler) Create(c *gin.Context) {
