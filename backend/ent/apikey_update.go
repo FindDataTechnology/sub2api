@@ -252,6 +252,89 @@ func (_u *APIKeyUpdate) ClearExpiresAt() *APIKeyUpdate {
 	return _u
 }
 
+// SetConcurrencyRequest sets the "concurrency_request" field.
+func (_u *APIKeyUpdate) SetConcurrencyRequest(v int) *APIKeyUpdate {
+	_u.mutation.ResetConcurrencyRequest()
+	_u.mutation.SetConcurrencyRequest(v)
+	return _u
+}
+
+// SetNillableConcurrencyRequest sets the "concurrency_request" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableConcurrencyRequest(v *int) *APIKeyUpdate {
+	if v != nil {
+		_u.SetConcurrencyRequest(*v)
+	}
+	return _u
+}
+
+// AddConcurrencyRequest adds value to the "concurrency_request" field.
+func (_u *APIKeyUpdate) AddConcurrencyRequest(v int) *APIKeyUpdate {
+	_u.mutation.AddConcurrencyRequest(v)
+	return _u
+}
+
+// SetConcurrencyLimit sets the "concurrency_limit" field.
+func (_u *APIKeyUpdate) SetConcurrencyLimit(v int) *APIKeyUpdate {
+	_u.mutation.ResetConcurrencyLimit()
+	_u.mutation.SetConcurrencyLimit(v)
+	return _u
+}
+
+// SetNillableConcurrencyLimit sets the "concurrency_limit" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableConcurrencyLimit(v *int) *APIKeyUpdate {
+	if v != nil {
+		_u.SetConcurrencyLimit(*v)
+	}
+	return _u
+}
+
+// AddConcurrencyLimit adds value to the "concurrency_limit" field.
+func (_u *APIKeyUpdate) AddConcurrencyLimit(v int) *APIKeyUpdate {
+	_u.mutation.AddConcurrencyLimit(v)
+	return _u
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (_u *APIKeyUpdate) SetRpmLimit(v int) *APIKeyUpdate {
+	_u.mutation.ResetRpmLimit()
+	_u.mutation.SetRpmLimit(v)
+	return _u
+}
+
+// SetNillableRpmLimit sets the "rpm_limit" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableRpmLimit(v *int) *APIKeyUpdate {
+	if v != nil {
+		_u.SetRpmLimit(*v)
+	}
+	return _u
+}
+
+// AddRpmLimit adds value to the "rpm_limit" field.
+func (_u *APIKeyUpdate) AddRpmLimit(v int) *APIKeyUpdate {
+	_u.mutation.AddRpmLimit(v)
+	return _u
+}
+
+// SetEffectiveAt sets the "effective_at" field.
+func (_u *APIKeyUpdate) SetEffectiveAt(v time.Time) *APIKeyUpdate {
+	_u.mutation.SetEffectiveAt(v)
+	return _u
+}
+
+// SetNillableEffectiveAt sets the "effective_at" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableEffectiveAt(v *time.Time) *APIKeyUpdate {
+	if v != nil {
+		_u.SetEffectiveAt(*v)
+	}
+	return _u
+}
+
+// ClearEffectiveAt clears the value of the "effective_at" field.
+func (_u *APIKeyUpdate) ClearEffectiveAt() *APIKeyUpdate {
+	_u.mutation.ClearEffectiveAt()
+	return _u
+}
+
 // SetRateLimit5h sets the "rate_limit_5h" field.
 func (_u *APIKeyUpdate) SetRateLimit5h(v float64) *APIKeyUpdate {
 	_u.mutation.ResetRateLimit5h()
@@ -641,6 +724,30 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.ExpiresAtCleared() {
 		_spec.ClearField(apikey.FieldExpiresAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.ConcurrencyRequest(); ok {
+		_spec.SetField(apikey.FieldConcurrencyRequest, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedConcurrencyRequest(); ok {
+		_spec.AddField(apikey.FieldConcurrencyRequest, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ConcurrencyLimit(); ok {
+		_spec.SetField(apikey.FieldConcurrencyLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedConcurrencyLimit(); ok {
+		_spec.AddField(apikey.FieldConcurrencyLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.RpmLimit(); ok {
+		_spec.SetField(apikey.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRpmLimit(); ok {
+		_spec.AddField(apikey.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.EffectiveAt(); ok {
+		_spec.SetField(apikey.FieldEffectiveAt, field.TypeTime, value)
+	}
+	if _u.mutation.EffectiveAtCleared() {
+		_spec.ClearField(apikey.FieldEffectiveAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.RateLimit5h(); ok {
 		_spec.SetField(apikey.FieldRateLimit5h, field.TypeFloat64, value)
@@ -1036,6 +1143,89 @@ func (_u *APIKeyUpdateOne) SetNillableExpiresAt(v *time.Time) *APIKeyUpdateOne {
 // ClearExpiresAt clears the value of the "expires_at" field.
 func (_u *APIKeyUpdateOne) ClearExpiresAt() *APIKeyUpdateOne {
 	_u.mutation.ClearExpiresAt()
+	return _u
+}
+
+// SetConcurrencyRequest sets the "concurrency_request" field.
+func (_u *APIKeyUpdateOne) SetConcurrencyRequest(v int) *APIKeyUpdateOne {
+	_u.mutation.ResetConcurrencyRequest()
+	_u.mutation.SetConcurrencyRequest(v)
+	return _u
+}
+
+// SetNillableConcurrencyRequest sets the "concurrency_request" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableConcurrencyRequest(v *int) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetConcurrencyRequest(*v)
+	}
+	return _u
+}
+
+// AddConcurrencyRequest adds value to the "concurrency_request" field.
+func (_u *APIKeyUpdateOne) AddConcurrencyRequest(v int) *APIKeyUpdateOne {
+	_u.mutation.AddConcurrencyRequest(v)
+	return _u
+}
+
+// SetConcurrencyLimit sets the "concurrency_limit" field.
+func (_u *APIKeyUpdateOne) SetConcurrencyLimit(v int) *APIKeyUpdateOne {
+	_u.mutation.ResetConcurrencyLimit()
+	_u.mutation.SetConcurrencyLimit(v)
+	return _u
+}
+
+// SetNillableConcurrencyLimit sets the "concurrency_limit" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableConcurrencyLimit(v *int) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetConcurrencyLimit(*v)
+	}
+	return _u
+}
+
+// AddConcurrencyLimit adds value to the "concurrency_limit" field.
+func (_u *APIKeyUpdateOne) AddConcurrencyLimit(v int) *APIKeyUpdateOne {
+	_u.mutation.AddConcurrencyLimit(v)
+	return _u
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (_u *APIKeyUpdateOne) SetRpmLimit(v int) *APIKeyUpdateOne {
+	_u.mutation.ResetRpmLimit()
+	_u.mutation.SetRpmLimit(v)
+	return _u
+}
+
+// SetNillableRpmLimit sets the "rpm_limit" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableRpmLimit(v *int) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetRpmLimit(*v)
+	}
+	return _u
+}
+
+// AddRpmLimit adds value to the "rpm_limit" field.
+func (_u *APIKeyUpdateOne) AddRpmLimit(v int) *APIKeyUpdateOne {
+	_u.mutation.AddRpmLimit(v)
+	return _u
+}
+
+// SetEffectiveAt sets the "effective_at" field.
+func (_u *APIKeyUpdateOne) SetEffectiveAt(v time.Time) *APIKeyUpdateOne {
+	_u.mutation.SetEffectiveAt(v)
+	return _u
+}
+
+// SetNillableEffectiveAt sets the "effective_at" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableEffectiveAt(v *time.Time) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetEffectiveAt(*v)
+	}
+	return _u
+}
+
+// ClearEffectiveAt clears the value of the "effective_at" field.
+func (_u *APIKeyUpdateOne) ClearEffectiveAt() *APIKeyUpdateOne {
+	_u.mutation.ClearEffectiveAt()
 	return _u
 }
 
@@ -1458,6 +1648,30 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if _u.mutation.ExpiresAtCleared() {
 		_spec.ClearField(apikey.FieldExpiresAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.ConcurrencyRequest(); ok {
+		_spec.SetField(apikey.FieldConcurrencyRequest, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedConcurrencyRequest(); ok {
+		_spec.AddField(apikey.FieldConcurrencyRequest, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ConcurrencyLimit(); ok {
+		_spec.SetField(apikey.FieldConcurrencyLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedConcurrencyLimit(); ok {
+		_spec.AddField(apikey.FieldConcurrencyLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.RpmLimit(); ok {
+		_spec.SetField(apikey.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRpmLimit(); ok {
+		_spec.AddField(apikey.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.EffectiveAt(); ok {
+		_spec.SetField(apikey.FieldEffectiveAt, field.TypeTime, value)
+	}
+	if _u.mutation.EffectiveAtCleared() {
+		_spec.ClearField(apikey.FieldEffectiveAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.RateLimit5h(); ok {
 		_spec.SetField(apikey.FieldRateLimit5h, field.TypeFloat64, value)
