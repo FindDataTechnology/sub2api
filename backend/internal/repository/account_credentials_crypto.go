@@ -208,3 +208,20 @@ func credentialAPIKeyHashHexes(apiKeys []string) []string {
 	}
 	return out
 }
+
+// credentialAPIKeyHashArg 返回可直接当 SQL 参数用的 api_key 指纹：
+// 有 api_key → hex 字符串；没有 → **无类型 nil**（SQL NULL）。
+//
+// 为什么必须是 NULL 而不是空串：这些位置用的是 `IS [NOT] DISTINCT FROM`，
+// 空串与 NULL 是两回事。旧写法比较 jsonb 子键，缺失时是 SQL NULL，
+// 所以新写法也必须传 NULL 才能保持「两边都缺 ⇒ 不变化」的语义。
+//
+// 也不要把 (*string)(nil) 直接塞进 any——那是个非 nil 的接口包着空指针，
+// 驱动会报错；必须转成真正的无类型 nil。
+func credentialAPIKeyHashArg(credentials map[string]any) any {
+	hash := credentialAPIKeyHash(credentials)
+	if hash == nil {
+		return nil
+	}
+	return *hash
+}

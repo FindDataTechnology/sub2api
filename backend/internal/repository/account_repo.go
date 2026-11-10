@@ -697,7 +697,7 @@ func lockAndMergeAccountProbeExtra(
 				AND $2 IN (`+ollamaCloudUsagePlatformsSQL+`)
 				AND type = 'apikey'
 				AND $3 = 'apikey'
-				AND credentials -> 'api_key' IS NOT DISTINCT FROM $4::jsonb -> 'api_key'
+				AND credentials_api_key_hash IS NOT DISTINCT FROM $6
 				AND `+ollamaCloudBaseURLMatchesSQL("credentials_meta ->> 'base_url'")+`
 				AND `+ollamaCloudBaseURLMatchesSQL("$4::jsonb ->> 'base_url'")+`,
 				false
@@ -726,7 +726,7 @@ func lockAndMergeAccountProbeExtra(
 				)
 				AND type = 'apikey'
 				AND $3 = 'apikey'
-				AND credentials -> 'api_key' IS NOT DISTINCT FROM $4::jsonb -> 'api_key',
+				AND credentials_api_key_hash IS NOT DISTINCT FROM $6,
 				false
 			),
 			extra -> 'opencode_go_usage_auto_refresh',
@@ -736,7 +736,7 @@ func lockAndMergeAccountProbeExtra(
 		FROM accounts
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR NO KEY UPDATE
-	`, account.ID, account.Platform, account.Type, string(credentials), proxyID)
+	`, account.ID, account.Platform, account.Type, string(credentials), proxyID, credentialAPIKeyHashArg(account.Credentials))
 	if err != nil {
 		return nil, err
 	}
@@ -969,7 +969,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 							AND `+opencodeGoBaseURLMatchSQLPrefix+`credentials_meta ->> 'base_url'`+opencodeGoBaseURLMatchSQLSuffix+`)
 					)
 					AND (
-						credentials -> 'api_key' IS DISTINCT FROM $1::jsonb -> 'api_key'
+						credentials_api_key_hash IS DISTINCT FROM $3
 						-- 或组身份不再成立：opencode_go 转 Zen（COALESCE 恒非 NULL，
 						-- IS NOT TRUE 等价于判定为假；平台条件必须在 IS NOT TRUE 作用
 						-- 域之外，否则挂载行的 FALSE IS NOT TRUE 会误判为已变化）；
@@ -993,7 +993,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 					AND type = 'apikey'
 					AND credentials IS DISTINCT FROM $1::jsonb
 					AND (
-						credentials -> 'api_key' IS DISTINCT FROM $1::jsonb -> 'api_key'
+						credentials_api_key_hash IS DISTINCT FROM $3
 						OR NOT (
 							`+ollamaCloudBaseURLMatchesSQL("credentials_meta ->> 'base_url'")+`
 							AND `+ollamaCloudBaseURLMatchesSQL("$1::jsonb ->> 'base_url'")+`
@@ -1013,7 +1013,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 			END,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
-	`, string(payload), id)
+	`, string(payload), id, credentialAPIKeyHashArg(credentials))
 	if err != nil {
 		return err
 	}
@@ -3203,6 +3203,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 	// JSONB 需要合并而非覆盖，使用 raw SQL 保持旧行为。
 	credentialPlaceholder := ""
+	apiKeyHashPlaceholder := ""
 	if len(updates.Credentials) > 0 {
 		payload, err := json.Marshal(updates.Credentials)
 		if err != nil {
@@ -3212,6 +3213,14 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb")
 		args = append(args, payload)
 		idx++
+		// 身份变化判定改比指纹：合并表达式之后，SQL 侧已经拿不到"新 api_key"。
+		// 只在 updates 真带了 api_key 时分配占位符，没带时不产生多余参数
+		// （否则占位符与 args 数量会对不上）。
+		if _, hasAPIKey := updates.Credentials["api_key"]; hasAPIKey {
+			apiKeyHashPlaceholder = "$" + itoa(idx)
+			args = append(args, credentialAPIKeyHashArg(updates.Credentials))
+			idx++
+		}
 		// 这里是 SQL 侧合并，Go 拿不到"合并后的完整文档"，所以派生列在这里
 		// **无法算出真值**。显式置回"未派生"状态：密文与两个指纹置 NULL、
 		// meta 置空对象。读路径据此回落明文列；留着过期的派生值比置空危险得多
@@ -3227,7 +3236,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 
 	ollamaGroupIdentityChanges := make([]string, 0, 2)
 	if _, ok := updates.Credentials["api_key"]; ok {
-		ollamaGroupIdentityChanges = append(ollamaGroupIdentityChanges, "credentials -> 'api_key' IS DISTINCT FROM "+credentialPlaceholder+"::jsonb -> 'api_key'")
+		ollamaGroupIdentityChanges = append(ollamaGroupIdentityChanges, "credentials_api_key_hash IS DISTINCT FROM "+apiKeyHashPlaceholder)
 	}
 	if _, ok := updates.Credentials["base_url"]; ok {
 		ollamaGroupIdentityChanges = append(ollamaGroupIdentityChanges,
@@ -3248,7 +3257,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		" OR (platform IN (" + opencodeGoUsageMountPlatformsSQL + ") AND " + opencodeOldBaseURL + "))"
 	if _, ok := updates.Credentials["api_key"]; ok {
 		opencodeGroupIdentityChanges = append(opencodeGroupIdentityChanges,
-			opencodeOldUsageIdentity+" AND credentials -> 'api_key' IS DISTINCT FROM "+credentialPlaceholder+"::jsonb -> 'api_key'")
+			opencodeOldUsageIdentity+" AND credentials_api_key_hash IS DISTINCT FROM "+apiKeyHashPlaceholder)
 	}
 	if _, ok := updates.Credentials["base_url"]; ok {
 		// 仅挂载行身份钉在官方基址上（opencode_go 行的 base_url 不参与资格，两个
