@@ -287,3 +287,67 @@ func TestDeriveCredentialColumnsAfterMerge_NilCryptorClearsCiphertext(t *testing
 	require.NoError(t, db.QueryRow(`SELECT credentials_encrypted FROM accounts WHERE id = 1`).Scan(&after))
 	require.Nil(t, after, "无加密器时不留过期密文，读路径回落明文")
 }
+
+// TestMigration250_HasRefreshTokenMatchesPlaintext 是站点 A（① 案）的**闸门级**验证，
+// 强度对齐 ④（独立列）那条"列值 vs 明文逐行比对"。
+//
+// 为什么必须跑**迁移文件本身**而不是复算 Go 逻辑：迁移里的 SQL 是手工写的表达式，
+// 它与 credentialHasRefreshToken 是两份实现。只测 Go 的话，迁移写错了照样绿——
+// 而线上存量行的值恰恰只由迁移决定。
+//
+// 断言三件事：
+//  1. 跑完迁移后，meta 里的值与明文逐行一致（0 处不一致）
+//  2. 幂等：再跑一次，值与行数都不变
+//  3. 空串 / 纯空白 / JSON null / 数字 这些边界形态都与 SQL 语义一致
+func TestMigration250_HasRefreshTokenMatchesPlaintext(t *testing.T) {
+	db := backfillDrillDB(t)
+
+	sqlBytes, err := os.ReadFile("../../migrations/250_credentials_meta_has_refresh_token.sql")
+	require.NoError(t, err, "迁移文件必须能被读到；路径变了要同步改这里")
+	migrationSQL := string(sqlBytes)
+
+	// 边界形态：正常值 / 空串 / 纯空白 / JSON null / 数字 / 键缺失 / 空对象
+	_, err = db.Exec(`
+		INSERT INTO accounts (id, platform, type, credentials) VALUES
+			(1, 'grok', 'oauth', '{"refresh_token":"rt-1","access_token":"at"}'),
+			(2, 'grok', 'oauth', '{"refresh_token":"","access_token":"at"}'),
+			(3, 'grok', 'oauth', '{"refresh_token":"   ","access_token":"at"}'),
+			(4, 'grok', 'oauth', '{"refresh_token":null,"access_token":"at"}'),
+			(5, 'grok', 'oauth', '{"refresh_token":123,"access_token":"at"}'),
+			(6, 'grok', 'oauth', '{"access_token":"at"}'),
+			(7, 'grok', 'oauth', '{}');
+	`)
+	require.NoError(t, err)
+
+	run := func() {
+		_, err := db.Exec(migrationSQL)
+		require.NoError(t, err, "迁移必须可执行")
+		_, err = db.Exec(migrationSQL) // 连跑两次验幂等
+		require.NoError(t, err, "迁移必须幂等")
+	}
+	run()
+
+	// 逐行比对：meta 里的值 vs 明文表达式。不一致必须为 0。
+	var mismatches int
+	require.NoError(t, db.QueryRow(`
+		SELECT count(*) FROM accounts
+		WHERE COALESCE((credentials_meta ->> 'has_refresh_token')::boolean, false)
+		   IS DISTINCT FROM COALESCE(NULLIF(BTRIM(credentials ->> 'refresh_token'), '') IS NOT NULL, false)
+	`).Scan(&mismatches))
+	require.Zero(t, mismatches, "迁移算出的 has_refresh_token 必须与明文逐行一致")
+
+	// 逐 id 钉住期望值，避免"整体一致但全错成同一个值"这种假绿
+	want := map[int64]bool{1: true, 2: false, 3: false, 4: false, 5: true, 6: false, 7: false}
+	for id, expected := range want {
+		var got bool
+		require.NoError(t, db.QueryRow(
+			`SELECT COALESCE((credentials_meta ->> 'has_refresh_token')::boolean, false) FROM accounts WHERE id = $1`,
+			id).Scan(&got))
+		require.Equal(t, expected, got, "id=%d 的 has_refresh_token 与 SQL 语义不符", id)
+	}
+
+	// 幂等后再确认一次行数没变（防止迁移误删/误插）
+	var rows int
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM accounts`).Scan(&rows))
+	require.Equal(t, 7, rows)
+}
