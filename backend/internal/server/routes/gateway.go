@@ -181,7 +181,7 @@ func RegisterGatewayRoutes(
 	// 计量通道（准入+原生账本写入）+ 上游账号池（ListSchedulableByPlatform）；
 	// 服务取 OpenAI 网关 handler / service 只读访问器（缝点台账§二；实现全在
 	// internal/lanes，只增）。
-	lanesApp := lanes.NewFromOpenAIHandler(h.OpenAIGateway, apiKeyService, cfg)
+	lanesApp := lanes.NewFromOpenAIHandler(h.OpenAIGateway, h.Gateway.LanesCapabilityModels, apiKeyService, cfg)
 
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")

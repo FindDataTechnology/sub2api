@@ -30,6 +30,9 @@ func RegisterGatewayLanes(group *gin.RouterGroup, app *Lanes) {
 	group.POST("/search", serve(LaneWebsearch))
 	group.POST("/audio/transcriptions", serve(LaneAudio))
 	group.POST("/audio/speech", serve(LaneAudio))
+	// 能力快照（ciyuan-capability-endpoint）：只读、不计费。命名空间化以避开上游
+	// 未来新增的 /v1/* 端点，与 /v1/sub2api/billing 同构。
+	group.GET("/ciyuan/capabilities", func(c *gin.Context) { ServeCapabilities(c, app) })
 }
 
 func serveLane(c *gin.Context, lane string, app *Lanes) {
