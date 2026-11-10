@@ -137,3 +137,122 @@ func (s *APIKeyService) checkCapacityAllocation(
 	}
 	return nil
 }
+
+// KeyCapacityState 是 state 端点要回报的东西：**库里的配置 vs 鉴权链实际看到的快照**。
+//
+// 为什么需要它：认证快照有 L1(15s)/L2(300s) 两级缓存。改完 concurrency 后，
+// 运维无法判断"改的生效了吗"——只能等 15 秒然后猜。有了这个端点就能直接看：
+//
+//	config_applied=false ⇒ 还在旧快照，别急着验证行为
+//	config_applied=true  ⇒ 已经生效
+//
+// 诚实边界：v1 只能判断"该 key 的快照是否已被重建"，不能保证所有实例都已切换
+// （生产单副本时等价；扩副本后需改为回报实例数）。
+type KeyCapacityState struct {
+	KeyID int64 `json:"key_id"`
+
+	// 库里的权威配置
+	ConfiguredConcurrencyRequest int    `json:"configured_concurrency_request"`
+	ConfiguredConcurrencyLimit   int    `json:"configured_concurrency_limit"`
+	ConfiguredRPMLimit           int    `json:"configured_rpm_limit"`
+	PoolCapacity                 int    `json:"pool_capacity"` // user.Concurrency，0=不限
+	EffectiveConcurrencyLimit    int    `json:"effective_concurrency_limit"`
+	EffectiveRPMLimit            int    `json:"effective_rpm_limit"`
+	LimitSource                  string `json:"limit_source"`
+
+	// 运行时
+	UserInflight int64 `json:"user_inflight"`
+	KeyInflight  int64 `json:"key_inflight"`
+	LeakedSlots  int64 `json:"leaked_slots_recovered"` // 对账回收过的槽位总数（泄漏要可见）
+
+	// 快照状态
+	ObservedSnapshotVersion int  `json:"observed_snapshot_version"`
+	ConfigApplied           bool `json:"config_applied"`
+
+	CountBackend string `json:"count_backend"` // in_process | shared（扩副本后应变）
+}
+
+// BuildKeyCapacityState 组装状态视图。
+//
+//	configured: 从库读到的 key（权威）
+//	cached:     从鉴权缓存读到的 key（鉴权链实际看到的值）；nil 表示缓存未命中
+//	gate:       容量闸，用于回报运行时计数；可为 nil
+func BuildKeyCapacityState(configured, cached *APIKey, gate *KeyCapacityGate) *KeyCapacityState {
+	if configured == nil {
+		return nil
+	}
+	st := &KeyCapacityState{
+		KeyID:                        configured.ID,
+		ConfiguredConcurrencyRequest: configured.ConcurrencyRequest,
+		ConfiguredConcurrencyLimit:   configured.ConcurrencyLimit,
+		ConfiguredRPMLimit:           configured.RPMLimit,
+		CountBackend:                 "in_process",
+	}
+	poolCap := 0
+	userRPM := 0
+	if configured.User != nil {
+		poolCap = configured.User.Concurrency
+		userRPM = configured.User.RPMLimit
+	}
+	st.PoolCapacity = poolCap
+	st.EffectiveConcurrencyLimit, st.LimitSource = effectiveLimitForState(configured.ConcurrencyLimit, poolCap)
+	st.EffectiveRPMLimit, _ = effectiveLimitForState(configured.RPMLimit, userRPM)
+
+	if gate != nil {
+		userID := configured.UserID
+		if configured.User != nil {
+			userID = configured.User.ID
+		}
+		st.UserInflight, st.KeyInflight, st.LeakedSlots = gate.CapacitySnapshot(userID, configured.ID)
+	}
+
+	// config_applied：缓存里看到的配置与库里一致即视为已生效
+	if cached != nil {
+		st.ConfigApplied = cached.ConcurrencyRequest == configured.ConcurrencyRequest &&
+			cached.ConcurrencyLimit == configured.ConcurrencyLimit &&
+			cached.RPMLimit == configured.RPMLimit
+	}
+	return st
+}
+
+// effectiveLimitForState 与 lanes 包的 effectiveLimit 同语义（取更严者）。
+// 这里单独一份是为了让 service 不依赖 lanes（lanes 依赖 middleware，会成环）。
+func effectiveLimitForState(keyLimit, poolLimit int) (int, string) {
+	switch {
+	case keyLimit > 0 && poolLimit > 0:
+		if keyLimit <= poolLimit {
+			return keyLimit, "key"
+		}
+		return poolLimit, "user"
+	case keyLimit > 0:
+		return keyLimit, "key"
+	case poolLimit > 0:
+		return poolLimit, "user"
+	default:
+		return 0, "unlimited"
+	}
+}
+
+// GetKeyCapacityState 读「库里配置」与「鉴权缓存实际看到的快照」，组装 state 视图。
+//
+// 缓存未命中时 cached=nil，ConfigApplied 保持 false —— 这是诚实的：
+// 未命中说明鉴权链下次会回源重建，此刻无法断言"已生效"。
+func (s *APIKeyService) GetKeyCapacityState(ctx context.Context, keyID int64, gate *KeyCapacityGate) (*KeyCapacityState, error) {
+	configured, err := s.GetByID(ctx, keyID)
+	if err != nil {
+		return nil, err
+	}
+	if configured == nil {
+		return nil, ErrAPIKeyNotFound
+	}
+
+	// 从鉴权缓存取当前生效的快照（只读，不触发重建）
+	var cached *APIKey
+	if entry, cerr := s.loadAuthCacheEntry(ctx, configured.Key, s.authCacheKey(configured.Key)); cerr == nil && entry != nil {
+		if probe, used, aerr := s.applyAuthCacheEntry(configured.Key, entry); aerr == nil && used {
+			cached = probe
+		}
+	}
+
+	return BuildKeyCapacityState(configured, cached, gate), nil
+}

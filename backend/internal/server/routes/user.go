@@ -77,6 +77,8 @@ func RegisterUserRoutes(
 		{
 			keys.GET("", h.APIKey.List)
 			keys.GET("/:id", h.APIKey.GetByID)
+			// 容量状态：库里的配置 / 鉴权链实际看到的值 / 是否已生效（add-key-capacity-contract）
+			keys.GET("/:id/state", h.APIKey.State)
 			keys.POST("", h.APIKey.Create)
 			keys.PUT("/:id", h.APIKey.Update)
 			keys.DELETE("/:id", h.APIKey.Delete)
