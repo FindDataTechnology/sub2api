@@ -690,7 +690,7 @@ func lockAndMergeAccountProbeExtra(
 		SELECT
 			platform = $2
 			AND type = $3
-			AND credentials = $4::jsonb
+			AND credentials_hash = $7
 			AND proxy_id IS NOT DISTINCT FROM $5,
 			COALESCE(
 				platform IN (`+ollamaCloudUsagePlatformsSQL+`)
@@ -736,7 +736,7 @@ func lockAndMergeAccountProbeExtra(
 		FROM accounts
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR NO KEY UPDATE
-	`, account.ID, account.Platform, account.Type, string(credentials), proxyID, credentialAPIKeyHashArg(account.Credentials))
+	`, account.ID, account.Platform, account.Type, string(credentials), proxyID, credentialAPIKeyHashArg(account.Credentials), credentialHashHex(account.Credentials))
 	if err != nil {
 		return nil, err
 	}
@@ -960,7 +960,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				-- ollama.com 基址正则）：Ollama 行不会被 OpenCode 分支遮蔽；
 				-- opencode_go 平台行不在 Ollama 白名单内，与 Ollama 分支真互斥。
 				WHEN type = 'apikey'
-					AND credentials IS DISTINCT FROM $1::jsonb
+					AND credentials_hash IS DISTINCT FROM $4
 					AND (
 						-- 旧行按新谓词属于 OpenCode 用量身份
 						(platform = 'opencode_go'
@@ -991,7 +991,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				-- 非 Ollama 账号的无变化持久化误清探测快照或重写 NULL extra。
 				WHEN platform IN (`+ollamaCloudUsagePlatformsSQL+`)
 					AND type = 'apikey'
-					AND credentials IS DISTINCT FROM $1::jsonb
+					AND credentials_hash IS DISTINCT FROM $4
 					AND (
 						credentials_api_key_hash IS DISTINCT FROM $3
 						OR NOT (
@@ -1007,13 +1007,13 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				-- 上游倍率探测已放宽到全部 API-key 平台：凭证变化即视为探测
 				-- 身份变化，丢弃 stale 快照。
 				WHEN type = 'apikey'
-					AND credentials IS DISTINCT FROM $1::jsonb
+					AND credentials_hash IS DISTINCT FROM $4
 				THEN COALESCE(extra, '{}'::jsonb) - 'upstream_billing_probe'
 				ELSE extra
 			END,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
-	`, string(payload), id, credentialAPIKeyHashArg(credentials))
+	`, string(payload), id, credentialAPIKeyHashArg(credentials), credentialHashHex(credentials))
 	if err != nil {
 		return err
 	}
