@@ -326,7 +326,9 @@ func TestBulkUpdateOpenCodeGoEligiblePredicateIncludesBaseURL(t *testing.T) {
 	// 覆盖 opencode_go 平台与挂载白名单的 opencode 基址，使 Ollama 行无法命中。
 	require.Contains(t, firstWhen, "platform = 'opencode_go'")
 	require.Contains(t, firstWhen, "[oO][pP][eE][nN][cC][oO][dD][eE]")
-	require.Contains(t, firstWhen, "credentials ->> 'base_url'")
+	// 2.3：base_url 改从 credentials_meta 取（语义等价由真 PG 差分保证）
+	require.NotContains(t, firstWhen, "credentials ->> 'base_url'")
+	require.Contains(t, firstWhen, "credentials_meta ->> 'base_url'")
 	require.NotContains(t, firstWhen, "[oO][lL][lL][aA][mM][aA]")
 }
 
@@ -345,7 +347,7 @@ func TestBulkUpdateOpenCodeGoBaseURLClauseIsNullSafe(t *testing.T) {
 	require.NotEmpty(t, exec.execQueries)
 	query := normalizeSQLWhitespace(exec.execQueries[0])
 	require.Contains(t, query, "IS NOT TRUE")
-	require.NotContains(t, query, "AND NOT btrim(credentials ->> 'base_url')")
+	require.NotContains(t, query, "AND NOT btrim(credentials_meta ->> 'base_url')")
 }
 
 // F6 回归：SQL 正则与 service.isOpenCodeGoBaseURL 对齐，接受显式默认端口 :443 与
@@ -484,7 +486,7 @@ func TestUpdateCredentialsOpenCodeBranchPrecedesOllamaBranch(t *testing.T) {
 // unit 通道此前完全拦不住，这里以文本形态钉死该 COALESCE 表达式。
 func TestOpenCodeGoUsageEligibleSQLDefaultsMissingAccountModeToGo(t *testing.T) {
 	require.Contains(t, opencodeGoUsageEligibleSQL,
-		"COALESCE(btrim(credentials ->> 'account_mode') <> 'zen', true)")
+		"COALESCE(btrim(credentials_meta ->> 'account_mode') <> 'zen', true)")
 }
 
 // Go 侧「默认 Go」契约的表驱动钉死：account_mode 只有 trim 后恰好等于 "zen" 才是

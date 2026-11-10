@@ -40,9 +40,9 @@ const (
 	opencodeGoUsageEligibleSQL = `
 	(
 		(platform = 'opencode_go'
-			AND COALESCE(btrim(credentials ->> 'account_mode') <> 'zen', true))
+			AND COALESCE(btrim(credentials_meta ->> 'account_mode') <> 'zen', true))
 		OR (platform IN (` + opencodeGoUsageMountPlatformsSQL + `)
-			AND ` + opencodeGoBaseURLMatchSQLPrefix + `credentials ->> 'base_url'` + opencodeGoBaseURLMatchSQLSuffix + `)
+			AND ` + opencodeGoBaseURLMatchSQLPrefix + `credentials_meta ->> 'base_url'` + opencodeGoBaseURLMatchSQLSuffix + `)
 	)
 	AND type = 'apikey'
 	AND jsonb_typeof(credentials -> 'api_key') = 'string'
