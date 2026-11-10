@@ -228,6 +228,12 @@ type CreateAPIKeyRequest struct {
 	RateLimit5h float64 `json:"rate_limit_5h"`
 	RateLimit1d float64 `json:"rate_limit_1d"`
 	RateLimit7d float64 `json:"rate_limit_7d"`
+
+	// 容量契约（add-key-capacity-contract）：0 表示不限/不占席位。
+	ConcurrencyRequest int        `json:"concurrency_request"`
+	ConcurrencyLimit   int        `json:"concurrency_limit"`
+	RPMLimit           int        `json:"rpm_limit"`
+	EffectiveAt        *time.Time `json:"effective_at"`
 }
 
 // UpdateAPIKeyRequest 更新API Key请求
@@ -249,6 +255,13 @@ type UpdateAPIKeyRequest struct {
 	RateLimit1d         *float64 `json:"rate_limit_1d"`
 	RateLimit7d         *float64 `json:"rate_limit_7d"`
 	ResetRateLimitUsage *bool    `json:"reset_rate_limit_usage"` // Reset all usage counters to 0
+
+	// 容量契约（nil = 不修改；0 = 不限/不占席位）
+	ConcurrencyRequest *int       `json:"concurrency_request"`
+	ConcurrencyLimit   *int       `json:"concurrency_limit"`
+	RPMLimit           *int       `json:"rpm_limit"`
+	EffectiveAt        *time.Time `json:"effective_at"`
+	ClearEffectiveAt   bool       `json:"-"` // 清空生效时刻（内部用）
 }
 
 func validateAPIKeyLimit(v float64) error {
@@ -515,6 +528,19 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 		}
 	}
 
+	// 容量契约：形状校验 + 聚合不变量（Σrequest ≤ 池、limit ≤ 池、request ≤ limit）
+	// 放在分组校验之前：容量字段自身非法时不该先去查分组。
+	if err := validateCapacityFieldsShape(req.ConcurrencyRequest, req.ConcurrencyLimit, req.RPMLimit); err != nil {
+		return nil, err
+	}
+	poolCapacity := 0
+	if user != nil {
+		poolCapacity = user.Concurrency
+	}
+	if err := s.checkCapacityAllocation(ctx, userID, poolCapacity, 0, req.ConcurrencyRequest, req.ConcurrencyLimit); err != nil {
+		return nil, err
+	}
+
 	// 验证分组权限（如果指定了分组）
 	if req.GroupID != nil {
 		group, err := s.groupRepo.GetByID(ctx, *req.GroupID)
@@ -581,6 +607,11 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 		RateLimit5h: req.RateLimit5h,
 		RateLimit1d: req.RateLimit1d,
 		RateLimit7d: req.RateLimit7d,
+
+		ConcurrencyRequest: req.ConcurrencyRequest,
+		ConcurrencyLimit:   req.ConcurrencyLimit,
+		RPMLimit:           req.RPMLimit,
+		EffectiveAt:        req.EffectiveAt,
 	}
 
 	// Set expiration time if specified
@@ -909,6 +940,48 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	}
 	if req.RateLimit7d != nil {
 		apiKey.RateLimit7d = *req.RateLimit7d
+		fields.RateLimits = true
+	}
+
+	// 容量契约（add-key-capacity-contract）：先算出目标值，做形状与聚合校验，
+	// 通过后才落库。校验失败必须**整体拒绝**（不写任何字段），否则会留下半态。
+	if req.ConcurrencyRequest != nil || req.ConcurrencyLimit != nil || req.RPMLimit != nil {
+		nextRequest := apiKey.ConcurrencyRequest
+		nextLimit := apiKey.ConcurrencyLimit
+		nextRPM := apiKey.RPMLimit
+		if req.ConcurrencyRequest != nil {
+			nextRequest = *req.ConcurrencyRequest
+		}
+		if req.ConcurrencyLimit != nil {
+			nextLimit = *req.ConcurrencyLimit
+		}
+		if req.RPMLimit != nil {
+			nextRPM = *req.RPMLimit
+		}
+		if err := validateCapacityFieldsShape(nextRequest, nextLimit, nextRPM); err != nil {
+			return nil, err
+		}
+		// 池容量取该用户的 User.Concurrency
+		poolCapacity := 0
+		if u, uerr := s.userRepo.GetByID(ctx, apiKey.UserID); uerr == nil && u != nil {
+			poolCapacity = u.Concurrency
+		}
+		// 排除自身：它旧的 request 不该与新的叠加
+		if err := s.checkCapacityAllocation(ctx, apiKey.UserID, poolCapacity, apiKey.ID, nextRequest, nextLimit); err != nil {
+			return nil, err
+		}
+
+		apiKey.ConcurrencyRequest = nextRequest
+		apiKey.ConcurrencyLimit = nextLimit
+		apiKey.RPMLimit = nextRPM
+		fields.RateLimits = true
+	}
+	if req.EffectiveAt != nil {
+		apiKey.EffectiveAt = req.EffectiveAt
+		fields.RateLimits = true
+	}
+	if req.ClearEffectiveAt {
+		apiKey.EffectiveAt = nil
 		fields.RateLimits = true
 	}
 	resetRateLimit := req.ResetRateLimitUsage != nil && *req.ResetRateLimitUsage
