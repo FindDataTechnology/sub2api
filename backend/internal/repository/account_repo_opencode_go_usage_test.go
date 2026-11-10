@@ -278,6 +278,7 @@ func TestUpdateCredentialsOpenCodeGoCleanupRequiresChangedCredentials(t *testing
 
 func TestBulkUpdateOpenCodeGoIdentityCleanupIsValueConditional(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	exec.queryRows = emptyCredentialQueryRows(t)
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
@@ -304,6 +305,7 @@ func TestBulkUpdateOpenCodeGoIdentityCleanupIsValueConditional(t *testing.T) {
 // 的 WHEN 携带 opencode 正则（与 Ollama 正则互斥），真实行为由 integration 测试覆盖。
 func TestBulkUpdateOpenCodeGoEligiblePredicateIncludesBaseURL(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	exec.queryRows = emptyCredentialQueryRows(t)
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	proxyID := int64(9)
@@ -337,6 +339,7 @@ func TestBulkUpdateOpenCodeGoEligiblePredicateIncludesBaseURL(t *testing.T) {
 // OpenCode 状态；IS NOT TRUE 把 NULL 视为不匹配。
 func TestBulkUpdateOpenCodeGoBaseURLClauseIsNullSafe(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	exec.queryRows = emptyCredentialQueryRows(t)
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
@@ -422,6 +425,7 @@ func TestOpenCodeGoUsagePlatformWhitelistMatchesServicePredicate(t *testing.T) {
 
 func TestBulkUpdateOpenCodeGoProxyChangeClearsSnapshotOnly(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	exec.queryRows = emptyCredentialQueryRows(t)
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	proxyID := int64(9)

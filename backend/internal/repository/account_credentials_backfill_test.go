@@ -24,6 +24,7 @@ DROP TABLE IF EXISTS api_keys;
 CREATE TABLE accounts (
 	id                       bigserial PRIMARY KEY,
 	platform                 text NOT NULL DEFAULT 'openai',
+	deleted_at               timestamptz,
 	type                     text NOT NULL DEFAULT 'apikey',
 	credentials              jsonb NOT NULL DEFAULT '{}'::jsonb,
 	credentials_meta         jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -212,4 +213,75 @@ func TestCredentialBackfill_LimitAndBatching(t *testing.T) {
 	require.Equal(t, 2, rest.AccountsUpdated)
 	remaining, _ := countBackfillPending(t, db)
 	require.Zero(t, remaining)
+}
+
+// TestDeriveCredentialColumnsAfterMerge_RepairsDerivedColumns 是 2.4 的真 PG 验收：
+// 合并语句把派生列置空后，回读重算必须把它们补回**正确**的值（而不是留在 NULL）。
+//
+// 为什么这条必须有真库：这段逻辑是"写完之后再读一次再算一次"，纯 sqlmock 只能证明
+// SQL 文本里出现了 SELECT，证明不了它读到的到底是合并前还是合并后的明文。
+func TestDeriveCredentialColumnsAfterMerge_RepairsDerivedColumns(t *testing.T) {
+	db := backfillDrillDB(t)
+	seedBackfillDrill(t, db)
+	cryptor := credentialTestEncryptor(t)
+
+	// 模拟"合并已发生、派生列被置空"的中间状态
+	_, err := db.Exec(`
+		UPDATE accounts
+		SET credentials = COALESCE(credentials, '{}'::jsonb) || '{"api_key":"sk-rotated"}'::jsonb,
+			credentials_meta = '{}'::jsonb,
+			credentials_encrypted = NULL,
+			credentials_hash = NULL,
+			credentials_api_key_hash = NULL
+		WHERE id = 1`)
+	require.NoError(t, err)
+
+	require.NoError(t, deriveCredentialColumnsAfterMerge(context.Background(), db, cryptor, []int64{1, 2, 3}))
+
+	// id=1：合并后是 {"api_key":"sk-rotated","base_url":"https://ollama.com"}
+	expectedMerged := map[string]any{"api_key": "sk-rotated", "base_url": "https://ollama.com"}
+	want, err := CredentialCryptoColumnsFor(expectedMerged, cryptor)
+	require.NoError(t, err)
+
+	var hash string
+	var apiKeyHash, encrypted *string
+	require.NoError(t, db.QueryRow(
+		`SELECT credentials_hash, credentials_api_key_hash, credentials_encrypted FROM accounts WHERE id = 1`,
+	).Scan(&hash, &apiKeyHash, &encrypted))
+
+	require.Equal(t, *want.Hash, hash, "哈希必须按**合并后**的明文算")
+	require.NotNil(t, apiKeyHash)
+	require.Equal(t, *want.APIKeyHash, *apiKeyHash)
+	require.NotNil(t, encrypted, "密文列必须被补上，不能留 NULL")
+
+	plaintext, err := cryptor.Decrypt(*encrypted)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"api_key":"sk-rotated","base_url":"https://ollama.com"}`, plaintext)
+
+	// 顺带确认它没有把没被合并的行写坏
+	var untouched string
+	require.NoError(t, db.QueryRow(`SELECT credentials_hash FROM accounts WHERE id = 2`).Scan(&untouched))
+	expected2, err := CredentialCryptoColumnsFor(map[string]any{"api_key": "sk-b", "account_mode": "go"}, cryptor)
+	require.NoError(t, err)
+	require.Equal(t, *expected2.Hash, untouched)
+}
+
+// 没有加密器时密文列必须写 NULL（而不是留着过期密文）。
+func TestDeriveCredentialColumnsAfterMerge_NilCryptorClearsCiphertext(t *testing.T) {
+	db := backfillDrillDB(t)
+	seedBackfillDrill(t, db)
+	cryptor := credentialTestEncryptor(t)
+
+	_, err := BackfillCredentialColumns(context.Background(), db, cryptor, CredentialBackfillOptions{})
+	require.NoError(t, err)
+
+	var before string
+	require.NoError(t, db.QueryRow(`SELECT credentials_encrypted FROM accounts WHERE id = 1`).Scan(&before))
+	require.NotEmpty(t, before)
+
+	require.NoError(t, deriveCredentialColumnsAfterMerge(context.Background(), db, nil, []int64{1}))
+
+	var after *string
+	require.NoError(t, db.QueryRow(`SELECT credentials_encrypted FROM accounts WHERE id = 1`).Scan(&after))
+	require.Nil(t, after, "无加密器时不留过期密文，读路径回落明文")
 }

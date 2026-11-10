@@ -1,13 +1,17 @@
 package repository
 
 import (
+	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync/atomic"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/lib/pq"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -260,4 +264,100 @@ func credentialHashOfRawJSON(raw string) string {
 		return ""
 	}
 	return credentialHashHex(decoded)
+}
+
+// credentialColumnUpdater 是"能执行 SQL 的东西"的最小接口（*sql.DB / *dbent.Client / tx 都满足）。
+// 抽出来是为了让派生列回填既能用在仓储写路径，也能用在事务里。
+type credentialColumnUpdater interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// deriveCredentialColumnsAfterMerge 在**同一个事务内**重新推导指定账号的派生列。
+//
+// 为什么需要它：BulkUpdate 的凭据是 SQL 侧合并（`credentials || $n`），Go 拿不到
+// "合并后的完整文档"，因此无法在写之前算出 meta/密文/两个指纹。之前的做法是把
+// 这几列置 NULL 让读路径回落明文——安全但会让密文丢失，且阶段四 drop 明文列之后
+// 就不再安全。
+//
+// 现在改为：合并语句执行完之后，在同一事务里回读明文（能读到刚合并的结果），
+// 在 Go 端算派生列，再一次性写回。合并语义一字不动，派生列从"被清空"变成"正确"。
+//
+// 必须在事务内调用：否则回读到的是别的连接可能已经改过的数据。
+func deriveCredentialColumnsAfterMerge(ctx context.Context, exec credentialColumnUpdater, cryptor service.SecretEncryptor, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := exec.QueryContext(ctx, `
+		SELECT id, credentials
+		FROM accounts
+		WHERE id = ANY($1) AND deleted_at IS NULL`, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("derive credential columns: select: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type derived struct {
+		id        int64
+		meta      string
+		encrypted *string
+		hash      string
+		apiKey    *string
+	}
+	batch := make([]derived, 0, len(ids))
+	for rows.Next() {
+		var id int64
+		var raw []byte
+		if err := rows.Scan(&id, &raw); err != nil {
+			return fmt.Errorf("derive credential columns: scan: %w", err)
+		}
+		decoded := map[string]any{}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				return fmt.Errorf("derive credential columns: account %d: %w", id, err)
+			}
+		}
+		columns, err := CredentialCryptoColumnsFor(decoded, cryptor)
+		if err != nil {
+			return fmt.Errorf("derive credential columns: account %d: %w", id, err)
+		}
+		metaJSON, err := json.Marshal(columns.Meta)
+		if err != nil {
+			return fmt.Errorf("derive credential columns: account %d: %w", id, err)
+		}
+		batch = append(batch, derived{
+			id:        id,
+			meta:      string(metaJSON),
+			encrypted: columns.Encrypted,
+			hash:      *columns.Hash,
+			apiKey:    columns.APIKeyHash,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("derive credential columns: rows: %w", err)
+	}
+	if len(batch) == 0 {
+		return nil
+	}
+
+	placeholder := 1
+	values := make([]string, 0, len(batch))
+	args := make([]any, 0, len(batch)*4)
+	for _, d := range batch {
+		values = append(values, fmt.Sprintf("($%d::bigint, $%d::jsonb, $%d::text, $%d::text, $%d::text)", placeholder, placeholder+1, placeholder+2, placeholder+3, placeholder+4))
+		args = append(args, d.id, d.meta, d.encrypted, d.hash, d.apiKey)
+		placeholder += 5
+	}
+	_, err = exec.ExecContext(ctx, `
+		UPDATE accounts AS a
+		SET credentials_meta = v.meta,
+			credentials_encrypted = v.encrypted,
+			credentials_hash = v.hash,
+			credentials_api_key_hash = v.api_key_hash
+		FROM (VALUES `+strings.Join(values, ", ")+`) AS v(id, meta, encrypted, hash, api_key_hash)
+		WHERE a.id = v.id`, args...)
+	if err != nil {
+		return fmt.Errorf("derive credential columns: update: %w", err)
+	}
+	return nil
 }

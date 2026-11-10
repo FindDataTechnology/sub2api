@@ -21,6 +21,7 @@ func TestBulkUpdate_ClearsDerivedCredentialColumnsOnMerge(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
+	exec.queryRows = emptyCredentialQueryRows(t)
 	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
 		Credentials: map[string]any{"api_key": "sk-rotated"},
 	})
@@ -29,17 +30,21 @@ func TestBulkUpdate_ClearsDerivedCredentialColumnsOnMerge(t *testing.T) {
 
 	query := normalizeSQLWhitespace(exec.execQueries[0])
 
-	// 前提：合并本身仍是 SQL 侧做的（阶段二会改成 FOR UPDATE + Go 端合并）
+	// 前提：合并本身仍是 SQL 侧做的
 	require.Contains(t, query, "credentials = COALESCE(credentials, '{}'::jsonb) ||")
 
-	// 派生列必须被置空，而不是保持旧值
-	require.Contains(t, query, "credentials_encrypted = NULL")
+	// 合并前必须先把派生列置为"未派生"，保证期间不会留下与明文不一致的过期值
 	require.Contains(t, query, "credentials_hash = NULL")
 	require.Contains(t, query, "credentials_api_key_hash = NULL")
 	require.Contains(t, query, "credentials_meta = '{}'::jsonb")
 
 	// 明文列 MUST 没被改成"整份替换"——那会丢掉未在 updates 里出现的子键
 	require.NotContains(t, query, "credentials = $")
+
+	// 2.4：合并语句之后 MUST 在同一事务里回读明文并重算派生列。
+	// 只置空不回填等于"每次批量编辑都把密文抹掉"，阶段四之后就读不到凭据了。
+	require.GreaterOrEqual(t, len(exec.queryQueries), 1, "合并后必须回读明文")
+	require.Contains(t, normalizeSQLWhitespace(exec.queryQueries[0]), "SELECT id, credentials")
 }
 
 // 不传 Credentials 时不该无端清空派生列——否则任何一次 status/priority 批量更新
