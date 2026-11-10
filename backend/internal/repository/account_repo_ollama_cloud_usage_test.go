@@ -180,7 +180,11 @@ func TestListOllamaCloudUsageGroupAccountsUsesOneStrictBatchQuery(t *testing.T) 
 	query := normalizeSQLWhitespace(capturedSQL)
 	require.Contains(t, query, "credentials ->> 'api_key' = ANY($1)")
 	require.Contains(t, query, "platform IN ('openai', 'anthropic', 'kimi', 'zhipu', 'deepseek', 'minimax')")
-	require.Contains(t, query, "jsonb_typeof(credentials -> 'api_key') = 'string'")
+	// 2.2：api_key 的"存在且为字符串"改由指纹列表达。
+	// 语义收窄（空串 api_key 不再算合格）已由 credential_sql_diff_test.go 的
+	// 真 PG 差分钉住；这里只保证确实换了列，且不许残留旧写法。
+	require.NotContains(t, query, "jsonb_typeof(credentials -> 'api_key')")
+	require.Contains(t, query, "credentials_api_key_hash IS NOT NULL")
 	require.Contains(t, query, ollamaCloudBaseURLMatchesSQL("credentials_meta ->> 'base_url'"))
 	require.NotContains(t, query, "~*")
 	require.NoError(t, mock.ExpectationsWereMet())

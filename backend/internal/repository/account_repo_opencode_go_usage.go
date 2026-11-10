@@ -45,7 +45,7 @@ const (
 			AND ` + opencodeGoBaseURLMatchSQLPrefix + `credentials_meta ->> 'base_url'` + opencodeGoBaseURLMatchSQLSuffix + `)
 	)
 	AND type = 'apikey'
-	AND jsonb_typeof(credentials -> 'api_key') = 'string'
+	AND credentials_api_key_hash IS NOT NULL
 `
 )
 
@@ -393,7 +393,7 @@ func (r *accountRepository) ListDueOpenCodeGoUsageAccounts(
 			FROM accounts
 			WHERE deleted_at IS NULL
 				AND `+opencodeGoUsageEligibleSQL+`
-				AND jsonb_typeof(credentials -> 'api_key') = 'string'
+				AND credentials_api_key_hash IS NOT NULL
 			GROUP BY credentials ->> 'api_key'
 		), joined AS (
 			SELECT e.id, e.api_key, e.snapshot, g.group_last_used_at,
