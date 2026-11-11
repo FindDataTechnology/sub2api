@@ -61,15 +61,15 @@ func TestCredentialSQLStructure_OnlyKnownSubkeySitesRemain(t *testing.T) {
 	//   - SetGrokOAuthError 那处 → 已改成 Go 侧早返回
 	//   - ListOAuthRefreshCandidatePage 那处 → 已读 credentials_meta 的派生事实
 	// 所以这里不再有白名单条目；新增任何一处都会让本测试变红。
-	allowed := map[string][]string{
-		// 剩余唯一一处**生产**子键提取：scoped-admin 的账号列表仍从明文列抽 model_mapping
-		// 用于展示（不是等值判断，也不是密钥）。`$1` 那条 `jsonb_build_object` 已在
-		// `3c9b947e1` 移除——Codex 身份匹配改在 Go 侧做（design.md A4 选项 C），
-		// 所以白名单里不再需要它。
-		"custom_admin_key_scope.go": {
-			"->'model_mapping' AS model_mapping",
-		},
-	}
+	// 现在**没有任何白名单条目**：生产侧对明文列的子键提取已归零。
+	// 归零不是靠"少扫一点"，而是逐一改掉的：
+	//   - api_key 取值类 → 指纹分组
+	//   - SetGrokOAuthError → Go 侧早返回
+	//   - ListOAuthRefreshCandidatePage → credentials_meta 的派生事实
+	//   - scoped-admin Codex 身份匹配 → Go 侧解密后匹配（A4 选项 C，`3c9b947e1`）
+	//   - scoped-admin 列表的 model_mapping → 解密后取值（Go 侧）
+	// 新增任何一处都会变红，且**必须同时更新 13b/5.2 的台账**。
+	allowed := map[string][]string{}
 
 	var unexpected []string
 	total := 0
@@ -100,16 +100,13 @@ func TestCredentialSQLStructure_OnlyKnownSubkeySitesRemain(t *testing.T) {
 	sort.Strings(unexpected)
 	require.Empty(t, unexpected,
 		"出现了清单外的 `credentials -> ...` 子键提取。阶段二之后这类新增几乎一定是漏改：%v", unexpected)
-	// 期望值改为 1，并说明为什么不是 0：
-	// 阶段二把 51 处改走新列后，按两种形态（`credentials ->> 'x'` 与
-	// `FieldCredentials) + "->'x'"`）扫，生产侧**还剩 1 处**未改：
-	// custom_admin_key_scope.go:50（从明文列抽 model_mapping）。
-	// 另有一处 :179 用 `c := s.C(FieldCredentials)` 再拼 jsonb_build_object（连
-	// access_token 一起抽），正则抓不到那种形态，已在白名单显式登记。
-	// **这两处都是阶段四 drop 明文列前必须改掉的**（RELEASE-CHECKLIST 13b）。
-	require.Equal(t, 1, total,
-		"剩余子键提取应为 1 处（custom_admin_key_scope.go:50 抽 model_mapping）。"+
-			"归零是阶段四 drop 明文列的前置——改完这里要同步改成 0")
+	// 0 就是终点：生产侧不再有任何 SQL 从明文列抽子键。
+	// 这个数字曾经是 8 → 1 → 0，每一次下降都对应一处改造；
+	// 它一旦回升，说明有人又把子键提取写回了 SQL（`->>` 作用在密文上是静默 NULL，
+	// 不会报错，只会让"某些账号突然查不到"）。
+	require.Zero(t, total,
+		"生产侧的子键提取应为 0 处。上升说明有 SQL 又开始吃明文列——"+
+			"drop 之后那类语句会运行期报错，或更糟：静默返回 NULL")
 }
 
 // TestCredentialSQLStructure_NoWholeDocumentComparisonsLeft 整文档等值比较必须清零。

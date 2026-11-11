@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -32,47 +31,43 @@ func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.Pa
 	if err != nil {
 		return nil, 0, err
 	}
-	// SQL 只投影模型映射子字段，不加载 Token、API Key、接入地址或其他凭证。
-	var rows []struct {
-		ID           int64
-		Name         string
-		Notes        *string
-		Platform     string
-		Type         string
-		Status       string
-		Schedulable  bool
-		Concurrency  int
-		Priority     int
-		ModelMapping json.RawMessage `json:"model_mapping"`
-	}
-	err = q.Offset(p.Offset()).Limit(p.Limit()).Order(dbaccount.ByID()).
-		Select(dbaccount.FieldID, dbaccount.FieldName, dbaccount.FieldNotes, dbaccount.FieldPlatform, dbaccount.FieldType, dbaccount.FieldStatus, dbaccount.FieldSchedulable, dbaccount.FieldConcurrency, dbaccount.FieldPriority).
-		Aggregate(func(s *entsql.Selector) string {
-			return s.C(dbaccount.FieldCredentials) + "->'model_mapping' AS model_mapping"
-		}).Scan(ctx, &rows)
+	// model_mapping 原先用 SQL 聚合 `credentials->'model_mapping'` 直接投影。
+	// drop 明文列之后那条聚合会运行期报错，所以改成**解密后取值**：
+	// 凭据只在 Go 侧出现，返回体里也只有 model_mapping，其余字段不外带。
+	models, err := q.Offset(p.Offset()).Limit(p.Limit()).Order(dbaccount.ByID()).
+		Select(dbaccount.FieldID, dbaccount.FieldName, dbaccount.FieldNotes,
+			dbaccount.FieldPlatform, dbaccount.FieldType, dbaccount.FieldStatus,
+			dbaccount.FieldSchedulable, dbaccount.FieldConcurrency, dbaccount.FieldPriority,
+			dbaccount.FieldCredentials, dbaccount.FieldCredentialsEncrypted).
+		All(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
-	accounts := make([]service.Account, 0, len(rows))
-	for _, row := range rows {
-		groups, e := r.loadAccountGroupIDs(ctx, row.ID)
+	accounts := make([]service.Account, 0, len(models))
+	for _, m := range models {
+		groups, e := r.loadAccountGroupIDs(ctx, m.ID)
 		if e != nil {
 			return nil, 0, e
 		}
-		var rawMapping map[string]any
 		mapping := map[string]string{}
-		if json.Unmarshal(row.ModelMapping, &rawMapping) == nil {
-			for source, target := range rawMapping {
+		creds, credErr := r.credentialsFromEntity(m)
+		if credErr != nil {
+			// 这一列只用于展示：解不开就让该行映射为空，别把整页列表打成 500。
+			// 但必须留痕，否则"管理端看不到路由配置"会变成查不出原因的现象。
+			logger.LegacyPrintf("repository.scopedadmin",
+				"[ScopedAdminList] cannot resolve credentials for account=%d: %v; returning empty model_mapping", m.ID, credErr)
+		} else if raw, ok := creds["model_mapping"].(map[string]any); ok {
+			for source, target := range raw {
 				if value, ok := target.(string); ok {
 					mapping[source] = value
 				}
 			}
 		}
-		var credentials map[string]any
+		var outCredentials map[string]any
 		if len(mapping) > 0 {
-			credentials = map[string]any{"model_mapping": mapping}
+			outCredentials = map[string]any{"model_mapping": mapping}
 		}
-		accounts = append(accounts, service.Account{ID: row.ID, Name: row.Name, Notes: row.Notes, Platform: row.Platform, Type: row.Type, Status: row.Status, Schedulable: row.Schedulable, Concurrency: row.Concurrency, Priority: row.Priority, GroupIDs: groups, Credentials: credentials})
+		accounts = append(accounts, service.Account{ID: m.ID, Name: m.Name, Notes: m.Notes, Platform: m.Platform, Type: m.Type, Status: m.Status, Schedulable: m.Schedulable, Concurrency: m.Concurrency, Priority: m.Priority, GroupIDs: groups, Credentials: outCredentials})
 	}
 	return accounts, int64(total), nil
 }
