@@ -292,7 +292,7 @@ func TestReclaimInterruptedRequeuesOrphanedRunning(t *testing.T) {
 		VALUES ($1, 1, 'task-orphan-1', now() - interval '10 minutes')`, id)
 	require.NoError(t, err)
 
-	requeued, failed, err := store.ReclaimInterrupted(context.Background(), time.Now(), 6)
+	requeued, failed, err := store.ReclaimInterrupted(context.Background(), time.Now(), time.Now(), 6, nil)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, requeued)
 	require.Zero(t, failed)
@@ -320,11 +320,52 @@ func TestReclaimInterruptedRequeuesOrphanedRunning(t *testing.T) {
 	id2 := insertDeferJob(t, db, &deadline)
 	_, err = db.Exec(`UPDATE lanes_task_jobs SET status='running', attempts=6 WHERE id=$1`, id2)
 	require.NoError(t, err)
-	_, failed, err = store.ReclaimInterrupted(context.Background(), time.Now(), 6)
+	_, failed, err = store.ReclaimInterrupted(context.Background(), time.Now(), time.Now(), 6, nil)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, failed)
 	j2, err := store.Get(context.Background(), id2)
 	require.NoError(t, err)
 	require.Equal(t, "failed", j2.Status)
 	require.Contains(t, *j2.Reason, "interrupted_too_many")
+}
+
+// 运行期回收的两个边界：**新**的不碰、**在飞**的不碰（真库）。
+//
+// 启动时回收可以"见 running 就收"（本进程刚起，必然都是前一个进程的），
+// 但运行期不行：Finish 写库失败留下的行与"正在跑的尝试"在库里长得一样，
+// 区分只能靠 ① updated_at 是否超过 2×attemptTimeout；② 本进程内存里的活跃集。
+func TestReclaimRespectsStalenessAndInflight(t *testing.T) {
+	db := openLanesScratchDB(t)
+	_ = newSchedTestLane(t, db, &stubRunner{outcome: AttemptCompleted, status: 200})
+	store := service.GetLanesTaskStore()
+	now := time.Now()
+
+	fresh := insertDeferJob(t, db, ptrTime(now.Add(time.Hour)))
+	_, err := db.Exec(`UPDATE lanes_task_jobs SET status='running', updated_at=$1 WHERE id=$2`, now, fresh)
+	require.NoError(t, err)
+
+	// ① 刚更新过的 running：不算孤儿，一个都不许收。
+	requeued, failed, err := store.ReclaimInterrupted(context.Background(), now, now.Add(-time.Minute), 6, nil)
+	require.NoError(t, err)
+	require.Zero(t, requeued)
+	require.Zero(t, failed, "新行不得被当成孤儿（否则正在跑的尝试会被抢跑）")
+
+	// ② 已过期但显式在飞：同样不许收。
+	stale := insertDeferJob(t, db, ptrTime(now.Add(time.Hour)))
+	_, err = db.Exec(`UPDATE lanes_task_jobs SET status='running', updated_at=$1 WHERE id=$2`,
+		now.Add(-time.Hour), stale)
+	require.NoError(t, err)
+	requeued, failed, err = store.ReclaimInterrupted(context.Background(), now, now.Add(-time.Minute), 6, []int64{stale})
+	require.NoError(t, err)
+	require.Zero(t, requeued)
+	require.Zero(t, failed, "在飞任务必须被 skip 列表挡住")
+
+	// ③ 过期的、且不在飞的：才收。
+	requeued, failed, err = store.ReclaimInterrupted(context.Background(), now, now.Add(-time.Minute), 6, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, requeued, "只有真正过期的孤儿该被收回")
+	require.Zero(t, failed)
+	job, err := store.Get(context.Background(), stale)
+	require.NoError(t, err)
+	require.Equal(t, "pending", job.Status)
 }
