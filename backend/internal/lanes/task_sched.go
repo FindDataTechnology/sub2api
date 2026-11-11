@@ -30,6 +30,20 @@ func (t *TaskLane) startScheduler() {
 		if t.runner == nil {
 			return
 		}
+		// 先收回上一个进程留下的 running，再开始领任务。
+		//
+		// 顺序有讲究：ClaimDue 只捞 pending，孤儿不先收回就会一直"在路上"；
+		// 放在 goroutine 之前同步做，第一次 tick 就看到干净状态，失败也可读。
+		if store := service.GetLanesTaskStore(); store != nil {
+			requeued, failed, err := store.ReclaimInterrupted(context.Background(), t.now(), taskMaxAttempts)
+			if err != nil {
+				logger.LegacyPrintf("lanes.tasks", "reclaim interrupted failed: err=%v", err)
+			} else if requeued > 0 || failed > 0 {
+				logger.LegacyPrintf("lanes.tasks",
+					"reclaimed %d interrupted task(s): requeued=%d failed=%d (上一个进程在跑它们时退出了)",
+					requeued+failed, requeued, failed)
+			}
+		}
 		go t.schedulerLoop()
 	})
 }

@@ -394,6 +394,67 @@ WHERE status = 'pending' AND deadline_at IS NOT NULL AND deadline_at <= $1`, now
 	return res.RowsAffected()
 }
 
+// ReclaimInterrupted 把**上一个进程留下的** running 任务收回。
+//
+// 为什么必须有：ClaimDue 只捞 status='pending'，全库没有任何地方回收 running。
+// 进程在跑任务时死掉（滚版、OOM、kill -9）→ 该行永远停在 running：
+// 端点一直显示"在跑"，调度器再也不会领取它，deadline 到了也不会淘汰
+// （ExpireOverdue 只管 pending）。2026-11-11 一天滚了三次版，每次都有这个窗口。
+//
+// 语义（单副本前提，见 task_sched.go 顶部）：
+//   - 只有本进程启动那一刻才调用，所以出现的 running 行**必然**属于已死的前一个进程；
+//   - 孤儿的 attempts 行补记 outcome='interrupted'（不编造耗时：finished_at 记 now）；
+//   - 任务本身重排；但 attempts 已经用满的直接落 failed，避免"崩溃-重试"无限循环。
+//
+// 扩副本后这里必须改成「按 updated_at 超时回收」，否则会抢走活着的副本手上的任务。
+func (s *LanesTaskStore) ReclaimInterrupted(ctx context.Context, now time.Time, maxAttempts int) (requeued, failed int64, err error) {
+	if err := s.ready(); err != nil {
+		return 0, 0, err
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = 6
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// 1) 孤儿的尝试行补记结局。-8 之前写出的行 finished_at 是零值（0001-01-01），
+	//    所以判据用「NULL 或早于 1970」，不能只判 IS NULL。
+	if _, err = tx.ExecContext(ctx, `
+UPDATE lanes_task_attempts a
+SET outcome = 'interrupted', finished_at = $1
+FROM lanes_task_jobs j
+WHERE a.job_id = j.id AND j.status = 'running'
+  AND (a.finished_at IS NULL OR a.finished_at < TIMESTAMPTZ '1970-01-01')`, now); err != nil {
+		return 0, 0, err
+	}
+
+	// 2) 尝试没满的退回 pending；满的当场 failed。两条都要留可读 reason。
+	var requeuedRes, failedRes sql.Result
+	if requeuedRes, err = tx.ExecContext(ctx, `
+UPDATE lanes_task_jobs
+SET status = 'pending', attempts = attempts + 1, next_attempt_at = $1,
+    reason = 'requeued_after_interruption', updated_at = $1
+WHERE status = 'running' AND attempts + 1 < $2`, now, maxAttempts); err != nil {
+		return 0, 0, err
+	}
+	if failedRes, err = tx.ExecContext(ctx, `
+UPDATE lanes_task_jobs
+SET status = 'failed', attempts = attempts + 1, reason = 'interrupted_too_many',
+    finished_at = $1, updated_at = $1
+WHERE status = 'running'`, now); err != nil {
+		return 0, 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	requeued, _ = requeuedRes.RowsAffected()
+	failed, _ = failedRes.RowsAffected()
+	return requeued, failed, nil
+}
+
 // CountActiveForKey 返回该 key 名下仍在排队的任务数（队列上界判定用）。
 func (s *LanesTaskStore) CountActiveForKey(ctx context.Context, apiKeyID int64) (int64, error) {
 	if err := s.ready(); err != nil {
