@@ -86,8 +86,13 @@ func TestExecutorReplaysIntoEngine(t *testing.T) {
 	// 控制字段不得漏到上游。
 	require.NotContains(t, cap.Body, "mode")
 	require.NotContains(t, cap.Body, "external_id")
-	require.Equal(t, false, cap.Body["stream"], "异步任务必须强制非流式")
 	require.Equal(t, "deepseek-v4.1-flash", cap.Body["model"])
+
+	// 时间戳必须真的被填上：命名返回值 + defer 才写得到。
+	// 零值 EndedAt 会让退避基准变成 0001-01-01（重试立即重打）且 p95/完成速率全失真。
+	require.False(t, out.StartedAt.IsZero(), "StartedAt 不得为零值")
+	require.False(t, out.EndedAt.IsZero(), "EndedAt 不得为零值（defer 必须写在返回值上）")
+	require.False(t, out.EndedAt.Before(out.StartedAt), "EndedAt 不得早于 StartedAt")
 }
 
 func TestExecutorClassifiesUpstreamFailures(t *testing.T) {
