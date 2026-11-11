@@ -722,9 +722,34 @@ func (r *apiKeyRepository) CountByUserID(ctx context.Context, userID int64) (int
 	return int64(count), err
 }
 
+// ExistsByKey 判断某个明文 key 是否已存在。
+//
+// 改比**指纹**而不是明文列：drop `api_keys.key` 之后明文列不存在，
+// 而指纹与原值一一对应（tombstone 改写 key 时会同步改写指纹，见 Delete），
+// 语义完全等价。回填窗口内指纹可能还为 NULL，所以保留明文回落并计数，
+// 与鉴权查找同一套口径（`APIKeyPlaintextLookupFallbackCount`）。
 func (r *apiKeyRepository) ExistsByKey(ctx context.Context, key string) (bool, error) {
-	count, err := r.activeQuery().Where(apikey.KeyEQ(key)).Count(ctx)
-	return count > 0, err
+	if key == "" {
+		return false, nil
+	}
+	hash := sha256Hex([]byte(key))
+	count, err := r.activeQuery().Where(apikey.KeyHashEQ(hash)).Count(ctx)
+	if err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return true, nil
+	}
+	count, err = r.activeQuery().Where(apikey.KeyEQ(key)).Count(ctx)
+	if err != nil {
+		return false, err
+	}
+	if count > 0 {
+		apiKeyPlaintextLookupFallbacks.Add(1)
+		logger.LegacyPrintf("repository.apikey",
+			"[APIKeyLookup] ExistsByKey fell back to the plaintext column (no key_hash yet)")
+	}
+	return count > 0, nil
 }
 
 func (r *apiKeyRepository) ListByGroupID(ctx context.Context, groupID int64, params pagination.PaginationParams) ([]service.APIKey, *pagination.PaginationResult, error) {
