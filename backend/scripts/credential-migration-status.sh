@@ -58,10 +58,42 @@ col_exists() {
   [ "$n" != "0" ] && printf 'yes' || printf 'no'
 }
 
+# finish_expect <rc> <expect>：把"判据结论"翻译成自检要的语义。
+# 注意 expect-fail 断言成功后必须 return 0 —— 直接把 rc（=1）返回出去会在
+# `set -e` 下把调用方整个带走（实测症状：B 档打印完就没了，C 档一行都没跑）。
+finish_expect() {
+  local rc="$1" expect="$2"
+  case "$expect" in
+    expect-pass) [ "$rc" -eq 0 ] || fail "自检失败：期望 PASS 但判据给出 FAIL"; return 0 ;;
+    expect-fail) [ "$rc" -ne 0 ] || fail "自检失败：期望 FAIL 但判据给出 PASS（判据是假门）"; return 0 ;;
+    interactive) return "$rc" ;;
+    *) fail "内部错误：未知期望值 $expect" ;;
+  esac
+}
+
 # run_status <dsn> [expect] ；expect ∈ interactive | expect-pass | expect-fail
 run_status() {
   local dsn="$1" expect="${2:-interactive}"
   local rc=0
+
+  # ── 前置：249 的派生列必须存在 ──
+  # 2026-11-11 实测：在"还没跑过 249"的库上（生产线当前就是这个状态 ——
+  # feat/ciyuan-capabilities 里没有任何本 change 的代码与迁移），
+  # A 项 SQL 会直接抛 `ERROR: column "credentials_encrypted" does not exist`，
+  # 运维只看到一段 psql 报错，得自己去猜"这是没部署还是部署坏了"。
+  local missing_derived=""
+  [ "$(col_exists accounts credentials_encrypted "$dsn")" = "yes" ] \
+    || missing_derived="accounts.credentials_encrypted"
+  [ "$(col_exists api_keys key_encrypted "$dsn")" = "yes" ] \
+    || missing_derived="${missing_derived:+$missing_derived }api_keys.key_encrypted"
+  if [ -n "$missing_derived" ]; then
+    log "✗ 派生列不存在：$missing_derived"
+    log "  ↳ 迁移 249_credential_at_rest_columns.sql 还没跑过：先部署含 249 的版本（阶段一）再来体检"
+    log "结论：**不可往下走**（体检无法进行，不是判据不达标）"
+    local precheck_rc=0
+    finish_expect 1 "$expect" || precheck_rc=$?
+    return "$precheck_rc"
+  fi
 
   local has_plaintext
   has_plaintext=$(col_exists accounts credentials "$dsn")
@@ -115,15 +147,9 @@ run_status() {
     log "结论：**不可往下走**（上面 ↳ 行是要做的事）"
   fi
 
-  # 期望档位只是自检用。注意 expect-fail 断言成功后必须 return 0：
-  # 直接把 rc（=1）返回出去，会在 `set -e` 下把调用方整个带走 ——
-  # 实测症状是"B 档打印完就没了，C 档一行都没跑"。
-  case "$expect" in
-    expect-pass) [ "$rc" -eq 0 ] || fail "自检失败：期望 PASS 但判据给出 FAIL"; return 0 ;;
-    expect-fail) [ "$rc" -ne 0 ] || fail "自检失败：期望 FAIL 但判据给出 PASS（判据是假门）"; return 0 ;;
-    interactive) return "$rc" ;;
-    *) fail "内部错误：未知期望值 $expect" ;;
-  esac
+  local body_rc=0
+  finish_expect "$rc" "$expect" || body_rc=$?
+  return "$body_rc"
 }
 
 # ── 自检 ────────────────────────────────────────────────────────────────────
@@ -160,6 +186,19 @@ INSERT INTO accounts(credentials, credentials_meta, credentials_hash, credential
 INSERT INTO api_keys(key, key_hash, key_encrypted) VALUES
  ('sk-live-1','k1','ct1'),
  ('sk-live-2',NULL,NULL);                              -- 有 key 但没指纹、没密文
+SQL
+}
+
+# seed_pre249：还没跑过迁移 249 的库（生产线部署本 change 之前就是这个形状）。
+# 只有明文列，没有任何派生列 —— 用来验前置判据"派生列不存在时先部署，而不是抛 psql 错"。
+seed_pre249() {
+  local db="$1"
+  dropdb --if-exists "$db" >/dev/null 2>&1 || true; createdb "$db"
+  psql -q -d "$db" -v ON_ERROR_STOP=1 <<'SQL'
+CREATE TABLE accounts(id bigserial PRIMARY KEY, credentials jsonb NOT NULL DEFAULT '{}'::jsonb,
+  credentials_meta jsonb NOT NULL DEFAULT '{}'::jsonb, deleted_at timestamptz);
+CREATE TABLE api_keys(id bigserial PRIMARY KEY, key varchar(128) NOT NULL DEFAULT '',
+  deleted_at timestamptz);
 SQL
 }
 
@@ -226,6 +265,20 @@ run_self_test() {
   log "── 自检 C：已 drop 的库必须 PASS，且不能因列不存在而报错 ──"
   run_status "$post" expect-pass
 
+  # 前置判据：派生列还不存在时，必须给"先部署含 249 的版本"，而不是让 A 项 SQL 抛
+  # `column "credentials_encrypted" does not exist`（实测生产线当前就是 pre-249 状态）。
+  log "── 自检 C2：pre-249 的库必须 FAIL 且点名迁移 249（不是抛 psql 错）──"
+  local pre249="sub2api_status_pre249_$$"
+  DBS_TO_DROP+=("$pre249")
+  seed_pre249 "$pre249"
+  local pre_out
+  pre_out=$(run_status "$pre249" expect-fail 2>&1) || fail "自检 C2 失效：pre-249 的库没让判据变 FAIL"
+  printf '%s\n' "$pre_out" | grep -q "249_credential_at_rest_columns.sql" \
+    || fail "自检 C2 失效：没点名迁移 249（运维会不知道是没部署还是部署坏了）"
+  printf '%s\n' "$pre_out" | grep -q "does not exist" \
+    && fail "自检 C2 失效：仍把 psql 的原始报错抛给运维"
+  log "       点名 249、无原始 psql 报错"
+
   # 逐项：只注入一个缺陷，断言"判据变 FAIL **且** 报的是这一项的补救说明"。
   # 只断言 FAIL 不够 —— 四项一起非零时，某一行接错数据源也看不出来。
   log "── 自检 D：逐项单独注入一个缺陷，必须各自点名 ──"
@@ -245,7 +298,7 @@ run_self_test() {
     log "       $which 单独注入 → 按预期点名"
   done
 
-  log "自检全部通过：三档结论互不相同，四项检查各自点名，只读保证有效"
+  log "自检全部通过：三档结论互不相同、pre-249 正确点名、四项检查各自点名、只读保证有效"
 }
 
 # ── 入口 ────────────────────────────────────────────────────────────────────
