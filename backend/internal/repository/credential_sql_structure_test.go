@@ -62,13 +62,12 @@ func TestCredentialSQLStructure_OnlyKnownSubkeySitesRemain(t *testing.T) {
 	//   - ListOAuthRefreshCandidatePage 那处 → 已读 credentials_meta 的派生事实
 	// 所以这里不再有白名单条目；新增任何一处都会让本测试变红。
 	allowed := map[string][]string{
-		// 例外：scoped-admin 的账号列表/Codex 候选用 ent 的 `s.C(FieldCredentials)` 从**明文列**
-		// 直接抽子键。这是**阶段四的阻碍**（含 access_token 这种密钥子键），
-		// 已在 RELEASE-CHECKLIST 13b 登记；在改掉之前这里必须显式列出，
-		// 不允许它静默通过（本守卫的上一版就因为只认 `credentials ->> 'x'` 而漏了这两种写法）。
+		// 剩余唯一一处**生产**子键提取：scoped-admin 的账号列表仍从明文列抽 model_mapping
+		// 用于展示（不是等值判断，也不是密钥）。`$1` 那条 `jsonb_build_object` 已在
+		// `3c9b947e1` 移除——Codex 身份匹配改在 Go 侧做（design.md A4 选项 C），
+		// 所以白名单里不再需要它。
 		"custom_admin_key_scope.go": {
 			"->'model_mapping' AS model_mapping",
-			"jsonb_build_object('chatgpt_account_id'",
 		},
 	}
 
@@ -184,7 +183,13 @@ func TestCredentialSQLStructure_StillWritesPlaintextColumn(t *testing.T) {
 // 而它们每一条在 drop `credentials` 之后都会运行期报错 —— 属于 13b 之外的**新发现**。
 //
 // 本测试只做一件事：把这种写法的出现次数钉死（当前 2 处，都在
-// scopedCodexIdentityPredicates 的 field() 里，一个 raw 一个 value），
+// scopedCodexIdentityPredicates 的 field() 里，一个 raw 一个 value）。
+//
+// ⚠️ `3c9b947e1` 之后，`scopedCodexIdentityPredicates` **已不在生产路径上**：
+// `ScopedAdminCodexCandidates` 改成 Go 侧匹配（design.md A4 选项 C），这族 SQL
+// 只作为**等价性仪器**的对照实现保留（TestScopedCodexIdentityPredicates_SQLAndGoAgree
+// 用它逐条比对）。所以这里的 2 处不是阻塞，而是"oracle 还在"。
+// 若有人把它重新接回生产读取路径，必须同时把 13b 的那一行重新标成阻塞。
 // 让这一类不能继续静默增长。
 func TestCredentialSQLStructure_QuotedIdentifierSubkeyRefsArePinned(t *testing.T) {
 	// 引号紧跟 -> 才算这一族（避免把 `credentials ->> 'x'` 之类算进来）
