@@ -1,8 +1,6 @@
 package repository
 
 import (
-	"bytes"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,7 +28,13 @@ import (
 //	② 运行层：真的触发一次回落，断言打出来的那行含标记词（证明标记词不是只写在注释里）。
 func TestPlaintextFallbackLogMarker_EverySiteUsesTheMarker(t *testing.T) {
 	const marker = "plaintext fallback"
-	const wantSites = 4 // 新增/删除回落站点时改这个数，并同步 tasks.md 3.3
+	// 阶段 3.4 摘掉全部回落分支（accounts 边界 + api key 鉴权/ExistsByKey），
+	// 所以**预期站点数 = 0**：这些字只应出现在错误文案与注释里，不该再有一条
+	// "正在回落到明文列"的日志。
+	//
+	// 这条断言现在是**反向守卫**：谁重新引入一个回落日志，checked 就不再是 0，
+	// 测试立刻红并逼他回答"3.3 的 grep 判据要不要把这个新站点算进去"。
+	const wantSites = 0
 
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)
@@ -80,26 +84,21 @@ func TestPlaintextFallbackLogMarker_EverySiteUsesTheMarker(t *testing.T) {
 		wantSites, checked, marker)
 }
 
-// 运行层：真的走一次回落（accounts 读路径），断言打出来的日志含标记词。
-// 只验源码文本的话，把标记词写进注释也能过。
-func TestPlaintextFallbackLogMarker_EmittedAtRuntime(t *testing.T) {
-	var buf bytes.Buffer
-	prevOut := log.Writer()
-	log.SetOutput(&buf)
-	t.Cleanup(func() { log.SetOutput(prevOut) })
-
-	// accounts：有明文、无密文、无加密器 → 走回落分支并打日志。
+// 运行层：阶段 3.4 之后，"回落"这件事已不存在 —— 只有明文没有密文时**必须是硬错误**。
+//
+// 原来这条靠"真触发一次回落"来证明日志里有标记词；回落删掉后那个载体没了。
+// 现在改为断言新契约：调用必须返回错误，且错误信息本身可 grep（不再依赖日志）。
+func TestPlaintextFallbackLogMarker_HardErrorAfterStage34(t *testing.T) {
 	repo := newAccountRepositoryWithSQL(nil, nil, nil)
 	resetCredentialPlaintextFallbackCount()
 	got, err := repo.credentialsFromEntity(&dbent.Account{
 		ID:          4242,
 		Credentials: map[string]any{"api_key": "sk-marker"},
 	})
-	require.NoError(t, err)
-	require.Equal(t, "sk-marker", got["api_key"])
-	require.Equal(t, int64(1), CredentialPlaintextFallbackCount(), "前提：确实走了回落分支")
-
-	t.Logf("captured: %q", buf.String())
-	require.Containsf(t, buf.String(), "plaintext fallback",
-		"回落日志里没有标记词 — 3.3 的 grep 在生产上会恒为 0（buf=%q）", buf.String())
+	require.Error(t, err, "阶段 3.4：只有明文没有密文必须硬失败")
+	require.Nil(t, got)
+	require.Contains(t, err.Error(), "no credentials_encrypted",
+		"错误信息必须点名缺失的列，运维才知道该重跑回填")
+	require.Equal(t, int64(1), CredentialPlaintextFallbackCount(),
+		"计数器仍保留：它是'本来会回落几次'的观测点")
 }

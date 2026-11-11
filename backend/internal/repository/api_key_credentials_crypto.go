@@ -112,6 +112,16 @@ func apiKeyPlaintextFromCiphertext(cryptor service.SecretEncryptor, id int64, en
 //   - 有密文：解密后作为权威值（解密失败=硬错误，绝不当成"没密文"再回落）；
 //   - 无密文但有明文列：回填窗口内，用明文列并计数+打日志，让空洞可见；
 //   - 两者都没有：返回空串，调用方据此判"查不到"。
+// 阶段 3.4：**明文列兜底已删除**。有明文却没有密文 = 硬错误。
+//
+// 删它的三个理由：
+//  1. 生产判据 B 已为 0：每条能认证的 key 都有 key_encrypted，这条兜底线上不会被用到；
+//  2. 兜底让"密文缺失"这个本该报警的状态变成静默可用 —— 回填漏行、写路径漏带、
+//     人工改库，三种情况下都拿明文顶上去，而明文列下一步就要 drop；
+//  3. 5.2 之后 `m.Key` 根本不存在，留着它只能推迟故障时点。
+//
+// 合法终态仍放行：**明文字段为空**（空 key 行 / tombstone 之前的空壳）返回 ""，不报错。
+// 这条与原来一致 —— 空 key 本来就没有可认证的值，调用方据此判"查不到"。
 func (r *apiKeyRepository) apiKeyAuthoritativePlaintext(m *dbent.APIKey) (string, error) {
 	if m == nil {
 		return "", nil
@@ -123,14 +133,13 @@ func (r *apiKeyRepository) apiKeyAuthoritativePlaintext(m *dbent.APIKey) (string
 	if !errors.Is(err, errNoAPIKeyCiphertext) {
 		return "", err
 	}
-	if m.Key != "" {
-		apiKeyCiphertextMissingLookups.Add(1)
-		// 措辞必须含 `plaintext fallback` 这个标记词：阶段三 3.3 的生产判据是对日志
-		// 窗口 grep 这一个词。此前写的是 "has no key_encrypted yet; falling back to…"，
-		// grep 抓不到 —— 于是"没有回落"与"没抓到"同形。
-		// `TestPlaintextFallbackLogMarker_EverySiteUsesTheMarker` 钉住这条不变量。
-		logger.LegacyPrintf("repository.apikey",
-			"[CredentialAtRest] plaintext fallback: api key %d has no key_encrypted yet; reading the plaintext column", m.ID)
+	if m.Key == "" {
+		return "", nil
 	}
-	return m.Key, nil
+	apiKeyCiphertextMissingLookups.Add(1)
+	logger.LegacyPrintf("repository.apikey",
+		"[CredentialAtRest] missing ciphertext: api key %d has a plaintext key but no key_encrypted", m.ID)
+	return "", fmt.Errorf(
+		"api key %d has a plaintext key but no key_encrypted: "+
+			"stage-3.4 removed the plaintext fallback; re-run cmd/credential-backfill", m.ID)
 }

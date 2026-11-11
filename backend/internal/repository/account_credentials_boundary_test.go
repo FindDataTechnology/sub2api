@@ -35,7 +35,12 @@ func TestCredentialsFromEntity_PrefersCiphertextOverPlaintext(t *testing.T) {
 }
 
 // 2) 无密文 -> 回落明文 + 计数。
-func TestCredentialsFromEntity_FallsBackToPlaintextAndCounts(t *testing.T) {
+// 1) 阶段 3.4 之后：只有明文、没有密文 = **硬错误**（回落分支已删除）。
+//
+// 这条原本断言"回落明文 + 计数+1"，是"能否删回落"的证据；3.4 删除后它反过来
+// 守住新契约：任何"忘了回填"的行都必须立刻炸出来，而不是被当成正常服务。
+// 同时断言计数仍 +1 —— 计数器留着当"如果还有回落，本来会发生几次"的观测点。
+func TestCredentialsFromEntity_PlaintextOnlyIsAHardErrorAfterStage34(t *testing.T) {
 	resetCredentialPlaintextFallbackCount()
 	repo := newAccountRepositoryWithSQL(nil, nil, nil) // cryptor = nil
 
@@ -43,9 +48,11 @@ func TestCredentialsFromEntity_FallsBackToPlaintextAndCounts(t *testing.T) {
 		ID:          8,
 		Credentials: map[string]any{"api_key": "sk-legacy"},
 	})
-	require.NoError(t, err)
-	require.Equal(t, "sk-legacy", got["api_key"])
-	require.Equal(t, int64(1), CredentialPlaintextFallbackCount())
+	require.Error(t, err, "只有明文没有密文时必须报错（阶段 3.4 已删除回落）")
+	require.Nil(t, got)
+	require.Contains(t, err.Error(), "no credentials_encrypted")
+	require.Contains(t, err.Error(), "re-run cmd/credential-backfill")
+	require.Equal(t, int64(1), CredentialPlaintextFallbackCount(), "仍要计数：它是'本来会回落几次'的观测点")
 }
 
 // 3) 空密文串等同于"没有密文"——空串不是有效密文，不能拿去解密。
@@ -59,8 +66,9 @@ func TestCredentialsFromEntity_EmptyCiphertextCountsAsMissing(t *testing.T) {
 		Credentials:          map[string]any{"api_key": "sk-legacy"},
 		CredentialsEncrypted: strPtr(""),
 	})
-	require.NoError(t, err)
-	require.Equal(t, "sk-legacy", got["api_key"])
+	require.Error(t, err, "空串不是有效密文，等同'没有密文' → 阶段 3.4 之后是硬错误")
+	require.Nil(t, got)
+	require.Contains(t, err.Error(), "no credentials_encrypted")
 	require.Equal(t, int64(1), CredentialPlaintextFallbackCount())
 }
 
@@ -169,7 +177,7 @@ func TestAccountEntityToServiceWithoutCredentials_NeverDecrypts(t *testing.T) {
 // 说明还有路径在回落——那就是没删干净。
 
 func TestCredentialFallbackContract_CurrentlyFallsBack_WILL_FLIP_AT_STAGE3(t *testing.T) {
-	const fallbackCurrentlyAllowed = true // ← Stage 3.4 之后改成 false
+	const fallbackCurrentlyAllowed = false // Stage 3.4 已翻转（2026-11-11）
 
 	resetCredentialPlaintextFallbackCount()
 	repo := newAccountRepositoryWithSQL(nil, nil, nil) // 无加密器
@@ -190,7 +198,7 @@ func TestCredentialFallbackContract_CurrentlyFallsBack_WILL_FLIP_AT_STAGE3(t *te
 	// Stage 3.4 之后应走到这里
 	require.Error(t, err, "Stage 3.4 之后：密文缺失 MUST 硬失败，不再回落")
 	require.Nil(t, got)
-	require.Contains(t, err.Error(), "has no encrypted credentials")
+	require.Contains(t, err.Error(), "has plaintext credentials but no credentials_encrypted")
 }
 
 // 与之配套：**密文存在**时，无论哪个阶段都必须走解密路径（不得回落）。

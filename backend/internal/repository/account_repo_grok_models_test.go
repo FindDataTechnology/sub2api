@@ -204,13 +204,17 @@ func TestGrokCatalogCASRefreshesSingleAccountOutsideTransaction(t *testing.T) {
 	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
 	t.Cleanup(func() { _ = client.Close() })
 	cache := &grokCatalogCacheSpy{}
-	repo := newAccountRepositoryWithSQL(client, db, cache)
+	// 走真解密：阶段 3.4 之后"只有明文"的账号读出来是硬错误，夹具必须带密文。
+	cryptor := credentialTestEncryptor(t)
+	repo := newAccountRepositoryWithSQLCrypto(client, db, cache, cryptor)
 	mock.ExpectExec(regexp.QuoteMeta(grokCatalogCASQuery)).
 		WithArgs(int64(25), "null", string(nextJSON)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`(?s)SELECT .* FROM "accounts" WHERE .*`).
 		WithArgs(int64(25)).
-		WillReturnRows(updatedAccountRows(25, `{"unrelated":"keep","grok_observed_models":{"models":["grok-4.7"],"fetched_at":"2026-10-25T02:00:01Z"}}`))
+		WillReturnRows(updatedAccountRowsEncrypted(t, 25,
+			`{"unrelated":"keep","grok_observed_models":{"models":["grok-4.7"],"fetched_at":"2026-10-25T02:00:01Z"}}`,
+			cryptor))
 	mock.ExpectQuery(`(?s)account_groups`).
 		WillReturnRows(sqlmock.NewRows([]string{"account_id", "group_id", "priority", "created_at"}))
 
