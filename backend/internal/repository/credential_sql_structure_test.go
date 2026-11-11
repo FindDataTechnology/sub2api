@@ -27,7 +27,11 @@ import (
 //           同样属阶段四前置
 //   - 明文列的 SET 写：必须仍存在（阶段四之前仍要写明文，否则回滚路径没了）
 
-var credentialColumnRefRe = regexp.MustCompile(`credentials\s*->>?\s*'([a-z_]+)'`)
+// 两种写法都要扫：
+//  1. 裸 SQL 里的 `credentials ->> 'x'`
+//  2. ent Aggregate 里的 `s.C(dbaccount.FieldCredentials) + "->'x'"` —— 上一版只认第 1 种，
+//     于是 custom_admin_key_scope.go 那两处（其中一个抽的是 access_token）完全没被看见。
+var credentialColumnRefRe = regexp.MustCompile(`credentials\s*->>?\s*'([a-z_]+)'|FieldCredentials\)\s*\+\s*"[^"]*->>?\s*'([a-z_]+)'`)
 
 func productionRepositorySources(t *testing.T) map[string]string {
 	t.Helper()
@@ -57,7 +61,16 @@ func TestCredentialSQLStructure_OnlyKnownSubkeySitesRemain(t *testing.T) {
 	//   - SetGrokOAuthError 那处 → 已改成 Go 侧早返回
 	//   - ListOAuthRefreshCandidatePage 那处 → 已读 credentials_meta 的派生事实
 	// 所以这里不再有白名单条目；新增任何一处都会让本测试变红。
-	allowed := map[string][]string{}
+	allowed := map[string][]string{
+		// 例外：scoped-admin 的账号列表/Codex 候选用 ent 的 `s.C(FieldCredentials)` 从**明文列**
+		// 直接抽子键。这是**阶段四的阻碍**（含 access_token 这种密钥子键），
+		// 已在 RELEASE-CHECKLIST 13b 登记；在改掉之前这里必须显式列出，
+		// 不允许它静默通过（本守卫的上一版就因为只认 `credentials ->> 'x'` 而漏了这两种写法）。
+		"custom_admin_key_scope.go": {
+			"->'model_mapping' AS model_mapping",
+			"jsonb_build_object('chatgpt_account_id'",
+		},
+	}
 
 	var unexpected []string
 	total := 0
@@ -88,12 +101,16 @@ func TestCredentialSQLStructure_OnlyKnownSubkeySitesRemain(t *testing.T) {
 	sort.Strings(unexpected)
 	require.Empty(t, unexpected,
 		"出现了清单外的 `credentials -> ...` 子键提取。阶段二之后这类新增几乎一定是漏改：%v", unexpected)
-	// 站点 A：ListOAuthRefreshCandidatePage 的 refresh_token 过滤仍在（待裁决方案，见
-	// REPORT-refresh-token-presence.md §2）。注意它的下一行 `credentials ? 'refresh_token'`
-	// 是另一条同源谓词，同样属白名单。
-	require.Equal(t, 0, total,
-		"生产侧对 credentials 列的子键提取应当归零——这是阶段四 drop 明文列的前置。"+
-			"（三处已分别改走指纹分组 / Go 侧早返回 / meta 派生事实；新增任何一处都会变红）")
+	// 期望值改为 1，并说明为什么不是 0：
+	// 阶段二把 51 处改走新列后，按两种形态（`credentials ->> 'x'` 与
+	// `FieldCredentials) + "->'x'"`）扫，生产侧**还剩 1 处**未改：
+	// custom_admin_key_scope.go:50（从明文列抽 model_mapping）。
+	// 另有一处 :179 用 `c := s.C(FieldCredentials)` 再拼 jsonb_build_object（连
+	// access_token 一起抽），正则抓不到那种形态，已在白名单显式登记。
+	// **这两处都是阶段四 drop 明文列前必须改掉的**（RELEASE-CHECKLIST 13b）。
+	require.Equal(t, 1, total,
+		"剩余子键提取应为 1 处（custom_admin_key_scope.go:50 抽 model_mapping）。"+
+			"归零是阶段四 drop 明文列的前置——改完这里要同步改成 0")
 }
 
 // TestCredentialSQLStructure_NoWholeDocumentComparisonsLeft 整文档等值比较必须清零。
