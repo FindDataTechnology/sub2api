@@ -32,7 +32,9 @@ func newAPIKeyRepoSQLite(t *testing.T) (*apiKeyRepository, *dbent.Client) {
 	client := enttest.NewClient(t, enttest.WithOptions(dbent.Driver(drv)))
 	t.Cleanup(func() { _ = client.Close() })
 
-	return &apiKeyRepository{client: client, sql: db}, client
+	// 带上加密器：阶段 3.4 之后"有明文没有密文"是硬错误，所以凡是经 repo.Create
+	// 建 key 再经 GetByKeyForAuth 读回的用例，夹具就必须像生产一样有密文。
+	return newAPIKeyRepositoryWithSQLCrypto(client, db, credentialTestEncryptor(t)), client
 }
 
 func mustCreateAPIKeyRepoUser(t *testing.T, ctx context.Context, client *dbent.Client, email string) *service.User {
