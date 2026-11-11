@@ -83,15 +83,16 @@ var errNoAPIKeyCiphertext = fmt.Errorf("api key has no key_encrypted yet")
 //
 // 单独拎出来是因为有两条读路径**不走实体**：`IncrementQuotaUsedAndGetState` 用一条
 // UPDATE ... RETURNING 直接拿列，`GetKeyAndOwnerID` 只 Select 三列。它们都必须从密文
-// 解密，而不是假设明文列还在。
-func (r *apiKeyRepository) apiKeyPlaintextFromCiphertext(id int64, encrypted *string) (string, error) {
+// 解密，而不是假设明文列还在。做成自由函数还为了让 `usageLogRepository` 复用
+// —— 那是另一个 receiver，但取明文的规则必须只有一份。
+func apiKeyPlaintextFromCiphertext(cryptor service.SecretEncryptor, id int64, encrypted *string) (string, error) {
 	if encrypted == nil || *encrypted == "" {
 		return "", errNoAPIKeyCiphertext
 	}
-	if r == nil || r.cryptor == nil {
+	if cryptor == nil {
 		return "", fmt.Errorf("api key %d has key_encrypted but no encryptor is configured: refusing to trust the plaintext column", id)
 	}
-	plaintext, err := r.cryptor.Decrypt(*encrypted)
+	plaintext, err := cryptor.Decrypt(*encrypted)
 	if err != nil {
 		// 解密失败是数据/密钥问题，不能退化成"用明文列凑一个答案"。
 		return "", fmt.Errorf("decrypt api key %d: %w", id, err)
@@ -115,7 +116,7 @@ func (r *apiKeyRepository) apiKeyAuthoritativePlaintext(m *dbent.APIKey) (string
 	if m == nil {
 		return "", nil
 	}
-	plaintext, err := r.apiKeyPlaintextFromCiphertext(m.ID, m.KeyEncrypted)
+	plaintext, err := apiKeyPlaintextFromCiphertext(r.cryptor, m.ID, m.KeyEncrypted)
 	if err == nil {
 		return plaintext, nil
 	}

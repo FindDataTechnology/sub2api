@@ -917,7 +917,7 @@ func (r *apiKeyRepository) IncrementQuotaUsedAndGetState(ctx context.Context, id
 	// sha256(明文)。取不到明文时服务层有个 `state.Key != ""` 的守卫会**静默跳过**失效，
 	// 于是刚被置成 quota_exhausted 的 key 还能从缓存里继续放行到 TTL 结束。
 	// 所以这里取不到明文必须打日志（可见），不能默默留空。
-	plaintext, decryptErr := r.apiKeyPlaintextFromCiphertext(id, encrypted)
+	plaintext, decryptErr := apiKeyPlaintextFromCiphertext(r.cryptor, id, encrypted)
 	if decryptErr != nil {
 		logger.LegacyPrintf("repository.apikey",
 			"[CredentialAtRest] quota state for id=%d has no usable key_encrypted (%v): auth cache cannot be invalidated", id, decryptErr)
@@ -1002,8 +1002,9 @@ func (r *apiKeyRepository) GetRateLimitData(ctx context.Context, id int64) (resu
 // apiKeyEntityToService 是纯映射：Key 直接取实体上的值。
 //
 // ⚠️ 它**不是** drop 安全的：drop 明文列之后 ent 实体上就没有 Key 了（编译期拦下）。
-// apiKeyRepository 自己的读路径请用 apiKeyEntityToServiceResolvingKey；
-// 目前仍用本函数的只有 usageLogRepository.loadAPIKeys（见 13b 台账）。
+// 现在只剩两处调用，都在 `lookupAPIKeyByHashThenPlaintext` 之后 —— 那里已经把 Key
+// 归一成权威明文（密文优先），所以取实体上的值就是对的。
+// 任何**新**的读路径请用 apiKeyEntityToServiceResolvingKey / apiKeyEntityToServiceWithKey。
 func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 	if m == nil {
 		return nil

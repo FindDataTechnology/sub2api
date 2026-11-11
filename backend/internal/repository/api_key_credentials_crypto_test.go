@@ -337,6 +337,34 @@ func TestAuth_DecryptFailureIsNotTreatedAsMissingCiphertext(t *testing.T) {
 		"解不开不等于缺失：不许计进缺密文兜底，否则坏了会被当成没回填")
 }
 
+// 用量日志这条读路径在**另一个 receiver**（usageLogRepository）上，
+// 它的 Key 只用于展示（掩码/审计），drop 明文列之后同样只能从密文解。
+// 直接打 loadAPIKeys，绕开需要 testcontainers 的集成包（本机没有 Docker、也无网拉包）。
+func TestUsageLogLoadAPIKeys_ResolvesPlaintextFromCiphertext(t *testing.T) {
+	cryptor := credentialTestEncryptor(t)
+	keyRepo, db := apiKeyScratchRepo(t, cryptor)
+	ctx := context.Background()
+
+	plaintext := "sk-usage-log-plain"
+	key := &service.APIKey{UserID: 1, Key: plaintext, Name: "k", Status: service.StatusActive}
+	require.NoError(t, keyRepo.Create(ctx, key))
+
+	// 模拟 drop：明文列清空，只留密文
+	_, err := db.Exec(`UPDATE api_keys SET key = '' WHERE id = $1`, key.ID)
+	require.NoError(t, err)
+
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB("postgres", db)))
+	t.Cleanup(func() { _ = client.Close() })
+	repo := newUsageLogRepositoryWithSQL(client, db)
+	repo.cryptor = cryptor
+
+	got, err := repo.loadAPIKeys(ctx, []int64{key.ID})
+	require.NoError(t, err)
+	require.Contains(t, got, key.ID)
+	require.Equal(t, plaintext, got[key.ID].Key,
+		"明文列没了之后，用量日志展示用的 key 必须来自解密，否则掩码会显示空白")
+}
+
 // 非鉴权的读路径（详情/列表/配额状态）同样不能依赖明文列。
 //
 // 这些接口返回的 `Key` 会被掩码显示、也会被拿去算缓存键，所以 drop 之后必须能从
