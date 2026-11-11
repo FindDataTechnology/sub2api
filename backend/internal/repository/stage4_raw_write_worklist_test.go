@@ -52,27 +52,39 @@ func TestStage4_RawSQLOnPlaintextColumnsFailsAfterDrop(t *testing.T) {
 		CREATE TABLE scheduler_outbox (
 			id bigserial PRIMARY KEY, event_type text, account_id bigint, group_id bigint, payload jsonb
 		);
+		CREATE TABLE api_keys (
+			id bigserial PRIMARY KEY,
+			key varchar(128) NOT NULL DEFAULT '',
+			key_hash varchar(64),
+			key_encrypted text,
+			deleted_at timestamptz,
+			updated_at timestamptz
+		);
 		INSERT INTO accounts (id, platform, type, credentials, credentials_hash)
 		VALUES (1, 'grok', 'oauth', '{"a":1}'::jsonb, 'h');
+		INSERT INTO api_keys (id, key, key_hash) VALUES (1, 'sk-worklist', 'kh');
 	`)
 	require.NoError(t, err)
 
 	type rawStatement struct {
-		name string
-		sql  string
-		args []any
+		name   string
+		sql    string
+		args   []any
+		column string // 这条语句依赖的明文列（accounts=credentials / api_keys=key）
 	}
 	statements := []rawStatement{
 		{
 			// 读：account_credentials_crypto.go:322 deriveCredentialColumnsAfterMerge
 			// BulkUpdate 在 SQL 侧合并凭据后，同事务回读明文重算派生列。
-			name: "deriveCredentialColumnsAfterMerge.read",
-			sql:  `SELECT id, credentials FROM accounts WHERE id = ANY($1) AND deleted_at IS NULL`,
-			args: []any{pq.Array([]int64{1})},
+			name:   "deriveCredentialColumnsAfterMerge.read",
+			column: "credentials",
+			sql:    `SELECT id, credentials FROM accounts WHERE id = ANY($1) AND deleted_at IS NULL`,
+			args:   []any{pq.Array([]int64{1})},
 		},
 		{
 			// 写：account_repo.go:1718 UpdateGrokOAuthCredentialsIfUnchanged
-			name: "UpdateGrokOAuthCredentialsIfUnchanged",
+			name:   "UpdateGrokOAuthCredentialsIfUnchanged",
+			column: "credentials",
 			sql: `
 			WITH updated AS (
 			UPDATE accounts AS a
@@ -88,15 +100,26 @@ func TestStage4_RawSQLOnPlaintextColumnsFailsAfterDrop(t *testing.T) {
 		},
 		{
 			// 写：account_repo.go:3228 BulkUpdate 的合并子句
-			name: "BulkUpdate.merge",
-			sql:  `UPDATE accounts SET credentials = COALESCE(credentials, '{}'::jsonb) || $1::jsonb WHERE id = 1`,
-			args: []any{[]byte(`{"k":"v"}`)},
+			name:   "BulkUpdate.merge",
+			column: "credentials",
+			sql:    `UPDATE accounts SET credentials = COALESCE(credentials, '{}'::jsonb) || $1::jsonb WHERE id = 1`,
+			args:   []any{[]byte(`{"k":"v"}`)},
 		},
 		{
 			// 写：UpdateCredentials 的整份替换
-			name: "UpdateCredentials",
-			sql:  `UPDATE accounts SET credentials = $1::jsonb WHERE id = 1`,
-			args: []any{[]byte(`{"k":"v"}`)},
+			name:   "UpdateCredentials",
+			column: "credentials",
+			sql:    `UPDATE accounts SET credentials = $1::jsonb WHERE id = 1`,
+			args:   []any{[]byte(`{"k":"v"}`)},
+		},
+		{
+			// 写：api_key_repo.go deleteWithTombstone —— 软删时把 key 改写为墓碑值。
+			// drop `api_keys.key` 之后这条也会报错；改造时要连指纹一起处理
+			// （tombstone 必须同时改写 key_hash，否则"已删除的 key 仍能被指纹命中"）。
+			name:   "api_keys.deleteWithTombstone",
+			column: "key",
+			sql:    `UPDATE api_keys SET key = $1, deleted_at = NOW(), updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL`,
+			args:   []any{"__deleted__sk-worklist", int64(1)},
 		},
 	}
 
@@ -117,18 +140,19 @@ func TestStage4_RawSQLOnPlaintextColumnsFailsAfterDrop(t *testing.T) {
 		require.NoError(t, probe(stmt), "%s 在 drop 之前必须能执行", stmt.name)
 	}
 
-	_, err = db.ExecContext(ctx, `ALTER TABLE accounts DROP COLUMN credentials`)
+	_, err = db.ExecContext(ctx, `ALTER TABLE accounts DROP COLUMN credentials; ALTER TABLE api_keys DROP COLUMN key`)
 	require.NoError(t, err)
 
-	// ── drop 之后：每条都必须失败，且错误点名被 drop 的列 ──
+	// ── drop 之后：每条都必须失败，且错误点名被 drop 的那一列 ──
 	for _, stmt := range statements {
 		execErr := probe(stmt)
 		require.Error(t, execErr, "%s 在 drop 之后必须失败（这正是阶段四第②步要改掉的地方）", stmt.name)
+		// 每条语句只依赖一列，所以期望列名跟着语句走（accounts 是 credentials、api_keys 是 key）。
 		// 只断言"点名的列 + 不存在"两段，不锁整句措辞：
 		// PG17 是 `column "credentials" of relation "accounts" does not exist`，
 		// 老版本没有 `of relation ...` 这一段。锁整句会让升级 PG 时假红。
-		require.Contains(t, execErr.Error(), `column "credentials"`,
-			"%s 的失败原因必须点名明文列", stmt.name)
+		require.Contains(t, execErr.Error(), `column "`+stmt.column+`"`,
+			"%s 的失败原因必须点名被 drop 的列（%s）", stmt.name, stmt.column)
 		require.Contains(t, execErr.Error(), "does not exist",
 			"%s 的失败原因必须是列不存在，而不是别的错——否则说明这条语句已不依赖明文列", stmt.name)
 	}
