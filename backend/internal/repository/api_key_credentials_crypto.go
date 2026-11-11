@@ -125,8 +125,12 @@ func (r *apiKeyRepository) apiKeyAuthoritativePlaintext(m *dbent.APIKey) (string
 	}
 	if m.Key != "" {
 		apiKeyCiphertextMissingLookups.Add(1)
+		// 措辞必须含 `plaintext fallback` 这个标记词：阶段三 3.3 的生产判据是对日志
+		// 窗口 grep 这一个词。此前写的是 "has no key_encrypted yet; falling back to…"，
+		// grep 抓不到 —— 于是"没有回落"与"没抓到"同形。
+		// `TestPlaintextFallbackLogMarker_EverySiteUsesTheMarker` 钉住这条不变量。
 		logger.LegacyPrintf("repository.apikey",
-			"[CredentialAtRest] api key %d has no key_encrypted yet; falling back to the plaintext column", m.ID)
+			"[CredentialAtRest] plaintext fallback: api key %d has no key_encrypted yet; reading the plaintext column", m.ID)
 	}
 	return m.Key, nil
 }

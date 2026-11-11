@@ -746,8 +746,9 @@ func (r *apiKeyRepository) ExistsByKey(ctx context.Context, key string) (bool, e
 	}
 	if count > 0 {
 		apiKeyPlaintextLookupFallbacks.Add(1)
+		// 同上：必须含 `plaintext fallback`（3.3 的判据就是 grep 这一个词）。
 		logger.LegacyPrintf("repository.apikey",
-			"[APIKeyLookup] ExistsByKey fell back to the plaintext column (no key_hash yet)")
+			"[APIKeyLookup] plaintext fallback: ExistsByKey matched the key column (no key_hash yet)")
 	}
 	return count > 0, nil
 }
