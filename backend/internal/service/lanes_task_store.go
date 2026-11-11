@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -394,6 +395,26 @@ WHERE status = 'pending' AND deadline_at IS NOT NULL AND deadline_at <= $1`, now
 	return res.RowsAffected()
 }
 
+// int64ArrayLiteral 把 id 列表拼成 Postgres 数组字面量（'{1,2,3}' / '{}'）。
+//
+// 不用 pq.Array：这里只需要一个只含整数的常量串，自己拼能避免为一次回收
+// 引入驱动层的值转换，也便于在 dbtest 里直接读出 SQL 看到的东西。
+func int64ArrayLiteral(ids []int64) string {
+	if len(ids) == 0 {
+		return "{}"
+	}
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, v := range ids {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatInt(v, 10))
+	}
+	b.WriteByte('}')
+	return b.String()
+}
+
 // ReclaimInterrupted 把**上一个进程留下的** running 任务收回。
 //
 // 为什么必须有：ClaimDue 只捞 status='pending'，全库没有任何地方回收 running。
@@ -402,12 +423,15 @@ WHERE status = 'pending' AND deadline_at IS NOT NULL AND deadline_at <= $1`, now
 // （ExpireOverdue 只管 pending）。2026-11-11 一天滚了三次版，每次都有这个窗口。
 //
 // 语义（单副本前提，见 task_sched.go 顶部）：
-//   - 只有本进程启动那一刻才调用，所以出现的 running 行**必然**属于已死的前一个进程；
+//   - olderThan 是"多久没动过才算孤儿"的界。启动时传 now（当前进程刚起，
+//     任何 running 都必然是前一个进程留下的）；运行期传 now-2×attemptTimeout，
+//     免得把正在跑的尝试误判成孤儿（updated_at 在领取时写一次，执行期间不刷新）；
+//   - skipIDs 是**本进程内存里正在执行**的任务号，显式排除，防抢跑；
 //   - 孤儿的 attempts 行补记 outcome='interrupted'（不编造耗时：finished_at 记 now）；
 //   - 任务本身重排；但 attempts 已经用满的直接落 failed，避免"崩溃-重试"无限循环。
 //
-// 扩副本后这里必须改成「按 updated_at 超时回收」，否则会抢走活着的副本手上的任务。
-func (s *LanesTaskStore) ReclaimInterrupted(ctx context.Context, now time.Time, maxAttempts int) (requeued, failed int64, err error) {
+// 扩副本后 skipIDs 必须换成共享的在飞登记（如 Redis），否则会抢走活副本手上的任务。
+func (s *LanesTaskStore) ReclaimInterrupted(ctx context.Context, now, olderThan time.Time, maxAttempts int, skipIDs []int64) (requeued, failed int64, err error) {
 	if err := s.ready(); err != nil {
 		return 0, 0, err
 	}
@@ -427,7 +451,9 @@ UPDATE lanes_task_attempts a
 SET outcome = 'interrupted', finished_at = $1
 FROM lanes_task_jobs j
 WHERE a.job_id = j.id AND j.status = 'running'
-  AND (a.finished_at IS NULL OR a.finished_at < TIMESTAMPTZ '1970-01-01')`, now); err != nil {
+  AND j.updated_at < $2
+  AND NOT (j.id = ANY($3::bigint[]))
+  AND (a.finished_at IS NULL OR a.finished_at < TIMESTAMPTZ '1970-01-01')`, now, olderThan, int64ArrayLiteral(skipIDs)); err != nil {
 		return 0, 0, err
 	}
 
@@ -437,14 +463,17 @@ WHERE a.job_id = j.id AND j.status = 'running'
 UPDATE lanes_task_jobs
 SET status = 'pending', attempts = attempts + 1, next_attempt_at = $1,
     reason = 'requeued_after_interruption', updated_at = $1
-WHERE status = 'running' AND attempts + 1 < $2`, now, maxAttempts); err != nil {
+WHERE status = 'running' AND attempts + 1 < $3
+  AND updated_at < $2 AND NOT (id = ANY($4::bigint[]))`,
+		now, olderThan, maxAttempts, int64ArrayLiteral(skipIDs)); err != nil {
 		return 0, 0, err
 	}
 	if failedRes, err = tx.ExecContext(ctx, `
 UPDATE lanes_task_jobs
 SET status = 'failed', attempts = attempts + 1, reason = 'interrupted_too_many',
     finished_at = $1, updated_at = $1
-WHERE status = 'running'`, now); err != nil {
+WHERE status = 'running' AND updated_at < $2 AND NOT (id = ANY($3::bigint[]))`,
+		now, olderThan, int64ArrayLiteral(skipIDs)); err != nil {
 		return 0, 0, err
 	}
 	if err = tx.Commit(); err != nil {

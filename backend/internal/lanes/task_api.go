@@ -37,6 +37,11 @@ type TaskLane struct {
 
 	inflight  atomic.Int64
 	startOnce sync.Once
+	// ticks 是调度心跳计数（运行期回收按拍数节流）。
+	ticks uint64
+	// activeTasks = 本进程**正在执行**的任务号：运行期回收拿它排除，
+	// 否则「执行时间长于回收阈值」的任务会被自己抢跑（同一任务并发两份 = 双计费）。
+	activeTasks sync.Map
 	nowFn     func() time.Time // 测试可注入
 	// inlineExec 让调度器在 tick 内同步执行（仅测试用）。
 	// 生产必须异步：一个慢上游不能把心跳卡住，那会让 deadline 淘汰停摆。
