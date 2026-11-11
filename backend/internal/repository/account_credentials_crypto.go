@@ -197,12 +197,6 @@ func (r *accountRepository) credentialsFromEntity(m *dbent.Account) (map[string]
 	return copyJSONMap(m.Credentials), nil
 }
 
-// credentialPlaintextFallbackSQLPredicate 是给 SQL 层用的"该行尚未迁移"判据。
-// 保留成函数是为了让 Stage 2 改写 SQL 时只有一个地方定义这个语义。
-func credentialPlaintextFallbackSQLPredicate(column string) string {
-	return "(" + column + " IS NULL OR " + column + " = '')"
-}
-
 // credentialAPIKeyHashHex 返回 api_key 的指纹（hex），空串返回空串。
 //
 // 为什么空串回空串而不是 nil：这些调用点把结果直接当 SQL 参数用，
