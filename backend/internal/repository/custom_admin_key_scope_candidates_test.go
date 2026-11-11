@@ -9,6 +9,7 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/require"
@@ -120,4 +121,75 @@ func TestScopedAdminCodexCandidates_MatchesWithoutPlaintextColumn(t *testing.T) 
 	// 没有 principal → 报错（授权边界不能被这次改动绕过）
 	_, err = repo.ScopedAdminCodexCandidates(ctx, identity)
 	require.Error(t, err, "缺少受限身份时必须拒绝")
+}
+
+// ScopedAdminList 的 model_mapping 原先用 SQL 聚合 `credentials->'model_mapping'` 取，
+// drop 明文列之后会运行期报错。改成解密后取值，这条测试把两件事钉在一起：
+//
+//	① 正常时能拿到映射（正例；没有它，下面的断言全"通过"也无意义）
+//	② **明文列清空后仍能拿到**（drop 后就是这个状态）
+//	③ 返回体里只有 model_mapping，别的凭据不外带
+func TestScopedAdminList_ModelMappingWithoutPlaintextColumn(t *testing.T) {
+	dsn := os.Getenv("SUB2API_CREDENTIAL_DIFF_DSN")
+	if dsn == "" {
+		t.Skip("SUB2API_CREDENTIAL_DIFF_DSN 未设置；需要真 PostgreSQL")
+	}
+	cryptor := credentialTestEncryptor(t)
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB("postgres", db)))
+	t.Cleanup(func() { _ = client.Close() })
+	ctx := context.Background()
+
+	_, err = db.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`)
+	require.NoError(t, err)
+	require.NoError(t, client.Schema.Create(ctx))
+
+	creds := map[string]any{
+		"api_key":       "sk-must-not-leak",
+		"model_mapping": map[string]any{"claude-3": "gpt-4o", "dropped": 42},
+	}
+	cols, err := CredentialCryptoColumnsFor(creds, cryptor)
+	require.NoError(t, err)
+	created, err := client.Account.Create().
+		SetName("list-mapping").
+		SetPlatform(service.PlatformOpenAI).
+		SetType(service.AccountTypeAPIKey).
+		SetCredentials(creds).
+		SetCredentialsMeta(cols.Meta).
+		SetCredentialsHash(*cols.Hash).
+		SetCredentialsEncrypted(*cols.Encrypted).
+		Save(ctx)
+	require.NoError(t, err)
+
+	repo := newAccountRepositoryWithSQLCrypto(client, db, nil, cryptor)
+	principalCtx := adminaccess.WithPrincipal(ctx, &adminaccess.Principal{
+		KeyID: "fixture",
+		Policy: adminaccess.Policy{Rules: []adminaccess.Rule{{
+			Permissions:      []string{"accounts.read"},
+			AllGroups:        true,
+			IncludeUngrouped: true,
+			AccountTypes:     []string{service.AccountTypeAPIKey},
+			Platforms:        []string{service.PlatformOpenAI},
+		}}},
+	})
+
+	list, total, err := repo.ScopedAdminList(principalCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, list, 1)
+	require.Equal(t, created.ID, list[0].ID)
+	require.Equal(t, map[string]any{"model_mapping": map[string]string{"claude-3": "gpt-4o"}},
+		list[0].Credentials, "只保留字符串值，且只回传 model_mapping（api_key 不外带）")
+
+	// ── drop 模拟：明文列清空 ──
+	_, err = db.ExecContext(ctx, `UPDATE accounts SET credentials = '{}'::jsonb`)
+	require.NoError(t, err)
+
+	list, total, err = repo.ScopedAdminList(principalCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "")
+	require.NoError(t, err, "明文列没了也必须能列出 —— drop 之后就是这个状态")
+	require.Equal(t, int64(1), total)
+	require.Equal(t, map[string]any{"model_mapping": map[string]string{"claude-3": "gpt-4o"}},
+		list[0].Credentials, "映射必须来自密文解密")
 }
