@@ -125,7 +125,7 @@ func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIK
 func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (string, int64, error) {
 	m, err := r.activeQuery().
 		Where(apikey.IDEQ(id)).
-		Select(apikey.FieldKey, apikey.FieldUserID).
+		Select(apikey.FieldKey, apikey.FieldKeyEncrypted, apikey.FieldUserID).
 		Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
@@ -133,7 +133,12 @@ func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (stri
 		}
 		return "", 0, err
 	}
-	return m.Key, m.UserID, nil
+	// 走权威明文：drop 明文列之后 `key` 列不存在，这里能拿到的只有密文。
+	plaintext, err := r.apiKeyAuthoritativePlaintext(m)
+	if err != nil {
+		return "", 0, err
+	}
+	return plaintext, m.UserID, nil
 }
 
 func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.APIKey, error) {
@@ -175,13 +180,24 @@ func (r *apiKeyRepository) lookupAPIKeyByHashThenPlaintext(
 	byHash, err := apply(r.activeQuery().Where(apikey.KeyHashEQ(hash))).Only(ctx)
 	switch {
 	case err == nil:
-		if !constantTimeEqualAPIKey(byHash.Key, key) {
+		// 复核要用的明文来自**密文**（drop 明文列之后那是唯一副本）；
+		// 这里比对的是"权威明文 vs 入参"，不是"明文列 vs 入参"。
+		plaintext, perr := r.apiKeyAuthoritativePlaintext(byHash)
+		if perr != nil {
+			logger.LegacyPrintf("repository.apikey",
+				"[APIKeyLookup] cannot resolve plaintext for id=%d: %v; rejecting", byHash.ID, perr)
+			return nil, service.ErrAPIKeyNotFound
+		}
+		if plaintext == "" || !constantTimeEqualAPIKey(plaintext, key) {
 			// 指纹命中但明文不等：拒绝，而不是回落明文给它第二次机会。
 			// 回落会让"指纹算错的坏行"变成可认证，那正是要防的方向。
 			logger.LegacyPrintf("repository.apikey",
 				"[APIKeyLookup] key_hash matched but plaintext differs (id=%d); rejecting", byHash.ID)
 			return nil, service.ErrAPIKeyNotFound
 		}
+		// 把权威明文放回实体：调用方（掩码/日志/缓存键）拿到的必须是明文，
+		// drop 之后它只能来自解密。
+		byHash.Key = plaintext
 		return byHash, nil
 	case !dbent.IsNotFound(err):
 		return nil, err
@@ -204,8 +220,11 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 	apply := func(q *dbent.APIKeyQuery) *dbent.APIKeyQuery {
 		return q.Select(
 			apikey.FieldID,
-			// 复核需要明文：指纹只用于定位，命中后必须再比对一次（见 lookup 的注释）
+			// 复核需要明文：指纹只用于定位，命中后必须再比对一次（见 lookup 的注释）。
+			// 明文**优先取自密文**，所以这里必须一起选出 key_encrypted——
+			// 漏选会让权威明文退化成明文列，drop 之后就没人可退了。
 			apikey.FieldKey,
+			apikey.FieldKeyEncrypted,
 			apikey.FieldUserID,
 			apikey.FieldGroupID,
 			apikey.FieldName,
