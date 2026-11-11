@@ -104,6 +104,10 @@ type capabilitiesResponse struct {
 	Lanes       map[string]capabilitiesLane `json:"lanes"`
 	Media       capabilitiesMedia           `json:"media"`
 	Limits      capabilitiesLimits          `json:"limits"`
+	// add-ciyuan-task-lane S1：价格与容量。两段都可为 null（观测不足/未装配），
+	// 且都是 advisory —— 不承诺「发起时仍成立」。
+	Pricing  *capabilitiesPricing  `json:"pricing"`
+	Capacity *capabilitiesCapacity `json:"capacity"`
 }
 
 // ServeCapabilities 处理 GET /v1/ciyuan/capabilities。
@@ -135,6 +139,9 @@ func ServeCapabilities(c *gin.Context, app *Lanes) {
 		Media:       buildCapabilitiesMedia(apiKey.Group),
 		Limits:      buildCapabilitiesLimits(apiKey),
 	}
+	pricing := buildCapabilitiesPricing(apiKey.Group, time.Now())
+	capacity := buildCapabilitiesCapacity(ctx, primaryModelFor(ctx, apiKey.ID, available), time.Now())
+	resp.attachPricingAndCapacity(pricing, capacity)
 	c.JSON(http.StatusOK, resp)
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -32,6 +33,26 @@ func CapacityGate() *service.KeyCapacityGate { return capacityGate }
 // timeNow 是生效时刻判定的时钟。单独抽出来是为了测试能控制"现在"，
 // 而不是靠 sleep 或依赖真实时间（后者在 CI 上必然间歇性失败）。
 var timeNow = time.Now
+
+// KeyCapacityExemptPath 报告该路径是否豁免 key 容量闸。
+//
+// 只有任务车道的提交/查询路径豁免：它们本身不产生上游在飞调用。
+// 执行（重放）走 /v1/chat/completions，不在豁免名单里，因此席位语义不变。
+//
+// 两条防绕过：
+//  1. 精确路径 + 边界前缀，杜绝 /v1/ciyuan/tasks-evil 这类同前缀的误放行；
+//  2. **非规范路径一律不豁免**（path.Clean 必须原样返回）——否则
+//     /v1/ciyuan/tasks/../chat/completions 这种穿越形态会拿着任务路径的豁免
+//     去跑真正的上游调用，等于把席位契约作废。
+func KeyCapacityExemptPath(p string) bool {
+	if p == "" || path.Clean(p) != p {
+		return false
+	}
+	if p == "/v1/ciyuan/tasks" {
+		return true
+	}
+	return strings.HasPrefix(p, "/v1/ciyuan/tasks/")
+}
 
 // acquireKeyCapacity 返回 (是否放行, 归因层, release)。
 // 归因层取值 "" | "user" | "key" —— 直接进错误体，让调用方知道是哪一层挡的。
@@ -331,14 +352,21 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		//
 		// release 必须 defer：泄漏一次该 key 就永久少一个并发且外部看不出来。
 		// 回收由周期性对账兜底，并在 state 端点回报 leaked 计数（泄漏要可见）。
-		if allowed, scope, release := acquireKeyCapacity(apiKey); !allowed {
-			MarkIngressRejected(c, IngressRejectKeyCapacity)
-			AbortWithError(c, http.StatusTooManyRequests,
-				"KEY_CAPACITY_EXCEEDED",
-				"key capacity exceeded (scope="+scope+"); retry later")
-			return
-		} else {
-			defer release()
+		//
+		// 豁免：任务车道的**提交**请求本身不产生上游在飞调用（它只写一行任务或
+		// 同步重放一次）。若不豁免，池满时 mode=defer 的提交也会被 429 ——
+		// 而那正是最需要排队的时候。真正执行时走的是 /v1/chat/completions，
+		// 那条路径照常占席位，故席位语义不变。
+		if !KeyCapacityExemptPath(c.Request.URL.Path) {
+			if allowed, scope, release := acquireKeyCapacity(apiKey); !allowed {
+				MarkIngressRejected(c, IngressRejectKeyCapacity)
+				AbortWithError(c, http.StatusTooManyRequests,
+					"KEY_CAPACITY_EXCEEDED",
+					"key capacity exceeded (scope="+scope+"); retry later")
+				return
+			} else {
+				defer release()
+			}
 		}
 
 		// ── 7. 设置上下文 → Next ─────────────────────────────────────
