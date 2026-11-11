@@ -65,6 +65,13 @@ const (
 	// taskEstDuration 单次执行的保守耗时估计（用于 deadline 可行性判定）。
 	// 取观测到的 p95（约 86s）向上取整，宁可判不可行也不要收下再失败。
 	taskEstDuration = 120 * time.Second
+	// taskAttemptTimeout 单次尝试的硬上限。必须是 taskEstDuration 的倍数：
+	// 拿估计值本身当超时会误杀「正常但偏慢」的那批，所以给到 3 倍。
+	//
+	// 为什么必须有：并发只有 taskWorkerConcurrency=2，一个挂住的上游就把半个
+	// 车道占死；而且取消后往往是空响应，classifyAttempt(0) 走 default 落成
+	// client error（不可重试）——「上游抖动」会被写成「永久失败」。
+	taskAttemptTimeout = 3 * taskEstDuration
 	// taskUnknownRPS 没有任何观测时的保守容量假设（S0 实测整类 p50 = 0.117 rps，
 	// 这里取更低值，宁可把等待时间估长导致当场拒，也不要收下注定超期的任务）。
 	taskUnknownRPS = 0.05
