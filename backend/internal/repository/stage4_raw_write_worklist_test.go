@@ -6,21 +6,25 @@ import (
 	"os"
 	"testing"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
-// 阶段四第②步的**作业单**：drop 明文列之后，哪些语句会炸、炸在哪里。
+// 阶段四第②步的**作业单**：drop 明文列之后，哪些裸 SQL 会炸、炸在哪里。
 //
 // 为什么要单独一条：ent 那边的依赖是**编译期**拦下的（schema 删字段 → 全站编译失败），
 // 而裸 SQL 字符串没有任何编译期保护 —— 它们只在真正执行时才报
 // `column "credentials" does not exist`。也就是说，如果只靠"编译过了就以为改完了"，
-// 这三处会在 drop 之后的消息流里逐个暴露，而那时已经不可回退。
+// 这些语句会在 drop 之后的消息流里逐个暴露，而那时已经不可回退。
 //
-// 所以这里把三条语句按当前代码原样抄下来，在**已 drop 的库**上执行，
-// 断言它们确实失败、且错误里点名了被 drop 的列。drop 那次 release 的验收标准就是：
-// 本测试里的每一条都已被改造成不再引用明文列（届时本测试整体删除）。
-func TestStage4_RawSQLWritesToPlaintextColumnsFailAfterDrop(t *testing.T) {
+// 覆盖面：**写**（三条 SET/合并）与**读**（合并后事务内回读明文重算派生列）。
+// 早先只登记了写，读那一条是后来扫裸列引用才发现的 —— 一类语句只登记一半，
+// 和"守卫只认一种写法"是同一个毛病。
+//
+// 做法：把每条语句按当前代码原样抄下来，先在**未 drop** 的库上跑通（证明语句本身有效，
+// 排除语法错冒充依赖缺失），再 drop 明文列后逐条断言失败且点名被 drop 的列。
+// drop 那次 release 的验收标准：本测试里的每一条都已被改造成不再引用明文列，然后整体删除。
+func TestStage4_RawSQLOnPlaintextColumnsFailsAfterDrop(t *testing.T) {
 	dsn := os.Getenv("SUB2API_CREDENTIAL_DIFF_DSN")
 	if dsn == "" {
 		t.Skip("SUB2API_CREDENTIAL_DIFF_DSN 未设置；阶段四作业单演练需要真 PostgreSQL")
@@ -53,15 +57,21 @@ func TestStage4_RawSQLWritesToPlaintextColumnsFailAfterDrop(t *testing.T) {
 	`)
 	require.NoError(t, err)
 
-	// 三条生产语句（只保留与明文列有关的最小骨架，其它列值不重要）
-	type rawWrite struct {
+	type rawStatement struct {
 		name string
 		sql  string
 		args []any
 	}
-	statements := []rawWrite{
+	statements := []rawStatement{
 		{
-			// account_repo.go:1718 UpdateGrokOAuthCredentialsIfUnchanged
+			// 读：account_credentials_crypto.go:322 deriveCredentialColumnsAfterMerge
+			// BulkUpdate 在 SQL 侧合并凭据后，同事务回读明文重算派生列。
+			name: "deriveCredentialColumnsAfterMerge.read",
+			sql:  `SELECT id, credentials FROM accounts WHERE id = ANY($1) AND deleted_at IS NULL`,
+			args: []any{pq.Array([]int64{1})},
+		},
+		{
+			// 写：account_repo.go:1718 UpdateGrokOAuthCredentialsIfUnchanged
 			name: "UpdateGrokOAuthCredentialsIfUnchanged",
 			sql: `
 			WITH updated AS (
@@ -77,30 +87,42 @@ func TestStage4_RawSQLWritesToPlaintextColumnsFailAfterDrop(t *testing.T) {
 			args: []any{[]byte(`{"k":"v"}`), []byte(`{}`)},
 		},
 		{
-			// account_repo.go:3228 BulkUpdate 的合并子句
+			// 写：account_repo.go:3228 BulkUpdate 的合并子句
 			name: "BulkUpdate.merge",
 			sql:  `UPDATE accounts SET credentials = COALESCE(credentials, '{}'::jsonb) || $1::jsonb WHERE id = 1`,
 			args: []any{[]byte(`{"k":"v"}`)},
 		},
 		{
-			// account_repo.go 的 UpdateCredentials：整份替换
+			// 写：UpdateCredentials 的整份替换
 			name: "UpdateCredentials",
 			sql:  `UPDATE accounts SET credentials = $1::jsonb WHERE id = 1`,
 			args: []any{[]byte(`{"k":"v"}`)},
 		},
 	}
 
-	// 先在**没有 drop** 的库上跑一遍，证明语句本身是有效的（否则下面的失败可能只是语法错）
+	// 读与写用同一个探针：Query 既能跑 SELECT 也能跑 UPDATE（不取结果即可）。
+	probe := func(stmt rawStatement) error {
+		rows, qErr := db.QueryContext(ctx, stmt.sql, stmt.args...)
+		if qErr != nil {
+			return qErr
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+		}
+		return rows.Err()
+	}
+
+	// ── drop 之前：每条都必须能跑通（证明语句有效） ──
 	for _, stmt := range statements {
-		_, err := db.ExecContext(ctx, stmt.sql, stmt.args...)
-		require.NoError(t, err, "%s 在 drop 之前必须能执行", stmt.name)
+		require.NoError(t, probe(stmt), "%s 在 drop 之前必须能执行", stmt.name)
 	}
 
 	_, err = db.ExecContext(ctx, `ALTER TABLE accounts DROP COLUMN credentials`)
 	require.NoError(t, err)
 
+	// ── drop 之后：每条都必须失败，且错误点名被 drop 的列 ──
 	for _, stmt := range statements {
-		_, execErr := db.ExecContext(ctx, stmt.sql, stmt.args...)
+		execErr := probe(stmt)
 		require.Error(t, execErr, "%s 在 drop 之后必须失败（这正是阶段四第②步要改掉的地方）", stmt.name)
 		// 只断言"点名的列 + 不存在"两段，不锁整句措辞：
 		// PG17 是 `column "credentials" of relation "accounts" does not exist`，
