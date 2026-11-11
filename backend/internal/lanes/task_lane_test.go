@@ -174,7 +174,6 @@ func TestFeasibleByDeadline(t *testing.T) {
 	ok, _, _ := feasibleByDeadline(now, nil, 100, 0.1)
 	require.True(t, ok, "没有截止时间的任务永远可行")
 
-	now := peakTime()
 	deadline := now.Add(2 * time.Hour) // 7200s
 
 	feasible, wait, _ := feasibleByDeadline(now, &deadline, 60, 0.1) // 600s + 120s
