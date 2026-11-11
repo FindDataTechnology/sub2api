@@ -185,3 +185,88 @@ WHERE COALESCE(s.cur_usd,0) >= 0.5
   AND (s.usd_growth_x >= 2 OR s.ramp_x >= 2
        OR (s.prev_usd IS NULL AND COALESCE(s.cur_usd,0) >= 1))
 ORDER BY COALESCE(s.cur_usd,0) DESC;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 任务车道（add-ciyuan-task-lane 5.4）
+--
+-- 要能回答三个问题：①多少任务被推迟、省了多少钱 ②多少任务死在 deadline
+-- ③排队是不是在堆积（pending 峰值 / 等待时长）
+--
+-- 口径纪律：
+--   - 节省额 = 实扣 vs 「如果不推迟、按提交时刻峰价跑」的估价差。
+--     估价来自 estimated_cost_usd（提交时按峰谷因子算的经验估价），
+--     因此本查询的节省是**估价口径**，不是财务口径 —— 别当账单用。
+--   - 「死在 deadline」只认 reason='deadline_exceeded' 前缀，
+--     那样能把「重排时预判超期」与「到点淘汰」一并算进来。
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ① 车道总览（近 N 天）
+SELECT status,
+       count(*)                                        AS tasks,
+       count(*) FILTER (WHERE deferred_until IS NOT NULL) AS deferred_tasks,
+       round(sum(estimated_cost_usd)::numeric, 4)      AS est_usd_sum,
+       round(sum(actual_cost_usd)::numeric, 4)         AS actual_usd_sum,
+       round(avg(attempts)::numeric, 2)                AS avg_attempts
+FROM lanes_task_jobs
+WHERE created_at >= now() - interval '7 days'
+GROUP BY status
+ORDER BY tasks DESC;
+
+-- ② 推迟的收益（估价口径）：被推迟且成功的任务，实扣 vs 峰价估价
+SELECT count(*)                                                   AS deferred_completed,
+       round(sum(estimated_cost_usd)::numeric, 4)                 AS est_at_peak_usd,
+       round(sum(actual_cost_usd)::numeric, 4)                    AS actual_usd,
+       round(sum(estimated_cost_usd - actual_cost_usd)::numeric, 4) AS est_saving_usd,
+       round((1 - sum(actual_cost_usd) / NULLIF(sum(estimated_cost_usd),0))::numeric, 3) AS saving_ratio
+FROM lanes_task_jobs
+WHERE deferred_until IS NOT NULL
+  AND status = 'completed'
+  AND created_at >= now() - interval '7 days';
+
+-- ③ 死在 deadline 的任务（含原因分布）
+SELECT COALESCE(split_part(reason, ':', 1), '(none)') AS reason_class,
+       count(*)                                       AS tasks,
+       round(avg(attempts)::numeric, 1)               AS avg_attempts
+FROM lanes_task_jobs
+WHERE status = 'failed'
+  AND created_at >= now() - interval '7 days'
+GROUP BY 1
+ORDER BY tasks DESC;
+
+-- ④ 排队健康度：pending 是否在堆积 + 等待时长
+--    I3 的日常自证：第一行必须恒为 0（pending 且 deadline 已过）。
+SELECT count(*) FILTER (WHERE deadline_at IS NOT NULL AND deadline_at < now()) AS pending_past_deadline_MUST_BE_ZERO,
+       count(*)                                                               AS pending_now,
+       max(now() - created_at)                                                AS oldest_pending_age,
+       max(deferred_until)                                                    AS latest_deferred_until
+FROM lanes_task_jobs
+WHERE status = 'pending';
+
+-- ⑤ 每类执行健康度（按 model）：成功率与 p95 耗时
+SELECT j.model,
+       count(*)                                                        AS attempts,
+       count(*) FILTER (WHERE a.outcome = 'completed')                 AS completed,
+       count(*) FILTER (WHERE a.outcome = 'retry_queue_full')          AS retried_queue_full,
+       count(*) FILTER (WHERE a.outcome = 'retry_transient')           AS retried_transient,
+       count(*) FILTER (WHERE a.outcome = 'failed_client')             AS failed_client,
+       round(100.0 * count(*) FILTER (WHERE a.outcome = 'completed') / count(*), 1) AS success_pct,
+       round(percentile_cont(0.95) WITHIN GROUP (
+           ORDER BY extract(epoch FROM (a.finished_at - a.started_at)))::numeric, 1) AS p95_seconds
+FROM lanes_task_attempts a
+JOIN lanes_task_jobs j ON j.id = a.job_id
+WHERE a.finished_at >= now() - interval '7 days'
+GROUP BY j.model
+ORDER BY attempts DESC;
+
+-- ⑥ 血缘抽查：任务行能否追到账单行
+--    usage_logs.request_id 形如 'client:task-<job>-<attempt>'，前缀按尝试号唯一。
+SELECT j.id AS job_id, j.status,
+       a.attempt_no, a.outcome,
+       u.id AS usage_log_id, u.request_id, u.actual_cost,
+       (u.id IS NOT NULL) AS billed
+FROM lanes_task_jobs j
+LEFT JOIN lanes_task_attempts a ON a.job_id = j.id AND a.outcome = 'completed'
+LEFT JOIN usage_logs u ON u.request_id = 'client:' || a.request_id AND u.api_key_id = j.api_key_id
+WHERE j.created_at >= now() - interval '2 days'
+ORDER BY j.id DESC
+LIMIT 50;
