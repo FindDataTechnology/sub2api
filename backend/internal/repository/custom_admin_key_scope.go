@@ -32,13 +32,14 @@ func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.Pa
 		return nil, 0, err
 	}
 	// model_mapping 原先用 SQL 聚合 `credentials->'model_mapping'` 直接投影。
-	// drop 明文列之后那条聚合会运行期报错，所以改成**解密后取值**：
-	// 凭据只在 Go 侧出现，返回体里也只有 model_mapping，其余字段不外带。
+	// drop 明文列之后那条聚合会运行期报错，所以改成**解密后取值**。
+	// **只选密文列，明文列一次都不碰** —— 上游守卫的原意是"这个面不读凭据"，
+	// 而读整份明文的成本/风险都高于读密文（后者 drop 之后也仍然存在）。
 	models, err := q.Offset(p.Offset()).Limit(p.Limit()).Order(dbaccount.ByID()).
 		Select(dbaccount.FieldID, dbaccount.FieldName, dbaccount.FieldNotes,
 			dbaccount.FieldPlatform, dbaccount.FieldType, dbaccount.FieldStatus,
 			dbaccount.FieldSchedulable, dbaccount.FieldConcurrency, dbaccount.FieldPriority,
-			dbaccount.FieldCredentials, dbaccount.FieldCredentialsEncrypted).
+			dbaccount.FieldCredentialsEncrypted).
 		All(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -177,16 +178,31 @@ func (r *accountRepository) ScopedAdminCodexCandidates(ctx context.Context, iden
 		return []service.Account{}, nil
 	}
 
-	// 一次取候选再在 Go 里筛。代价是这条路径要解密全部候选行 —— 它是人工触发的
+	// 一次取候选再在 Go 里筛。代价是这条路径要解密**全部**候选行 —— 它是人工触发的
 	// 低频导入，不是请求热路径（A4 选项 C 的取舍）。
-	// **不加 LIMIT**：加了就把"按 id 降序第一个命中"变成"前 N 行里第一个命中"，语义变了。
+	//
+	// **为什么明确不加 LIMIT**：加了就把"按 id 降序第一个命中"变成"前 N 行里第一个命中"，
+	// 语义变了 —— 会把更早的合法账号判成"不存在"，于是导入出一条重复账号。
+	// 上游曾要求"SQL 里按身份筛选 + LIMIT"，那条契约在 drop 明文列之后无法成立
+	// （身份只存在于明文 JSON 里）；契约已改为"不得读明文列 + 必须带权限范围谓词"，
+	// 见 TestScopedAdminCodexCandidatesQueryIsBounded。
+	//
+	// **只读密文列**：明文列一次都不碰（drop 之后它也不存在）。
 	rows, err := r.accountListFilteredQuery(service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "").
 		Where(dbaccount.Or(scope...)).
 		Order(dbaccount.ByID(entsql.OrderDesc())).
-		Select(dbaccount.FieldID, dbaccount.FieldCredentials, dbaccount.FieldCredentialsEncrypted).
+		Select(dbaccount.FieldID, dbaccount.FieldCredentialsEncrypted).
 		All(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// 成本可观测：候选数就是这一跳要解密的行数。超过阈值打一条 WARN，
+	// 免得"导入越来越慢"变成一个查不出原因的现象（账号规模长起来时它会说话）。
+	const candidateWarnThreshold = 500
+	if len(rows) > candidateWarnThreshold {
+		logger.LegacyPrintf("repository.scopedadmin",
+			"[ScopedCodexIdentity] scanned %d candidates for identity match (>%d): this path decrypts every candidate; consider a derived identity column if it grows",
+			len(rows), candidateWarnThreshold)
 	}
 
 	resolved := make(map[int64]map[string]any, len(rows))
