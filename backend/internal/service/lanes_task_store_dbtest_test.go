@@ -223,3 +223,91 @@ func TestLanesTaskStore_RescheduleAndPendingAhead(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 3, active)
 }
+
+// Create 必须把血缘与实扣一起落行（真机验证抓到过它们被 INSERT 列清单漏掉）。
+//
+// 事故形态：submitNow 在 Create 之前设置 job.LastRequestID / ActualCostUSD，
+// 但 INSERT 的列清单里没有这两列 → 任务行永远为空，
+// 而 usage_logs 那边明明有 "client:task-*" 行，血缘在两边断开。
+func TestLanesTaskStore_CreatePersistsLineageAndActualCost(t *testing.T) {
+	store := NewLanesTaskStore(openScratchDB(t))
+	ctx := context.Background()
+
+	requestID := "task-now-1-1"
+	cost := 0.00001275
+	status := 200
+	j := newJobFor(50, nil, "now")
+	j.Status = "completed"
+	j.Attempts = 1
+	j.ResultStatus = &status
+	j.ResultBody = []byte(`{"id":"chatcmpl-x","choices":[]}`)
+	j.LastRequestID = &requestID
+	j.ActualCostUSD = &cost
+	j.EstimatedCostUSD = ptrFloat(0.0039)
+
+	id, dup, err := store.Create(ctx, j)
+	require.NoError(t, err)
+	require.False(t, dup)
+
+	got, err := store.Get(ctx, id)
+	require.NoError(t, err)
+	require.NotNil(t, got.LastRequestID, "血缘列不得被 INSERT 丢弃")
+	require.Equal(t, requestID, *got.LastRequestID)
+	require.NotNil(t, got.ActualCostUSD, "实扣不得被 INSERT 丢弃")
+	require.InDelta(t, cost, *got.ActualCostUSD, 1e-12)
+	require.NotNil(t, got.EstimatedCostUSD, "估价与实扣必须并存，互不覆盖")
+	require.InDelta(t, 0.0039, *got.EstimatedCostUSD, 1e-9)
+	require.Equal(t, 1, got.Attempts)
+	require.Equal(t, "completed", got.Status)
+}
+
+// SetActualCost 只写实扣，不动估价（用量行异步到账时用）。
+func TestLanesTaskStore_SetActualCostDoesNotClobberEstimate(t *testing.T) {
+	store := NewLanesTaskStore(openScratchDB(t))
+	ctx := context.Background()
+
+	j := newJobFor(60, nil, "now")
+	j.EstimatedCostUSD = ptrFloat(0.01)
+	id, _, err := store.Create(ctx, j)
+	require.NoError(t, err)
+
+	require.NoError(t, store.SetActualCost(ctx, id, 0.004))
+	got, err := store.Get(ctx, id)
+	require.NoError(t, err)
+	require.NotNil(t, got.ActualCostUSD)
+	require.InDelta(t, 0.004, *got.ActualCostUSD, 1e-12)
+	require.NotNil(t, got.EstimatedCostUSD)
+	require.InDelta(t, 0.01, *got.EstimatedCostUSD, 1e-9, "估价不得被实扣覆盖")
+}
+
+func ptrFloat(v float64) *float64 { return &v }
+
+// SetLineage：defer 路径提交时没有 request_id，终态后补写；cost=nil 不得擦掉已写实扣。
+func TestLanesTaskStore_SetLineage(t *testing.T) {
+	store := NewLanesTaskStore(openScratchDB(t))
+	ctx := context.Background()
+
+	id, _, err := store.Create(ctx, newJobFor(70, nil, "defer"))
+	require.NoError(t, err)
+
+	require.NoError(t, store.SetLineage(ctx, id, "task-70-1", nil))
+	got, err := store.Get(ctx, id)
+	require.NoError(t, err)
+	require.NotNil(t, got.LastRequestID)
+	require.Equal(t, "task-70-1", *got.LastRequestID)
+
+	cost := 0.002
+	require.NoError(t, store.SetLineage(ctx, id, "", &cost))
+	got, err = store.Get(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, "task-70-1", *got.LastRequestID, "空 request_id 不得擦掉已有血缘")
+	require.NotNil(t, got.ActualCostUSD)
+	require.InDelta(t, 0.002, *got.ActualCostUSD, 1e-12)
+
+	// cost=nil 时保留原值
+	require.NoError(t, store.SetLineage(ctx, id, "task-70-2", nil))
+	got, err = store.Get(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, "task-70-2", *got.LastRequestID)
+	require.InDelta(t, 0.002, *got.ActualCostUSD, 1e-12, "nil cost 不得把已知实扣擦成空")
+}

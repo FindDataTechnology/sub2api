@@ -24,6 +24,10 @@ import (
 //	psql -d ... -f migrations/252_lanes_task_attempts.sql
 //	CIYUAN_TEST_PG_DSN='postgres:///ciyuan_task_ddl_test?sslmode=disable' \
 //	  go test -tags dbtest ./internal/lanes/ -run TestScheduler -v
+//
+// **一次只跑一个包**：lanes 与 service 的 dbtest 共用同一个 scratch 库并各自
+// TRUNCATE，go test 并行跑两个包会互相清空对方的行（实测：调度用例多跑了一次、
+// attempts 写入撞 FK）。这不是代码缺陷，是用例编排问题 —— 分开跑即绿。
 
 type stubRunner struct {
 	outcome  string

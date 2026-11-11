@@ -97,9 +97,15 @@ func (t *TaskLane) execute(ctx context.Context, job *service.LanesTaskJob) {
 	}
 
 	out := t.runner.runWithRequestID(ctx, job, requestID)
-	cost, _ := store.UsageCostByRequestID(ctx, requestID)
+	// defer 路径没有人在等，可以多等几拍让用量行落库。
+	cost := waitActualCost(ctx, store, requestID, 6)
 
 	_ = store.FinishAttempt(ctx, job.ID, attemptNo, out.HTTPStatus, out.Outcome, out.ErrMsg, cost, out.EndedAt)
+
+	// 终态后统一补血缘与实扣（defer 路径提交时还没有 request_id）。
+	defer func() {
+		_ = store.SetLineage(ctx, job.ID, requestID, cost)
+	}()
 
 	switch {
 	case out.Outcome == AttemptCompleted:
@@ -131,6 +137,26 @@ func (t *TaskLane) execute(ctx context.Context, job *service.LanesTaskJob) {
 	default:
 		t.failPermanent(ctx, store, job, out, attemptNo)
 	}
+}
+
+// waitActualCost 等实扣到账。
+//
+// 用量行由 UsageRecordWorkerPool **异步**写入，紧跟重放去查通常取不到 ——
+// 实测就是这里让 actual_cost_usd 落成空。故做有限次短退避重试；
+// 到点仍取不到就返回 nil 并留空（端点显示 null，**不编造**）。
+func waitActualCost(ctx context.Context, store *service.LanesTaskStore, requestID string, attempts int) *float64 {
+	if store == nil || requestID == "" {
+		return nil
+	}
+	for i := 0; i < attempts; i++ {
+		if cost, err := store.UsageCostByRequestID(ctx, requestID); err == nil && cost != nil {
+			return cost
+		}
+		if i < attempts-1 {
+			time.Sleep(150 * time.Millisecond)
+		}
+	}
+	return nil
 }
 
 func (t *TaskLane) failDeadline(ctx context.Context, store *service.LanesTaskStore, job *service.LanesTaskJob, out attemptOutcome, attemptNo int) {

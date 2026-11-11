@@ -156,15 +156,15 @@ func (s *LanesTaskStore) Create(ctx context.Context, j *LanesTaskJob) (id int64,
 INSERT INTO lanes_task_jobs (
 	external_id, api_key_id, user_id, group_id, platform, model, client_ip, mode, status,
 	request_body, deadline_at, deferred_until, next_attempt_at, attempts, max_attempts,
-	peak_multiplier, defer_reason, estimated_cost_usd, result_status, result_body,
-	result_truncated, reason, created_at, updated_at, finished_at
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21,$22,$23,$23,$24)
+	peak_multiplier, defer_reason, estimated_cost_usd, actual_cost_usd, result_status,
+	result_body, result_truncated, reason, last_request_id, created_at, updated_at, finished_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$25,$26)
 ON CONFLICT (api_key_id, external_id) WHERE external_id IS NOT NULL DO NOTHING
 RETURNING id`,
 		j.ExternalID, j.APIKeyID, j.UserID, j.GroupID, j.Platform, j.Model, j.ClientIP, j.Mode, j.Status,
 		string(body), j.DeadlineAt, j.DeferredUntil, j.NextAttemptAt, j.Attempts, j.MaxAttempts,
-		j.PeakMultiplier, j.DeferReason, j.EstimatedCostUSD, j.ResultStatus, resultBody,
-		j.ResultTruncated, j.Reason, j.CreatedAt, j.FinishedAt,
+		j.PeakMultiplier, j.DeferReason, j.EstimatedCostUSD, j.ActualCostUSD, j.ResultStatus, resultBody,
+		j.ResultTruncated, j.Reason, j.LastRequestID, j.CreatedAt, j.FinishedAt,
 	)
 	if err := row.Scan(&id); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -343,6 +343,36 @@ SET attempts = GREATEST(attempts, $2), status = $3, result_status = $4, result_b
     result_truncated = $6, actual_cost_usd = COALESCE($7, actual_cost_usd), reason = $8,
     finished_at = now(), updated_at = now()
 WHERE id = $1`, jobID, attempts, status, resultStatus, body, truncated, cost, reasonArg)
+	return err
+}
+
+// SetLineage 回填「最近一次尝试的 request_id」与实扣。
+//
+// 为什么单独一条：defer 路径的任务行在**提交时**就落库（那时还没有 request_id），
+// 之后由调度器执行，故血缘只能在终态后补写。attempts 表里本来就有每次的
+// request_id（可精确追溯），这一列是给「一眼看最后用了哪次」的便捷指针。
+// cost 为 nil 时保留原值（COALESCE），不把已知的实扣擦成空。
+func (s *LanesTaskStore) SetLineage(ctx context.Context, jobID int64, requestID string, cost *float64) error {
+	if err := s.ready(); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE lanes_task_jobs
+SET last_request_id = COALESCE(NULLIF($2, ''), last_request_id),
+    actual_cost_usd = COALESCE($3, actual_cost_usd),
+    updated_at = now()
+WHERE id = $1`, jobID, requestID, cost)
+	return err
+}
+
+// SetActualCost 单独回填实扣（用量行异步写入、晚于任务落行时用）。
+// 只写 actual_cost_usd，不碰 estimated_cost_usd —— 估价与账单互不覆盖。
+func (s *LanesTaskStore) SetActualCost(ctx context.Context, jobID int64, cost float64) error {
+	if err := s.ready(); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE lanes_task_jobs SET actual_cost_usd = $2, updated_at = now() WHERE id = $1`, jobID, cost)
 	return err
 }
 

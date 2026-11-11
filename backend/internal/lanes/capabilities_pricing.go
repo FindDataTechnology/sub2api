@@ -113,21 +113,35 @@ func buildCapabilitiesCapacity(ctx context.Context, model string, now time.Time)
 	}
 	cap.SampleActiveMinutes = activeMinutes
 	ratio, rerr := store.ErrorRatioForModel(ctx, model, since)
-	if rerr == nil {
-		cap.ErrorRatio = ratio
+	if rerr != nil {
+		ratio = nil
 	}
 	switch {
 	case activeMinutes >= capacityMinActiveMinutesHigh:
 		cap.Confidence = "high"
-		cap.SustainableRPS = &rps
 	case activeMinutes >= capacityMinActiveMinutesMedium:
 		cap.Confidence = "medium"
-		cap.SustainableRPS = &rps
 	default:
-		// 样本不足：不给数值。小样本的小数精度是编造。
 		cap.Confidence = "low"
 	}
+	if cap.Confidence != "low" {
+		cap.SustainableRPS = &rps
+	}
+	attachErrorRatio(&cap, ratio, cap.Confidence)
 	return cap
+}
+
+// attachErrorRatio 只在样本足够时回报错误率。
+//
+// 实测抓到的缺陷：`DeepSeek-V4-Pro-Official` 在 3 天内 usage_logs=0、
+// ops_error_logs=1，比率算出来是 1.0 —— 算术没错，但 1 个样本的「100% 失败」
+// 是噪音不是信号，会让调用方白白回避一个只是偶发一次错误的模型。
+// （与「小样本的小数精度是编造」同一条纪律，只是这里漏了样本门槛。）
+func attachErrorRatio(cap *capabilitiesCapacity, ratio *float64, confidence string) {
+	if confidence == "low" {
+		return
+	}
+	cap.ErrorRatio = ratio
 }
 
 // primaryModelFor 选出「这个 key 实际在跑」的模型：近 7 天用得最多的那个。
