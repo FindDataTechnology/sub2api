@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -58,4 +60,52 @@ func resetAPIKeyPlaintextLookupFallbackCount() { apiKeyPlaintextLookupFallbacks.
 // constantTimeEqualAPIKey 做常量时间比对，避免按字节提前返回泄漏前缀信息。
 func constantTimeEqualAPIKey(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+// apiKeyCiphertextMissingLookups 统计"鉴权时这一行还没有 key_encrypted"的次数。
+//
+// 与 apiKeyPlaintextLookupFallbacks 的区别：那个统计"没指纹、只能按明文列查"，
+// 这个统计"有指纹但没有密文，复核只能看明文列"。两者都是回填窗口的产物，
+// 但第二阶段修不了这个 —— 它只在回填跑完之前出现。
+var apiKeyCiphertextMissingLookups atomic.Int64
+
+// APIKeyCiphertextMissingLookupCount 返回本进程累计次数。
+func APIKeyCiphertextMissingLookupCount() int64 { return apiKeyCiphertextMissingLookups.Load() }
+
+// resetAPIKeyCiphertextMissingLookupCount 仅供测试。
+func resetAPIKeyCiphertextMissingLookupCount() { apiKeyCiphertextMissingLookups.Store(0) }
+
+// apiKeyAuthoritativePlaintext 给出这一行"权威的"明文 key：鉴权复核要用它，
+// 对外返回的 service.APIKey.Key（掩码/日志要用）也来自它。
+//
+// 为什么必须优先取密文：drop 明文列之后 `key_encrypted` 是**唯一**副本。
+// 若复核仍读明文列，drop 当天会撞 `column "key" does not exist`；若代码改成
+// "读不到就当空"（更糟），那么每一行都会因"明文不等"被判查不到 —— 全站 401。
+// 所以最终形态必须在 drop **之前**就落到位：密文优先，明文列只在密文缺失时兜底。
+//
+// 三种输入的处置：
+//   - 有密文：解密后作为权威值（解密失败=硬错误，绝不当成"没密文"再回落）；
+//   - 无密文但有明文列：回填窗口内，用明文列并计数+打日志，让空洞可见；
+//   - 两者都没有：返回空串，调用方据此判"查不到"。
+func (r *apiKeyRepository) apiKeyAuthoritativePlaintext(m *dbent.APIKey) (string, error) {
+	if m == nil {
+		return "", nil
+	}
+	if m.KeyEncrypted != nil && *m.KeyEncrypted != "" {
+		if r == nil || r.cryptor == nil {
+			return "", fmt.Errorf("api key %d has key_encrypted but no encryptor is configured: refusing to trust the plaintext column", m.ID)
+		}
+		plaintext, err := r.cryptor.Decrypt(*m.KeyEncrypted)
+		if err != nil {
+			// 解密失败是数据/密钥问题，不能退化成"用明文列凑一个答案"。
+			return "", fmt.Errorf("decrypt api key %d: %w", m.ID, err)
+		}
+		return plaintext, nil
+	}
+	if m.Key != "" {
+		apiKeyCiphertextMissingLookups.Add(1)
+		logger.LegacyPrintf("repository.apikey",
+			"[CredentialAtRest] api key %d has no key_encrypted yet; falling back to the plaintext column", m.ID)
+	}
+	return m.Key, nil
 }

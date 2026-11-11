@@ -197,9 +197,10 @@ func TestLookupAPIKey_FallsBackWhenHashMissing(t *testing.T) {
 	require.Equal(t, int64(1), APIKeyPlaintextLookupFallbackCount(), "回落必须可见")
 }
 
-// **最严的一条**：指纹命中但明文不等 —— 必须拒绝，且**不许**再回落明文给它第二次机会。
-// 若回落，一条"指纹算错/人工改库"的坏行就会变成可认证。
-func TestLookupAPIKey_HashMatchButPlaintextDiffersIsRejected(t *testing.T) {
+// 权威源的顺序被翻转了：**密文 → 明文列**（drop 之后前者是唯一副本）。
+// 所以"明文列被人改成别的值"不再等于"key 被轮换"——指纹和密文都还指着原值。
+// 这条测试钉住这个顺序：用原 key 查必须通过，且不许退到明文回落。
+func TestAuth_StalePlaintextColumnDoesNotBlockTheRealKey(t *testing.T) {
 	cryptor := credentialTestEncryptor(t)
 	repo, db := apiKeyScratchRepo(t, cryptor)
 	ctx := context.Background()
@@ -207,16 +208,129 @@ func TestLookupAPIKey_HashMatchButPlaintextDiffersIsRejected(t *testing.T) {
 	key := &service.APIKey{UserID: 1, Key: "sk-victim", Name: "k", Status: service.StatusActive}
 	require.NoError(t, repo.Create(ctx, key))
 
-	// 模拟"指纹过期"：明文被改（例如人工改库/旧写入漏带指纹），但 key_hash 仍指向旧值。
+	// 只改明文列（模拟人工改库/旧写入漂移）。指纹与密文仍指向 sk-victim。
 	// 注意不能改成"两行共享同一指纹"——key_hash 上有唯一索引，那样根本写不进去。
 	_, err := db.Exec(`UPDATE api_keys SET key = 'sk-rotated-out-of-band' WHERE id = $1`, key.ID)
 	require.NoError(t, err)
 
 	resetAPIKeyPlaintextLookupFallbackCount()
-	// 用**旧** key 查：指纹仍能命中这一行，但明文已经不是它了 ⇒ 必须拒绝
-	_, lookupErr := repo.GetByKeyForAuth(ctx, "sk-victim")
+	resetAPIKeyCiphertextMissingLookupCount()
+	found, err := repo.GetByKeyForAuth(ctx, "sk-victim")
+	require.NoError(t, err, "指纹与密文都指向 sk-victim，明文列漂移不应阻断真实 key")
+	require.Equal(t, key.ID, found.ID)
+	require.Equal(t, "sk-victim", found.Key, "返回的明文应当来自密文，而不是那列脏值")
+	require.Zero(t, APIKeyPlaintextLookupFallbackCount(), "这条路径是命中指纹的，不该走明文回落")
+}
+
+// 把上一条反过来看：**用被写进明文列的那个值**去查，会发生什么。
+//
+// 指纹命中不了（哈希是原 key 的），于是落到"按明文列等值查"的回落分支 ——
+// 它会命中并放行。也就是说：只要回落分支还活着，一条被人工改过明文列的行
+// 就能让那个新值通过认证。
+//
+// 这不是复核分支的漏洞（复核只信任指纹+密文），而是**回落分支**的固有代价。
+// 它正是阶段 3.4（摘回落）与阶段 5（drop 明文列）要消掉的东西：
+// 明文列没了，回落分支就没有可查的列。所以这条测试是**特性化测试**：
+// 它记录现在的行为，并在回落被摘掉时翻转成"查不到"。
+func TestAuth_StalePlaintextColumnIsStillReachableViaFallback_WILL_FLIP_AT_STAGE3(t *testing.T) {
+	const fallbackStillAlive = true // 阶段 3.4 摘掉回落时改成 false，本测试随即断言"查不到"
+
+	cryptor := credentialTestEncryptor(t)
+	repo, db := apiKeyScratchRepo(t, cryptor)
+	ctx := context.Background()
+
+	key := &service.APIKey{UserID: 1, Key: "sk-victim", Name: "k", Status: service.StatusActive}
+	require.NoError(t, repo.Create(ctx, key))
+	_, err := db.Exec(`UPDATE api_keys SET key = 'sk-rotated-out-of-band' WHERE id = $1`, key.ID)
+	require.NoError(t, err)
+
+	resetAPIKeyPlaintextLookupFallbackCount()
+	found, err := repo.GetByKeyForAuth(ctx, "sk-rotated-out-of-band")
+
+	if fallbackStillAlive {
+		require.NoError(t, err, "回落分支还在：明文列里的值能命中（这是要摘掉它的理由）")
+		require.Equal(t, key.ID, found.ID)
+		require.Equal(t, int64(1), APIKeyPlaintextLookupFallbackCount(), "这类命中必须计数可见")
+	} else {
+		require.ErrorIs(t, err, service.ErrAPIKeyNotFound,
+			"回落已摘：只有指纹+密文能认证，明文列里的脏值查不到")
+	}
+}
+
+// ── 阶段四前置：复核的明文必须来自密文，而不是明文列 ────────────────────────
+//
+// drop 明文列之后 `key_encrypted` 是唯一副本。若复核仍读 `key` 列：
+//   - drop 当天：`column "key" does not exist`（ent 会先炸，属可见故障）；
+//   - 更糟的改法：读不到就当空 → 每行都"明文不等" → 全站 401。
+// 所以这组测试在**列还在的时候**就把最终形态钉住：把 `key` 清成空串模拟 drop，
+// 鉴权与取 key 都必须照常工作。
+
+func TestAuth_UsesCiphertextWhenPlaintextColumnIsGone(t *testing.T) {
+	cryptor := credentialTestEncryptor(t)
+	repo, db := apiKeyScratchRepo(t, cryptor)
+	ctx := context.Background()
+
+	key := &service.APIKey{UserID: 1, Key: "sk-post-drop", Name: "k", Status: service.StatusActive}
+	require.NoError(t, repo.Create(ctx, key))
+
+	// 模拟 drop：明文列清空，指纹与密文保持不动（drop 后就是这个状态）
+	_, err := db.Exec(`UPDATE api_keys SET key = '' WHERE id = $1`, key.ID)
+	require.NoError(t, err)
+
+	resetAPIKeyCiphertextMissingLookupCount()
+	found, err := repo.GetByKeyForAuth(ctx, "sk-post-drop")
+	require.NoError(t, err, "明文列没了也必须能认证——drop 之后只剩密文")
+	require.Equal(t, key.ID, found.ID)
+	require.Equal(t, "sk-post-drop", found.Key, "返回体的 Key 必须是解密出来的明文，掩码/日志要用")
+	require.Zero(t, APIKeyCiphertextMissingLookupCount(), "这一行有密文，不该走缺密文兜底")
+
+	// 取 key 的旁路（删除路径用）同样不能依赖明文列
+	got, owner, err := repo.GetKeyAndOwnerID(ctx, key.ID)
+	require.NoError(t, err)
+	require.Equal(t, "sk-post-drop", got)
+	require.Equal(t, int64(1), owner)
+}
+
+// 负例一：密文解出来的东西与入参不符 → 拒绝。
+// 这条防"复核不小心比的是列里的旧明文"：此例里列已被清空，
+// 只有真正拿密文比对才会判不等。
+func TestAuth_RejectsWhenCiphertextDisagreesWithInput(t *testing.T) {
+	cryptor := credentialTestEncryptor(t)
+	repo, db := apiKeyScratchRepo(t, cryptor)
+	ctx := context.Background()
+
+	key := &service.APIKey{UserID: 1, Key: "sk-original", Name: "k", Status: service.StatusActive}
+	require.NoError(t, repo.Create(ctx, key))
+
+	other, err := cryptor.Encrypt("sk-someone-else")
+	require.NoError(t, err)
+	// 指纹仍指向 sk-original（所以定位能命中），但密文里装的是别的 key
+	_, err = db.Exec(`UPDATE api_keys SET key = '', key_encrypted = $1 WHERE id = $2`, other, key.ID)
+	require.NoError(t, err)
+
+	_, lookupErr := repo.GetByKeyForAuth(ctx, "sk-original")
 	require.ErrorIs(t, lookupErr, service.ErrAPIKeyNotFound,
-		"指纹命中但明文不等时必须判查不到，绝不放行")
-	require.Zero(t, APIKeyPlaintextLookupFallbackCount(),
-		"这种情况也不能回落明文——否则等于给它第二次命中机会")
+		"密文与入参不符必须拒绝——指纹只是索引，不是凭据")
+}
+
+// 负例二：密文坏到解不开 → 硬错误，且**不许**被当成"没有密文"退回明文列。
+// 否则一条损坏行会在回落里活下来，把"数据坏了"伪装成"还没回填"。
+func TestAuth_DecryptFailureIsNotTreatedAsMissingCiphertext(t *testing.T) {
+	cryptor := credentialTestEncryptor(t)
+	repo, db := apiKeyScratchRepo(t, cryptor)
+	ctx := context.Background()
+
+	key := &service.APIKey{UserID: 1, Key: "sk-corrupt", Name: "k", Status: service.StatusActive}
+	require.NoError(t, repo.Create(ctx, key))
+
+	// 明文列**保留**成正确值，只把密文弄坏。若实现"解不开就退回明文列"，这条会误放行。
+	_, err := db.Exec(`UPDATE api_keys SET key_encrypted = 'bm90LWEtY2lwaGVydGV4dA==' WHERE id = $1`, key.ID)
+	require.NoError(t, err)
+
+	resetAPIKeyCiphertextMissingLookupCount()
+	_, lookupErr := repo.GetByKeyForAuth(ctx, "sk-corrupt")
+	require.ErrorIs(t, lookupErr, service.ErrAPIKeyNotFound,
+		"密文解不开必须判查不到（fail closed），不能退回明文列凑答案")
+	require.Zero(t, APIKeyCiphertextMissingLookupCount(),
+		"解不开不等于缺失：不许计进缺密文兜底，否则坏了会被当成没回填")
 }
