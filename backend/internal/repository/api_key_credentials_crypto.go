@@ -2,6 +2,7 @@ package repository
 
 import (
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -75,6 +76,29 @@ func APIKeyCiphertextMissingLookupCount() int64 { return apiKeyCiphertextMissing
 // resetAPIKeyCiphertextMissingLookupCount 仅供测试。
 func resetAPIKeyCiphertextMissingLookupCount() { apiKeyCiphertextMissingLookups.Store(0) }
 
+// errNoAPIKeyCiphertext 表示这一行还没有密文（回填窗口内的正常情况，不是错误）。
+var errNoAPIKeyCiphertext = fmt.Errorf("api key has no key_encrypted yet")
+
+// apiKeyPlaintextFromCiphertext 是"从密文取明文"的唯一实现。
+//
+// 单独拎出来是因为有两条读路径**不走实体**：`IncrementQuotaUsedAndGetState` 用一条
+// UPDATE ... RETURNING 直接拿列，`GetKeyAndOwnerID` 只 Select 三列。它们都必须从密文
+// 解密，而不是假设明文列还在。
+func (r *apiKeyRepository) apiKeyPlaintextFromCiphertext(id int64, encrypted *string) (string, error) {
+	if encrypted == nil || *encrypted == "" {
+		return "", errNoAPIKeyCiphertext
+	}
+	if r == nil || r.cryptor == nil {
+		return "", fmt.Errorf("api key %d has key_encrypted but no encryptor is configured: refusing to trust the plaintext column", id)
+	}
+	plaintext, err := r.cryptor.Decrypt(*encrypted)
+	if err != nil {
+		// 解密失败是数据/密钥问题，不能退化成"用明文列凑一个答案"。
+		return "", fmt.Errorf("decrypt api key %d: %w", id, err)
+	}
+	return plaintext, nil
+}
+
 // apiKeyAuthoritativePlaintext 给出这一行"权威的"明文 key：鉴权复核要用它，
 // 对外返回的 service.APIKey.Key（掩码/日志要用）也来自它。
 //
@@ -91,16 +115,12 @@ func (r *apiKeyRepository) apiKeyAuthoritativePlaintext(m *dbent.APIKey) (string
 	if m == nil {
 		return "", nil
 	}
-	if m.KeyEncrypted != nil && *m.KeyEncrypted != "" {
-		if r == nil || r.cryptor == nil {
-			return "", fmt.Errorf("api key %d has key_encrypted but no encryptor is configured: refusing to trust the plaintext column", m.ID)
-		}
-		plaintext, err := r.cryptor.Decrypt(*m.KeyEncrypted)
-		if err != nil {
-			// 解密失败是数据/密钥问题，不能退化成"用明文列凑一个答案"。
-			return "", fmt.Errorf("decrypt api key %d: %w", m.ID, err)
-		}
+	plaintext, err := r.apiKeyPlaintextFromCiphertext(m.ID, m.KeyEncrypted)
+	if err == nil {
 		return plaintext, nil
+	}
+	if !errors.Is(err, errNoAPIKeyCiphertext) {
+		return "", err
 	}
 	if m.Key != "" {
 		apiKeyCiphertextMissingLookups.Add(1)

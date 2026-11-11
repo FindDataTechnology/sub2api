@@ -114,7 +114,7 @@ func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIK
 		}
 		return nil, err
 	}
-	return apiKeyEntityToService(m), nil
+	return r.apiKeyEntityToServiceResolvingKey(m), nil
 }
 
 // GetKeyAndOwnerID 根据 API Key ID 获取其 key 与所有者（用户）ID。
@@ -586,7 +586,7 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 
 	outKeys := make([]service.APIKey, 0, len(keys))
 	for i := range keys {
-		outKeys = append(outKeys, *apiKeyEntityToService(keys[i]))
+		outKeys = append(outKeys, *r.apiKeyEntityToServiceResolvingKey(keys[i]))
 	}
 	if err := r.attachLastUsedIPs(ctx, outKeys); err != nil {
 		return nil, nil, err
@@ -606,7 +606,7 @@ func (r *apiKeyRepository) ListAllByUserID(ctx context.Context, userID int64, fi
 
 	outKeys := make([]service.APIKey, 0, len(keys))
 	for i := range keys {
-		outKeys = append(outKeys, *apiKeyEntityToService(keys[i]))
+		outKeys = append(outKeys, *r.apiKeyEntityToServiceResolvingKey(keys[i]))
 	}
 	if err := r.attachLastUsedIPs(ctx, outKeys); err != nil {
 		return nil, err
@@ -750,7 +750,7 @@ func (r *apiKeyRepository) ListByGroupID(ctx context.Context, groupID int64, par
 
 	outKeys := make([]service.APIKey, 0, len(keys))
 	for i := range keys {
-		outKeys = append(outKeys, *apiKeyEntityToService(keys[i]))
+		outKeys = append(outKeys, *r.apiKeyEntityToServiceResolvingKey(keys[i]))
 	}
 
 	return outKeys, paginationResultFromTotal(int64(total), params), nil
@@ -821,7 +821,7 @@ func (r *apiKeyRepository) SearchAPIKeys(ctx context.Context, userID int64, keyw
 
 	outKeys := make([]service.APIKey, 0, len(keys))
 	for i := range keys {
-		outKeys = append(outKeys, *apiKeyEntityToService(keys[i]))
+		outKeys = append(outKeys, *r.apiKeyEntityToServiceResolvingKey(keys[i]))
 	}
 	return outKeys, nil
 }
@@ -901,16 +901,28 @@ func (r *apiKeyRepository) IncrementQuotaUsedAndGetState(ctx context.Context, id
 			END,
 			updated_at = NOW()
 		WHERE id = $3 AND deleted_at IS NULL
-		RETURNING quota_used, quota, key, status
+		RETURNING quota_used, quota, key_encrypted, status
 	`
 
 	state := &service.APIKeyQuotaUsageState{}
-	if err := scanSingleRow(ctx, r.sql, query, []any{amount, service.StatusAPIKeyQuotaExhausted, id}, &state.QuotaUsed, &state.Quota, &state.Key, &state.Status); err != nil {
-		if err == sql.ErrNoRows {
+	var encrypted *string
+	if scanErr := scanSingleRow(ctx, r.sql, query, []any{amount, service.StatusAPIKeyQuotaExhausted, id}, &state.QuotaUsed, &state.Quota, &encrypted, &state.Status); scanErr != nil {
+		if scanErr == sql.ErrNoRows {
 			return nil, service.ErrAPIKeyNotFound
 		}
-		return nil, err
+		return nil, scanErr
 	}
+
+	// state.Key 不是展示字段，它直接喂给 InvalidateAuthCacheByKey —— 而缓存键就是
+	// sha256(明文)。取不到明文时服务层有个 `state.Key != ""` 的守卫会**静默跳过**失效，
+	// 于是刚被置成 quota_exhausted 的 key 还能从缓存里继续放行到 TTL 结束。
+	// 所以这里取不到明文必须打日志（可见），不能默默留空。
+	plaintext, decryptErr := r.apiKeyPlaintextFromCiphertext(id, encrypted)
+	if decryptErr != nil {
+		logger.LegacyPrintf("repository.apikey",
+			"[CredentialAtRest] quota state for id=%d has no usable key_encrypted (%v): auth cache cannot be invalidated", id, decryptErr)
+	}
+	state.Key = plaintext
 	return state, nil
 }
 
@@ -987,14 +999,45 @@ func (r *apiKeyRepository) GetRateLimitData(ctx context.Context, id int64) (resu
 	return data, rows.Err()
 }
 
+// apiKeyEntityToService 是纯映射：Key 直接取实体上的值。
+//
+// ⚠️ 它**不是** drop 安全的：drop 明文列之后 ent 实体上就没有 Key 了（编译期拦下）。
+// apiKeyRepository 自己的读路径请用 apiKeyEntityToServiceResolvingKey；
+// 目前仍用本函数的只有 usageLogRepository.loadAPIKeys（见 13b 台账）。
 func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
+	if m == nil {
+		return nil
+	}
+	return apiKeyEntityToServiceWithKey(m, m.Key)
+}
+
+// apiKeyEntityToServiceResolvingKey 把 Key 解析成**权威明文（密文优先）**再映射。
+//
+// 为什么展示路径也要解密：`service.APIKey.Key` 会被掩码/日志/缓存键使用，
+// 明文列 drop 之后它只能来自 `key_encrypted`。这里不返回错误——让一行坏数据把
+// 整页列表打成 500 没有意义；解不开就置空（掩码显示为空）并打日志，
+// 绝不把密文当成明文塞出去。
+func (r *apiKeyRepository) apiKeyEntityToServiceResolvingKey(m *dbent.APIKey) *service.APIKey {
+	if m == nil {
+		return nil
+	}
+	key, err := r.apiKeyAuthoritativePlaintext(m)
+	if err != nil {
+		logger.LegacyPrintf("repository.apikey",
+			"[APIKeyLookup] cannot resolve plaintext for id=%d: %v; returning empty key so nothing leaks", m.ID, err)
+		key = ""
+	}
+	return apiKeyEntityToServiceWithKey(m, key)
+}
+
+func apiKeyEntityToServiceWithKey(m *dbent.APIKey, key string) *service.APIKey {
 	if m == nil {
 		return nil
 	}
 	out := &service.APIKey{
 		ID:            m.ID,
 		UserID:        m.UserID,
-		Key:           m.Key,
+		Key:           key,
 		Name:          m.Name,
 		Status:        m.Status,
 		IPWhitelist:   m.IPWhitelist,

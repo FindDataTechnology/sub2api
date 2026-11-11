@@ -6,6 +6,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+
 	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -333,4 +335,39 @@ func TestAuth_DecryptFailureIsNotTreatedAsMissingCiphertext(t *testing.T) {
 		"密文解不开必须判查不到（fail closed），不能退回明文列凑答案")
 	require.Zero(t, APIKeyCiphertextMissingLookupCount(),
 		"解不开不等于缺失：不许计进缺密文兜底，否则坏了会被当成没回填")
+}
+
+// 非鉴权的读路径（详情/列表/配额状态）同样不能依赖明文列。
+//
+// 这些接口返回的 `Key` 会被掩码显示、也会被拿去算缓存键，所以 drop 之后必须能从
+// 密文解出来。把明文列清空＝模拟 drop，三条路径都要照常返回明文。
+func TestReadPaths_ReturnPlaintextWithoutPlaintextColumn(t *testing.T) {
+	cryptor := credentialTestEncryptor(t)
+	repo, db := apiKeyScratchRepo(t, cryptor)
+	ctx := context.Background()
+
+	key := &service.APIKey{UserID: 1, Key: "sk-readpath", Name: "k", Status: service.StatusActive, Quota: 5}
+	require.NoError(t, repo.Create(ctx, key))
+	require.NoError(t, repo.Update(ctx, key, service.APIKeyUpdateFields{Quota: true}))
+
+	// 模拟 drop：明文列清空
+	_, err := db.Exec(`UPDATE api_keys SET key = '' WHERE id = $1`, key.ID)
+	require.NoError(t, err)
+
+	got, err := repo.GetByID(ctx, key.ID)
+	require.NoError(t, err)
+	require.Equal(t, "sk-readpath", got.Key, "详情路径的 Key 必须来自解密")
+
+	list, _, err := repo.ListByUserID(ctx, key.UserID, pagination.PaginationParams{Page: 1, PageSize: 10}, service.APIKeyListFilters{})
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Equal(t, "sk-readpath", list[0].Key, "列表路径的 Key 也必须来自解密，否则掩码会显示空")
+
+	// 配额状态里的 Key 直接喂给 InvalidateAuthCacheByKey（缓存键 = sha256(明文)）：
+	// 取不到明文会让"配额耗尽"的缓存失效被静默跳过。
+	state, err := repo.IncrementQuotaUsedAndGetState(ctx, key.ID, 1)
+	require.NoError(t, err)
+	require.Equal(t, "sk-readpath", state.Key, "配额状态的 Key 必须来自解密，否则缓存失效会被静默跳过")
+	require.Equal(t, sha256Hex([]byte("sk-readpath")), sha256Hex([]byte(state.Key)),
+		"喂给缓存失效的必须是明文（缓存键是 sha256(明文)）")
 }
