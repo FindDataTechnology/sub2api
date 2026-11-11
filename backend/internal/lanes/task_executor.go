@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -51,6 +52,12 @@ type taskExecutor struct {
 	//     （harden-sub2api-credential-storage 在途），只需换这里的实现，
 	//     车道的重放逻辑一行不改。
 	resolveKey func(ctx context.Context, apiKeyID int64) (string, error)
+	// attemptTimeout 单次尝试的硬上限；0 表示用 taskAttemptTimeout。
+	//
+	// 没有它的时候，一个挂住的上游会把 worker 槽位长期占死（并发只有 2），
+	// 而且**空响应会被 classifyAttempt 判成 client error ⇒ 不可重试**：
+	// 「上游抖动」被翻译成「永久失败」，两个错叠在一起。
+	attemptTimeout time.Duration
 }
 
 // attemptOutcome 是一次重放的结果。
@@ -163,6 +170,14 @@ func (e *taskExecutor) runWithRequestID(ctx context.Context, job *service.LanesT
 		res.ErrMsg = "request cancelled before execution: " + err.Error()
 		return res
 	}
+	// 单次尝试的硬上限。父 ctx 仍然生效（mode=now 的客户端断连照样能取消），
+	// 这里只是再叠一个"再慢也必须收手"的界。
+	timeout := e.attemptTimeout
+	if timeout <= 0 {
+		timeout = taskAttemptTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	if e.engine == nil {
 		res.Outcome = AttemptFailedPermanent
 		res.ErrMsg = "task lane executor not wired (engine missing)"
@@ -217,6 +232,13 @@ func (e *taskExecutor) runWithRequestID(ctx context.Context, job *service.LanesT
 	res.Outcome = classifyAttempt(res.HTTPStatus)
 	if res.Outcome != AttemptCompleted {
 		res.ErrMsg = firstNonEmpty(extractErrorMessage(res.Body), fmt.Sprintf("upstream status %d", res.HTTPStatus))
+	}
+	// 超时必须在这里改判：取消后网关往往来不及写响应，status=0 会走
+	// classifyAttempt 的 default 分支落成 client error（不可重试），
+	// 于是「上游太慢」被永久化。这是必须在 reason 里说清的可重试类别。
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		res.Outcome = AttemptRetryTransient
+		res.ErrMsg = fmt.Sprintf("attempt timed out after %s (status=%d)", timeout, res.HTTPStatus)
 	}
 	return res
 }

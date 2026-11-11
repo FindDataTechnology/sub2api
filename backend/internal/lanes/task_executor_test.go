@@ -174,3 +174,48 @@ func TestBackoffStaysWithinDeadlineGate(t *testing.T) {
 	require.False(t, next.Add(taskEstDuration).After(deadline),
 		"20s 退避 + 120s 估计仍应落在 30min 截止内")
 }
+
+// 挂住的上游必须被硬上限截断，并且**判成可重试**。
+//
+// 两个错曾经叠在一起：① 执行器没有任何超时，并发只有 2 ⇒ 一个挂住的上游
+// 占掉半个车道；② 取消后网关多半写不出响应，status=0 走 classifyAttempt 的
+// default 分支落成 client error（不可重试）⇒「上游太慢」被永久化。
+func TestExecutorTimesOutHungUpstreamAsRetryable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/v1/chat/completions", func(c *gin.Context) {
+		select {
+		case <-c.Request.Context().Done():
+			// 真实网关在上游取消时的形态：写不出响应就返回（status 保持 0）。
+			return
+		case <-time.After(2 * time.Second):
+			c.JSON(http.StatusOK, gin.H{"id": "too-late"})
+		}
+	})
+	exec := newTestExecutor(r, "sk-test-abc")
+	exec.attemptTimeout = 80 * time.Millisecond
+
+	start := time.Now()
+	out := exec.run(context.Background(), &service.LanesTaskJob{
+		ID: 7, RequestBody: []byte(`{"model":"m","messages":[]}`),
+	}, 1)
+	elapsed := time.Since(start)
+
+	require.Equal(t, AttemptRetryTransient, out.Outcome,
+		"超时必须可重试：判成 client error 会把上游抖动永久化成失败")
+	require.Contains(t, out.ErrMsg, "timed out", "理由要能一眼看出是超时，而不是假装上游返回了 0")
+	require.Less(t, elapsed, 1500*time.Millisecond, "必须真的提前收手，不能等上游写完")
+
+	// 反面对照（同一个执行器换回不超时的实现时本用例会红）：
+	// 快上游 + 同样的 80ms 上限必须照常完成，证明上限不是"一律判超时"。
+	fast := gin.New()
+	fast.POST("/v1/chat/completions", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"id": "ok"})
+	})
+	okExec := newTestExecutor(fast, "sk-test-abc")
+	okExec.attemptTimeout = 80 * time.Millisecond
+	ok := okExec.run(context.Background(), &service.LanesTaskJob{
+		ID: 8, RequestBody: []byte(`{"model":"m","messages":[]}`),
+	}, 1)
+	require.Equal(t, AttemptCompleted, ok.Outcome, "上限不得误杀正常完成")
+}
