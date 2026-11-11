@@ -270,3 +270,61 @@ func TestTaskLaneHasNoAccountTopologyInputs(t *testing.T) {
 	require.Nil(t, lane.apiKeys)
 	// 调度参数全是常量（见 task_types.go），没有从账号派生的字段可供注入。
 }
+
+// 上一个进程留下的 running 必须被收回（真库）。
+//
+// 洞的形状：ClaimDue 只捞 pending，全库没有回收点。进程在跑任务时死掉
+// （滚版/OOM/kill）→ 该行永远 running：端点一直显示"在跑"、调度器不再领、
+// ExpireOverdue 也管不到（它只管 pending）。2026-11-11 一天滚了三次版。
+func TestReclaimInterruptedRequeuesOrphanedRunning(t *testing.T) {
+	db := openLanesScratchDB(t)
+	runner := &stubRunner{outcome: AttemptCompleted, status: 200}
+	lane := newSchedTestLane(t, db, runner)
+	store := service.GetLanesTaskStore()
+
+	deadline := time.Now().Add(2 * time.Hour)
+	id := insertDeferJob(t, db, &deadline)
+
+	// 造出"上个进程死在执行中途"的形状：running + 一条没有 ended 的 attempt。
+	_, err := db.Exec(`UPDATE lanes_task_jobs SET status='running', attempts=1 WHERE id=$1`, id)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO lanes_task_attempts (job_id, attempt_no, request_id, started_at)
+		VALUES ($1, 1, 'task-orphan-1', now() - interval '10 minutes')`, id)
+	require.NoError(t, err)
+
+	requeued, failed, err := store.ReclaimInterrupted(context.Background(), time.Now(), 6)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, requeued)
+	require.Zero(t, failed)
+
+	job, err := store.Get(context.Background(), id)
+	require.NoError(t, err)
+	require.Equal(t, "pending", job.Status, "尝试没满必须退回 pending，而不是永久 running")
+	require.Equal(t, 2, job.Attempts, "收回要消耗一次尝试，否则崩溃-重试可以无限循环")
+	require.NotNil(t, job.Reason)
+	require.Contains(t, *job.Reason, "requeued_after_interruption")
+
+	// 孤儿尝试行补记结局，且不能是零值时间（-8 之前那批是 0001-01-01）。
+	var outcome string
+	var finished time.Time
+	require.NoError(t, db.QueryRow(`SELECT outcome, finished_at FROM lanes_task_attempts
+		WHERE job_id=$1 AND attempt_no=1`, id).Scan(&outcome, &finished))
+	require.Equal(t, "interrupted", outcome)
+	require.False(t, finished.IsZero(), "补记结局必须带真实时间")
+
+	// 收回后调度器能正常领取它（证明真的回到了可跑状态）。
+	lane.schedulerTick(context.Background())
+	require.Equal(t, 1, runner.calls, "收回之后必须能被领取执行")
+
+	// 尝试已用满的孤儿：直接 failed，不能无限重排。
+	id2 := insertDeferJob(t, db, &deadline)
+	_, err = db.Exec(`UPDATE lanes_task_jobs SET status='running', attempts=6 WHERE id=$1`, id2)
+	require.NoError(t, err)
+	_, failed, err = store.ReclaimInterrupted(context.Background(), time.Now(), 6)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, failed)
+	j2, err := store.Get(context.Background(), id2)
+	require.NoError(t, err)
+	require.Equal(t, "failed", j2.Status)
+	require.Contains(t, *j2.Reason, "interrupted_too_many")
+}
