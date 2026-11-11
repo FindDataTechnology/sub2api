@@ -16,6 +16,8 @@ var (
 		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "key", Type: field.TypeString, Unique: true, Size: 128},
+		{Name: "key_hash", Type: field.TypeString, Unique: true, Nullable: true, Size: 64},
+		{Name: "key_encrypted", Type: field.TypeString, Nullable: true},
 		{Name: "name", Type: field.TypeString, Size: 100},
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
 		{Name: "last_used_at", Type: field.TypeTime, Nullable: true},
@@ -48,13 +50,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "api_keys_groups_api_keys",
-				Columns:    []*schema.Column{APIKeysColumns[26]},
+				Columns:    []*schema.Column{APIKeysColumns[28]},
 				RefColumns: []*schema.Column{GroupsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "api_keys_users_api_keys",
-				Columns:    []*schema.Column{APIKeysColumns[27]},
+				Columns:    []*schema.Column{APIKeysColumns[29]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -63,17 +65,17 @@ var (
 			{
 				Name:    "apikey_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{APIKeysColumns[27]},
+				Columns: []*schema.Column{APIKeysColumns[29]},
 			},
 			{
 				Name:    "apikey_group_id",
 				Unique:  false,
-				Columns: []*schema.Column{APIKeysColumns[26]},
+				Columns: []*schema.Column{APIKeysColumns[28]},
 			},
 			{
 				Name:    "apikey_status",
 				Unique:  false,
-				Columns: []*schema.Column{APIKeysColumns[6]},
+				Columns: []*schema.Column{APIKeysColumns[8]},
 			},
 			{
 				Name:    "apikey_deleted_at",
@@ -83,17 +85,17 @@ var (
 			{
 				Name:    "apikey_last_used_at",
 				Unique:  false,
-				Columns: []*schema.Column{APIKeysColumns[7]},
+				Columns: []*schema.Column{APIKeysColumns[9]},
 			},
 			{
 				Name:    "apikey_quota_quota_used",
 				Unique:  false,
-				Columns: []*schema.Column{APIKeysColumns[10], APIKeysColumns[11]},
+				Columns: []*schema.Column{APIKeysColumns[12], APIKeysColumns[13]},
 			},
 			{
 				Name:    "apikey_expires_at",
 				Unique:  false,
-				Columns: []*schema.Column{APIKeysColumns[12]},
+				Columns: []*schema.Column{APIKeysColumns[14]},
 			},
 		},
 	}
@@ -108,6 +110,10 @@ var (
 		{Name: "platform", Type: field.TypeString, Size: 50},
 		{Name: "type", Type: field.TypeString, Size: 20},
 		{Name: "credentials", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "credentials_meta", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "credentials_encrypted", Type: field.TypeString, Nullable: true},
+		{Name: "credentials_hash", Type: field.TypeString, Nullable: true, Size: 64},
+		{Name: "credentials_api_key_hash", Type: field.TypeString, Nullable: true, Size: 64},
 		{Name: "extra", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "proxy_fallback_origin_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "concurrency", Type: field.TypeInt, Default: 3},
@@ -140,13 +146,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "accounts_proxies_proxy",
-				Columns:    []*schema.Column{AccountsColumns[30]},
+				Columns:    []*schema.Column{AccountsColumns[34]},
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "accounts_accounts_children",
-				Columns:    []*schema.Column{AccountsColumns[31]},
+				Columns:    []*schema.Column{AccountsColumns[35]},
 				RefColumns: []*schema.Column{AccountsColumns[0]},
 				OnDelete:   schema.Restrict,
 			},
@@ -165,52 +171,52 @@ var (
 			{
 				Name:    "account_status",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[15]},
+				Columns: []*schema.Column{AccountsColumns[19]},
 			},
 			{
 				Name:    "account_proxy_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[30]},
+				Columns: []*schema.Column{AccountsColumns[34]},
 			},
 			{
 				Name:    "account_priority",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[13]},
+				Columns: []*schema.Column{AccountsColumns[17]},
 			},
 			{
 				Name:    "account_last_used_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[17]},
+				Columns: []*schema.Column{AccountsColumns[21]},
 			},
 			{
 				Name:    "account_schedulable",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[20]},
+				Columns: []*schema.Column{AccountsColumns[24]},
 			},
 			{
 				Name:    "account_rate_limited_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[21]},
+				Columns: []*schema.Column{AccountsColumns[25]},
 			},
 			{
 				Name:    "account_rate_limit_reset_at",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[22]},
+				Columns: []*schema.Column{AccountsColumns[26]},
 			},
 			{
 				Name:    "account_overload_until",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[23]},
+				Columns: []*schema.Column{AccountsColumns[27]},
 			},
 			{
 				Name:    "account_platform_priority",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[6], AccountsColumns[13]},
+				Columns: []*schema.Column{AccountsColumns[6], AccountsColumns[17]},
 			},
 			{
 				Name:    "account_priority_status",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[13], AccountsColumns[15]},
+				Columns: []*schema.Column{AccountsColumns[17], AccountsColumns[19]},
 			},
 			{
 				Name:    "account_deleted_at",
@@ -220,7 +226,12 @@ var (
 			{
 				Name:    "account_parent_account_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[31]},
+				Columns: []*schema.Column{AccountsColumns[35]},
+			},
+			{
+				Name:    "account_credentials_api_key_hash",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[12]},
 			},
 		},
 	}
