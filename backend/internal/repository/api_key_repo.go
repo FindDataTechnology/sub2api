@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 
@@ -27,6 +28,9 @@ import (
 type apiKeyRepository struct {
 	client *dbent.Client
 	sql    sqlExecutor
+	// cryptor 负责 key_encrypted 的加解密。nil 是合法值 = 只写 key_hash、密文列留 NULL。
+	// 与 accounts 同一模式（design D1a）：不改既有构造函数签名，避免 17 个调用点跟着动。
+	cryptor service.SecretEncryptor
 }
 
 func NewAPIKeyRepository(client *dbent.Client, sqlDB *sql.DB) service.APIKeyRepository {
@@ -34,7 +38,18 @@ func NewAPIKeyRepository(client *dbent.Client, sqlDB *sql.DB) service.APIKeyRepo
 }
 
 func newAPIKeyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *apiKeyRepository {
-	return &apiKeyRepository{client: client, sql: sqlq}
+	return newAPIKeyRepositoryWithSQLCrypto(client, sqlq, nil)
+}
+
+// NewAPIKeyRepositoryCrypto 是带加密器的生产构造入口（wire 用）。
+// 不传加密器时 key_encrypted 保持 NULL，只有 key_hash 会写——那是可接受的中间态
+// （阶段三 3.5b 才依赖密文），但生产不应该是这个状态。
+func NewAPIKeyRepositoryCrypto(client *dbent.Client, sqlDB *sql.DB, cryptor service.SecretEncryptor) service.APIKeyRepository {
+	return newAPIKeyRepositoryWithSQLCrypto(client, sqlDB, cryptor)
+}
+
+func newAPIKeyRepositoryWithSQLCrypto(client *dbent.Client, sqlq sqlExecutor, cryptor service.SecretEncryptor) *apiKeyRepository {
+	return &apiKeyRepository{client: client, sql: sqlq, cryptor: cryptor}
 }
 
 func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
@@ -68,6 +83,19 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		builder.SetIPBlacklist(key.IPBlacklist)
 	}
 
+	// 阶段三 3.5a：新发的 key 必须同时落指纹（以及配了加密器时的密文），
+	// 否则按 key_hash 查找会在"新建的 key"上立刻失效（回填只补存量）。
+	keyHash, keyEncrypted, cryptoErr := apiKeyDerivedColumns(key.Key, r.cryptor)
+	if cryptoErr != nil {
+		return cryptoErr
+	}
+	if keyHash != "" {
+		builder.SetKeyHash(keyHash)
+	}
+	if keyEncrypted != nil {
+		builder.SetKeyEncrypted(*keyEncrypted)
+	}
+
 	created, err := builder.Save(ctx)
 	if err == nil {
 		key.ID = created.ID
@@ -90,7 +118,7 @@ func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIK
 		}
 		return nil, err
 	}
-	return apiKeyEntityToService(m), nil
+	return r.apiKeyEntityToServiceResolvingKey(m), nil
 }
 
 // GetKeyAndOwnerID 根据 API Key ID 获取其 key 与所有者（用户）ID。
@@ -101,7 +129,7 @@ func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIK
 func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (string, int64, error) {
 	m, err := r.activeQuery().
 		Where(apikey.IDEQ(id)).
-		Select(apikey.FieldKey, apikey.FieldUserID).
+		Select(apikey.FieldKey, apikey.FieldKeyEncrypted, apikey.FieldUserID).
 		Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
@@ -109,33 +137,98 @@ func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (stri
 		}
 		return "", 0, err
 	}
-	return m.Key, m.UserID, nil
+	// 走权威明文：drop 明文列之后 `key` 列不存在，这里能拿到的只有密文。
+	plaintext, err := r.apiKeyAuthoritativePlaintext(m)
+	if err != nil {
+		return "", 0, err
+	}
+	return plaintext, m.UserID, nil
 }
 
 func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.APIKey, error) {
-	m, err := r.activeQuery().
-		Where(apikey.KeyEQ(key)).
-		WithUser(func(q *dbent.UserQuery) {
-			q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
-				gq.Select(group.FieldID)
-			})
-		}).
-		WithGroup().
-		Only(ctx)
+	apply := func(q *dbent.APIKeyQuery) *dbent.APIKeyQuery {
+		return q.
+			WithUser(func(q *dbent.UserQuery) {
+				q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
+					gq.Select(group.FieldID)
+				})
+			}).
+			WithGroup()
+	}
+	m, err := r.lookupAPIKeyByHashThenPlaintext(ctx, key, apply)
+	if err != nil {
+		return nil, err
+	}
+	return apiKeyEntityToService(m), nil
+}
+
+// lookupAPIKeyByHashThenPlaintext 是鉴权路径的唯一查找实现（阶段三 3.5b）。
+//
+// 顺序（顺序即语义）：
+//  1. 先按 key_hash 定位——这是加密落盘之后**唯一**不依赖明文列的查找方式；
+//  2. 命中后 MUST 再拿明文做一次常量时间比对。指纹只是索引，不是凭据：
+//     指纹与明文脱节（旧数据算错、写路径漏带、人工改库）时必须判"查不到"，
+//     绝不能因为指纹撞上就放行。这是"选可验证更严的一侧"。
+//  3. 指纹没命中 → 回落明文查找（该行尚未回填指纹），并计数。
+//     回填完成、且所有写路径都带指纹之后，这个分支可以删掉。
+func (r *apiKeyRepository) lookupAPIKeyByHashThenPlaintext(
+	ctx context.Context,
+	key string,
+	apply func(*dbent.APIKeyQuery) *dbent.APIKeyQuery,
+) (*dbent.APIKey, error) {
+	if key == "" {
+		return nil, service.ErrAPIKeyNotFound
+	}
+
+	hash := sha256Hex([]byte(key))
+	byHash, err := apply(r.activeQuery().Where(apikey.KeyHashEQ(hash))).Only(ctx)
+	switch {
+	case err == nil:
+		// 复核要用的明文来自**密文**（drop 明文列之后那是唯一副本）；
+		// 这里比对的是"权威明文 vs 入参"，不是"明文列 vs 入参"。
+		plaintext, perr := r.apiKeyAuthoritativePlaintext(byHash)
+		if perr != nil {
+			logger.LegacyPrintf("repository.apikey",
+				"[APIKeyLookup] cannot resolve plaintext for id=%d: %v; rejecting", byHash.ID, perr)
+			return nil, service.ErrAPIKeyNotFound
+		}
+		if plaintext == "" || !constantTimeEqualAPIKey(plaintext, key) {
+			// 指纹命中但明文不等：拒绝，而不是回落明文给它第二次机会。
+			// 回落会让"指纹算错的坏行"变成可认证，那正是要防的方向。
+			logger.LegacyPrintf("repository.apikey",
+				"[APIKeyLookup] key_hash matched but plaintext differs (id=%d); rejecting", byHash.ID)
+			return nil, service.ErrAPIKeyNotFound
+		}
+		// 把权威明文放回实体：调用方（掩码/日志/缓存键）拿到的必须是明文，
+		// drop 之后它只能来自解密。
+		byHash.Key = plaintext
+		return byHash, nil
+	case !dbent.IsNotFound(err):
+		return nil, err
+	}
+
+	byPlaintext, err := apply(r.activeQuery().Where(apikey.KeyEQ(key))).Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return nil, service.ErrAPIKeyNotFound
 		}
 		return nil, err
 	}
-	return apiKeyEntityToService(m), nil
+	apiKeyPlaintextLookupFallbacks.Add(1)
+	logger.LegacyPrintf("repository.apikey",
+		"[APIKeyLookup] plaintext fallback: id=%d has no usable key_hash yet", byPlaintext.ID)
+	return byPlaintext, nil
 }
 
 func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
-	m, err := r.activeQuery().
-		Where(apikey.KeyEQ(key)).
-		Select(
+	apply := func(q *dbent.APIKeyQuery) *dbent.APIKeyQuery {
+		return q.Select(
 			apikey.FieldID,
+			// 复核需要明文：指纹只用于定位，命中后必须再比对一次（见 lookup 的注释）。
+			// 明文**优先取自密文**，所以这里必须一起选出 key_encrypted——
+			// 漏选会让权威明文退化成明文列，drop 之后就没人可退了。
+			apikey.FieldKey,
+			apikey.FieldKeyEncrypted,
 			apikey.FieldUserID,
 			apikey.FieldGroupID,
 			apikey.FieldName,
@@ -153,100 +246,98 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 			apikey.FieldRpmLimit,
 			apikey.FieldEffectiveAt,
 		).
-		WithUser(func(q *dbent.UserQuery) {
-			q.Select(
-				user.FieldID,
-				user.FieldEmail,
-				user.FieldUsername,
-				user.FieldStatus,
-				user.FieldRole,
-				user.FieldBalance,
-				user.FieldConcurrency,
-				user.FieldBalanceNotifyEnabled,
-				user.FieldRestrictPublicGroups,
-				user.FieldBalanceNotifyThresholdType,
-				user.FieldBalanceNotifyThreshold,
-				user.FieldBalanceNotifyExtraEmails,
-				user.FieldTotalRecharged,
-				user.FieldSignupSource,
-				user.FieldLastLoginAt,
-				user.FieldLastActiveAt,
-				user.FieldRpmLimit,
-			)
-			q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
-				gq.Select(group.FieldID)
+			WithUser(func(q *dbent.UserQuery) {
+				q.Select(
+					user.FieldID,
+					user.FieldEmail,
+					user.FieldUsername,
+					user.FieldStatus,
+					user.FieldRole,
+					user.FieldBalance,
+					user.FieldConcurrency,
+					user.FieldBalanceNotifyEnabled,
+					user.FieldRestrictPublicGroups,
+					user.FieldBalanceNotifyThresholdType,
+					user.FieldBalanceNotifyThreshold,
+					user.FieldBalanceNotifyExtraEmails,
+					user.FieldTotalRecharged,
+					user.FieldSignupSource,
+					user.FieldLastLoginAt,
+					user.FieldLastActiveAt,
+					user.FieldRpmLimit,
+				)
+				q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
+					gq.Select(group.FieldID)
+				})
+			}).
+			WithGroup(func(q *dbent.GroupQuery) {
+				q.Select(
+					group.FieldID,
+					group.FieldName,
+					group.FieldPlatform,
+					group.FieldIsExclusive,
+					group.FieldStatus,
+					group.FieldSubscriptionType,
+					group.FieldRateMultiplier,
+					group.FieldDailyLimitUsd,
+					group.FieldWeeklyLimitUsd,
+					group.FieldMonthlyLimitUsd,
+					group.FieldAllowImageGeneration,
+					group.FieldAllowBatchImageGeneration,
+					group.FieldImageCountBilling,
+					group.FieldImageRateIndependent,
+					group.FieldImageRateMultiplier,
+					group.FieldImagePrice1k,
+					group.FieldImagePrice2k,
+					group.FieldImagePrice4k,
+					group.FieldVideoRateIndependent,
+					group.FieldVideoRateMultiplier,
+					group.FieldVideoPrice480p,
+					group.FieldVideoPrice720p,
+					group.FieldVideoPrice1080p,
+					group.FieldVideoModelPrices,
+					group.FieldWebSearchPricePerCall,
+					group.FieldRerankPricePerRequest,
+					group.FieldSearchPricePer1k,
+					group.FieldAudioRealtimePricePerMin,
+					group.FieldAudioTtsPricePerMillionChars,
+					group.FieldAudioSttPricePerHour,
+					group.FieldLongContextPricingEnabled,
+					group.FieldModelPricing,
+					group.FieldClaudeCodeOnly,
+					group.FieldFallbackGroupID,
+					group.FieldFallbackGroupIDOnInvalidRequest,
+					group.FieldModelRoutingEnabled,
+					group.FieldModelRouting,
+					group.FieldMcpXMLInject,
+					group.FieldSupportedModelScopes,
+					group.FieldAllowMessagesDispatch,
+					group.FieldAllowLive,
+					group.FieldForceOpenaiFast,
+					group.FieldFreeOpenaiFast,
+					group.FieldDefaultMappedModel,
+					group.FieldMessagesDispatchModelConfig,
+					group.FieldModelAllowlist,
+					group.FieldCodexModelsManifestConfig,
+					group.FieldRpmLimit,
+					group.FieldMaxReasoningEffort,
+					group.FieldMaxReasoningEffortOverLimit,
+					group.FieldReasoningEffortMappings,
+					group.FieldPeakRateEnabled,
+					group.FieldPeakStart,
+					group.FieldPeakEnd,
+					group.FieldPeakRateMultiplier,
+					// 分组利润控制：认证快照是调度门 enable 判定的直接来源，
+					// 漏选会让门静默失效；新增快照分组字段时必须同步本投影，
+					// 集成测试对账兜底。
+					group.FieldProfitControlEnabled,
+					group.FieldProfitMinMargin,
+					group.FieldProfitSafetyBuffer,
+				)
 			})
-		}).
-		WithGroup(func(q *dbent.GroupQuery) {
-			q.Select(
-				group.FieldID,
-				group.FieldName,
-				group.FieldPlatform,
-				group.FieldIsExclusive,
-				group.FieldStatus,
-				group.FieldSubscriptionType,
-				group.FieldRateMultiplier,
-				group.FieldDailyLimitUsd,
-				group.FieldWeeklyLimitUsd,
-				group.FieldMonthlyLimitUsd,
-				group.FieldAllowImageGeneration,
-				group.FieldAllowBatchImageGeneration,
-				group.FieldImageCountBilling,
-				group.FieldImageRateIndependent,
-				group.FieldImageRateMultiplier,
-				group.FieldImagePrice1k,
-				group.FieldImagePrice2k,
-				group.FieldImagePrice4k,
-				group.FieldVideoRateIndependent,
-				group.FieldVideoRateMultiplier,
-				group.FieldVideoPrice480p,
-				group.FieldVideoPrice720p,
-				group.FieldVideoPrice1080p,
-				group.FieldVideoModelPrices,
-				group.FieldWebSearchPricePerCall,
-				group.FieldRerankPricePerRequest,
-				group.FieldSearchPricePer1k,
-				group.FieldAudioRealtimePricePerMin,
-				group.FieldAudioTtsPricePerMillionChars,
-				group.FieldAudioSttPricePerHour,
-				group.FieldLongContextPricingEnabled,
-				group.FieldModelPricing,
-				group.FieldClaudeCodeOnly,
-				group.FieldFallbackGroupID,
-				group.FieldFallbackGroupIDOnInvalidRequest,
-				group.FieldModelRoutingEnabled,
-				group.FieldModelRouting,
-				group.FieldMcpXMLInject,
-				group.FieldSupportedModelScopes,
-				group.FieldAllowMessagesDispatch,
-				group.FieldAllowLive,
-				group.FieldForceOpenaiFast,
-				group.FieldFreeOpenaiFast,
-				group.FieldDefaultMappedModel,
-				group.FieldMessagesDispatchModelConfig,
-				group.FieldModelAllowlist,
-				group.FieldCodexModelsManifestConfig,
-				group.FieldRpmLimit,
-				group.FieldMaxReasoningEffort,
-				group.FieldMaxReasoningEffortOverLimit,
-				group.FieldReasoningEffortMappings,
-				group.FieldPeakRateEnabled,
-				group.FieldPeakStart,
-				group.FieldPeakEnd,
-				group.FieldPeakRateMultiplier,
-				// 分组利润控制：认证快照是调度门 enable 判定的直接来源，
-				// 漏选会让门静默失效；新增快照分组字段时必须同步本投影，
-				// 集成测试对账兜底。
-				group.FieldProfitControlEnabled,
-				group.FieldProfitMinMargin,
-				group.FieldProfitSafetyBuffer,
-			)
-		}).
-		Only(ctx)
+	}
+	m, err := r.lookupAPIKeyByHashThenPlaintext(ctx, key, apply)
 	if err != nil {
-		if dbent.IsNotFound(err) {
-			return nil, service.ErrAPIKeyNotFound
-		}
 		return nil, err
 	}
 	return apiKeyEntityToService(m), nil
@@ -362,11 +453,26 @@ func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 	// 存在唯一键约束 生成tombstone key 用来释放原key，长度远小于 128，满足 schema 限制
 	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
 	// 显式软删除：避免依赖 Hook 行为，确保 deleted_at 一定被设置。
-	affected, err := r.client.APIKey.Update().
+	// tombstone 会改写明文 key，所以派生列 MUST 一起改：
+	// 留着旧指纹等于"已删除的 key 仍能被 key_hash 命中"。
+	tombstoneHash, tombstoneEncrypted, cryptoErr := apiKeyDerivedColumns(tombstoneKey, r.cryptor)
+	if cryptoErr != nil {
+		return cryptoErr
+	}
+	update := r.client.APIKey.Update().
 		Where(apikey.IDEQ(id), apikey.DeletedAtIsNil()).
 		SetKey(tombstoneKey).
-		SetDeletedAt(time.Now()).
-		Save(ctx)
+		SetDeletedAt(time.Now())
+	if tombstoneHash != "" {
+		update = update.SetKeyHash(tombstoneHash)
+	}
+	if tombstoneEncrypted != nil {
+		update = update.SetKeyEncrypted(*tombstoneEncrypted)
+	} else {
+		// 没有加密器时显式清空，避免留下与明文不一致的旧密文
+		update = update.ClearKeyEncrypted()
+	}
+	affected, err := update.Save(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return service.ErrAPIKeyNotFound
@@ -492,7 +598,7 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 
 	outKeys := make([]service.APIKey, 0, len(keys))
 	for i := range keys {
-		outKeys = append(outKeys, *apiKeyEntityToService(keys[i]))
+		outKeys = append(outKeys, *r.apiKeyEntityToServiceResolvingKey(keys[i]))
 	}
 	if err := r.attachLastUsedIPs(ctx, outKeys); err != nil {
 		return nil, nil, err
@@ -512,7 +618,7 @@ func (r *apiKeyRepository) ListAllByUserID(ctx context.Context, userID int64, fi
 
 	outKeys := make([]service.APIKey, 0, len(keys))
 	for i := range keys {
-		outKeys = append(outKeys, *apiKeyEntityToService(keys[i]))
+		outKeys = append(outKeys, *r.apiKeyEntityToServiceResolvingKey(keys[i]))
 	}
 	if err := r.attachLastUsedIPs(ctx, outKeys); err != nil {
 		return nil, err
@@ -628,9 +734,35 @@ func (r *apiKeyRepository) CountByUserID(ctx context.Context, userID int64) (int
 	return int64(count), err
 }
 
+// ExistsByKey 判断某个明文 key 是否已存在。
+//
+// 改比**指纹**而不是明文列：drop `api_keys.key` 之后明文列不存在，
+// 而指纹与原值一一对应（tombstone 改写 key 时会同步改写指纹，见 Delete），
+// 语义完全等价。回填窗口内指纹可能还为 NULL，所以保留明文回落并计数，
+// 与鉴权查找同一套口径（`APIKeyPlaintextLookupFallbackCount`）。
 func (r *apiKeyRepository) ExistsByKey(ctx context.Context, key string) (bool, error) {
-	count, err := r.activeQuery().Where(apikey.KeyEQ(key)).Count(ctx)
-	return count > 0, err
+	if key == "" {
+		return false, nil
+	}
+	hash := sha256Hex([]byte(key))
+	count, err := r.activeQuery().Where(apikey.KeyHashEQ(hash)).Count(ctx)
+	if err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return true, nil
+	}
+	count, err = r.activeQuery().Where(apikey.KeyEQ(key)).Count(ctx)
+	if err != nil {
+		return false, err
+	}
+	if count > 0 {
+		apiKeyPlaintextLookupFallbacks.Add(1)
+		// 同上：必须含 `plaintext fallback`（3.3 的判据就是 grep 这一个词）。
+		logger.LegacyPrintf("repository.apikey",
+			"[APIKeyLookup] plaintext fallback: ExistsByKey matched the key column (no key_hash yet)")
+	}
+	return count > 0, nil
 }
 
 func (r *apiKeyRepository) ListByGroupID(ctx context.Context, groupID int64, params pagination.PaginationParams) ([]service.APIKey, *pagination.PaginationResult, error) {
@@ -656,7 +788,7 @@ func (r *apiKeyRepository) ListByGroupID(ctx context.Context, groupID int64, par
 
 	outKeys := make([]service.APIKey, 0, len(keys))
 	for i := range keys {
-		outKeys = append(outKeys, *apiKeyEntityToService(keys[i]))
+		outKeys = append(outKeys, *r.apiKeyEntityToServiceResolvingKey(keys[i]))
 	}
 
 	return outKeys, paginationResultFromTotal(int64(total), params), nil
@@ -727,7 +859,7 @@ func (r *apiKeyRepository) SearchAPIKeys(ctx context.Context, userID int64, keyw
 
 	outKeys := make([]service.APIKey, 0, len(keys))
 	for i := range keys {
-		outKeys = append(outKeys, *apiKeyEntityToService(keys[i]))
+		outKeys = append(outKeys, *r.apiKeyEntityToServiceResolvingKey(keys[i]))
 	}
 	return outKeys, nil
 }
@@ -807,16 +939,28 @@ func (r *apiKeyRepository) IncrementQuotaUsedAndGetState(ctx context.Context, id
 			END,
 			updated_at = NOW()
 		WHERE id = $3 AND deleted_at IS NULL
-		RETURNING quota_used, quota, key, status
+		RETURNING quota_used, quota, key_encrypted, status
 	`
 
 	state := &service.APIKeyQuotaUsageState{}
-	if err := scanSingleRow(ctx, r.sql, query, []any{amount, service.StatusAPIKeyQuotaExhausted, id}, &state.QuotaUsed, &state.Quota, &state.Key, &state.Status); err != nil {
-		if err == sql.ErrNoRows {
+	var encrypted *string
+	if scanErr := scanSingleRow(ctx, r.sql, query, []any{amount, service.StatusAPIKeyQuotaExhausted, id}, &state.QuotaUsed, &state.Quota, &encrypted, &state.Status); scanErr != nil {
+		if scanErr == sql.ErrNoRows {
 			return nil, service.ErrAPIKeyNotFound
 		}
-		return nil, err
+		return nil, scanErr
 	}
+
+	// state.Key 不是展示字段，它直接喂给 InvalidateAuthCacheByKey —— 而缓存键就是
+	// sha256(明文)。取不到明文时服务层有个 `state.Key != ""` 的守卫会**静默跳过**失效，
+	// 于是刚被置成 quota_exhausted 的 key 还能从缓存里继续放行到 TTL 结束。
+	// 所以这里取不到明文必须打日志（可见），不能默默留空。
+	plaintext, decryptErr := apiKeyPlaintextFromCiphertext(r.cryptor, id, encrypted)
+	if decryptErr != nil {
+		logger.LegacyPrintf("repository.apikey",
+			"[CredentialAtRest] quota state for id=%d has no usable key_encrypted (%v): auth cache cannot be invalidated", id, decryptErr)
+	}
+	state.Key = plaintext
 	return state, nil
 }
 
@@ -893,29 +1037,60 @@ func (r *apiKeyRepository) GetRateLimitData(ctx context.Context, id int64) (resu
 	return data, rows.Err()
 }
 
+// apiKeyEntityToService 是纯映射：Key 直接取实体上的值。
+//
+// ⚠️ 它**不是** drop 安全的：drop 明文列之后 ent 实体上就没有 Key 了（编译期拦下）。
+// 现在只剩两处调用，都在 `lookupAPIKeyByHashThenPlaintext` 之后 —— 那里已经把 Key
+// 归一成权威明文（密文优先），所以取实体上的值就是对的。
+// 任何**新**的读路径请用 apiKeyEntityToServiceResolvingKey / apiKeyEntityToServiceWithKey。
 func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 	if m == nil {
 		return nil
 	}
-	out := &service.APIKey{
-		ID:          m.ID,
-		UserID:      m.UserID,
-		Key:         m.Key,
-		Name:        m.Name,
-		Status:      m.Status,
-		IPWhitelist: m.IPWhitelist,
-		IPBlacklist: m.IPBlacklist,
-		LastUsedAt:  m.LastUsedAt,
-		CreatedAt:   m.CreatedAt,
-		UpdatedAt:   m.UpdatedAt,
-		GroupID:     m.GroupID,
-		Quota:       m.Quota,
-		QuotaUsed:   m.QuotaUsed,
-		ExpiresAt:   m.ExpiresAt,
-		RateLimit5h: m.RateLimit5h,
-		RateLimit1d: m.RateLimit1d,
-		RateLimit7d: m.RateLimit7d,
+	return apiKeyEntityToServiceWithKey(m, m.Key)
+}
 
+// apiKeyEntityToServiceResolvingKey 把 Key 解析成**权威明文（密文优先）**再映射。
+//
+// 为什么展示路径也要解密：`service.APIKey.Key` 会被掩码/日志/缓存键使用，
+// 明文列 drop 之后它只能来自 `key_encrypted`。这里不返回错误——让一行坏数据把
+// 整页列表打成 500 没有意义；解不开就置空（掩码显示为空）并打日志，
+// 绝不把密文当成明文塞出去。
+func (r *apiKeyRepository) apiKeyEntityToServiceResolvingKey(m *dbent.APIKey) *service.APIKey {
+	if m == nil {
+		return nil
+	}
+	key, err := r.apiKeyAuthoritativePlaintext(m)
+	if err != nil {
+		logger.LegacyPrintf("repository.apikey",
+			"[APIKeyLookup] cannot resolve plaintext for id=%d: %v; returning empty key so nothing leaks", m.ID, err)
+		key = ""
+	}
+	return apiKeyEntityToServiceWithKey(m, key)
+}
+
+func apiKeyEntityToServiceWithKey(m *dbent.APIKey, key string) *service.APIKey {
+	if m == nil {
+		return nil
+	}
+	out := &service.APIKey{
+		ID:                 m.ID,
+		UserID:             m.UserID,
+		Key:                key,
+		Name:               m.Name,
+		Status:             m.Status,
+		IPWhitelist:        m.IPWhitelist,
+		IPBlacklist:        m.IPBlacklist,
+		LastUsedAt:         m.LastUsedAt,
+		CreatedAt:          m.CreatedAt,
+		UpdatedAt:          m.UpdatedAt,
+		GroupID:            m.GroupID,
+		Quota:              m.Quota,
+		QuotaUsed:          m.QuotaUsed,
+		ExpiresAt:          m.ExpiresAt,
+		RateLimit5h:        m.RateLimit5h,
+		RateLimit1d:        m.RateLimit1d,
+		RateLimit7d:        m.RateLimit7d,
 		ConcurrencyRequest: m.ConcurrencyRequest,
 		ConcurrencyLimit:   m.ConcurrencyLimit,
 		RPMLimit:           m.RpmLimit,

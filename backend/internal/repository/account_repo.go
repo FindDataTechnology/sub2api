@@ -50,6 +50,12 @@ type accountRepository struct {
 	// Used to proactively sync account snapshot to cache when status changes,
 	// ensuring sticky sessions can promptly detect unavailable accounts.
 	schedulerCache service.SchedulerCache
+	// cryptor 负责 credentials 列的加解密（AES-256-GCM）。
+	// nil 是合法值，表示"明文直通"——这是加解密改造之前的既有行为，
+	// 因此全部测试用的 newAccountRepositoryWithSQL 不需要改动。
+	// 注意：cryptor 为 nil 而密文列非空时必须报错，绝不能把密文当明文用，
+	// 否则会把密文原样发给上游。
+	cryptor service.SecretEncryptor
 }
 
 var schedulerNeutralExtraKeyPrefixes = []string{
@@ -121,15 +127,28 @@ func NewAdminAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCac
 
 // newAccountRepositoryWithSQL 是内部构造函数，支持依赖注入 SQL 执行器。
 // 这种设计便于单元测试时注入 mock 对象。
+//
+// cryptor 为 nil（明文直通）。需要加解密的调用方用 newAccountRepositoryWithSQLCrypto。
 func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedulerCache service.SchedulerCache) *accountRepository {
-	return &accountRepository{client: client, sql: sqlq, schedulerCache: schedulerCache}
+	return newAccountRepositoryWithSQLCrypto(client, sqlq, schedulerCache, nil)
+}
+
+// newAccountRepositoryWithSQLCrypto 与 newAccountRepositoryWithSQL 相同，额外注入
+// credentials 列的加解密器。cryptor 为 nil 时退化为明文直通（既有行为）。
+func newAccountRepositoryWithSQLCrypto(
+	client *dbent.Client,
+	sqlq sqlExecutor,
+	schedulerCache service.SchedulerCache,
+	cryptor service.SecretEncryptor,
+) *accountRepository {
+	return &accountRepository{client: client, sql: sqlq, schedulerCache: schedulerCache, cryptor: cryptor}
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
 	if scoped := r.accountTransactionScope(ctx); scoped != r {
 		return scoped.Create(ctx, account)
 	}
-	if err := createAccountRecord(ctx, r.client, account); err != nil {
+	if err := createAccountRecord(ctx, r.client, account, r); err != nil {
 		return err
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
@@ -138,9 +157,16 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	return nil
 }
 
-func createAccountRecord(ctx context.Context, client *dbent.Client, account *service.Account) error {
+// createAccountRecord 创建账号行。cryptor 为 nil 时新列只落 meta 与两个指纹、
+// 密文列写 NULL——这正是加解密改造前的行为，所以调用方传 nil 等价于旧逻辑。
+func createAccountRecord(ctx context.Context, client *dbent.Client, account *service.Account, crypto *accountRepository) error {
 	if account == nil {
 		return service.ErrAccountNilInput
+	}
+
+	credColumns, err := crypto.credentialCryptoColumnsFor(account.Credentials)
+	if err != nil {
+		return err
 	}
 
 	builder := client.Account.Create().
@@ -149,6 +175,10 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		SetPlatform(account.Platform).
 		SetType(account.Type).
 		SetCredentials(normalizeJSONMap(account.Credentials)).
+		SetCredentialsMeta(credColumns.Meta).
+		SetNillableCredentialsEncrypted(credColumns.Encrypted).
+		SetNillableCredentialsHash(credColumns.Hash).
+		SetNillableCredentialsAPIKeyHash(credColumns.APIKeyHash).
 		SetExtra(normalizeJSONMap(account.Extra)).
 		SetConcurrency(account.Concurrency).
 		SetPriority(account.Priority).
@@ -235,7 +265,7 @@ func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account
 		return err
 	}
 
-	if err := createAccountRecord(ctx, txClient, account); err != nil {
+	if err := createAccountRecord(ctx, txClient, account, r); err != nil {
 		return err
 	}
 	if len(groups) > 0 {
@@ -333,7 +363,10 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 
 	outByID := make(map[int64]*service.Account, len(entAccounts))
 	for _, entAcc := range entAccounts {
-		out := accountEntityToService(entAcc)
+		out, err := r.accountEntityToService(entAcc)
+		if err != nil {
+			return nil, err
+		}
 		if out == nil {
 			continue
 		}
@@ -543,12 +576,23 @@ func (r *accountRepository) updateLockedAccount(
 		schedulable = false
 	}
 
+	// 双写：明文列照旧写，同时刷新 meta / 两个指纹 / 密文。
+	// cryptor 为 nil（测试或未配置）时**显式清空密文列**而不是留着不动——
+	// 留着会留下"明文已改、密文是旧的"的行，阶段二按密文读就会读到过期凭据。
+	credColumns, err := r.credentialCryptoColumnsFor(account.Credentials)
+	if err != nil {
+		return nil, err
+	}
+
 	builder := client.Account.UpdateOneID(account.ID).
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
 		SetPlatform(account.Platform).
 		SetType(account.Type).
 		SetCredentials(normalizeJSONMap(account.Credentials)).
+		SetCredentialsMeta(credColumns.Meta).
+		SetNillableCredentialsHash(credColumns.Hash).
+		SetNillableCredentialsAPIKeyHash(credColumns.APIKeyHash).
 		SetExtra(extra).
 		SetConcurrency(account.Concurrency).
 		SetPriority(account.Priority).
@@ -556,6 +600,12 @@ func (r *accountRepository) updateLockedAccount(
 		SetErrorMessage(account.ErrorMessage).
 		SetSchedulable(schedulable).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
+
+	if credColumns.Encrypted != nil {
+		builder.SetCredentialsEncrypted(*credColumns.Encrypted)
+	} else {
+		builder.ClearCredentialsEncrypted()
+	}
 
 	if explicitRateMultiplier != nil {
 		builder.SetRateMultiplier(*explicitRateMultiplier)
@@ -640,15 +690,15 @@ func lockAndMergeAccountProbeExtra(
 		SELECT
 			platform = $2
 			AND type = $3
-			AND credentials = $4::jsonb
+			AND credentials_hash = $7
 			AND proxy_id IS NOT DISTINCT FROM $5,
 			COALESCE(
 				platform IN (`+ollamaCloudUsagePlatformsSQL+`)
 				AND $2 IN (`+ollamaCloudUsagePlatformsSQL+`)
 				AND type = 'apikey'
 				AND $3 = 'apikey'
-				AND credentials -> 'api_key' IS NOT DISTINCT FROM $4::jsonb -> 'api_key'
-				AND `+ollamaCloudBaseURLMatchesSQL("credentials ->> 'base_url'")+`
+				AND credentials_api_key_hash IS NOT DISTINCT FROM $6
+				AND `+ollamaCloudBaseURLMatchesSQL("credentials_meta ->> 'base_url'")+`
 				AND `+ollamaCloudBaseURLMatchesSQL("$4::jsonb ->> 'base_url'")+`,
 				false
 			),
@@ -665,18 +715,18 @@ func lockAndMergeAccountProbeExtra(
 					-- 未设置/非 zen 均为 Go，与 GetOpenCodeAccountMode 默认兼容一致），
 					-- 不校验 base_url。
 					(platform = 'opencode_go' AND $2 = 'opencode_go'
-						AND COALESCE(btrim(credentials ->> 'account_mode') <> 'zen', true)
+						AND COALESCE(btrim(credentials_meta ->> 'account_mode') <> 'zen', true)
 						AND COALESCE(btrim($4::jsonb ->> 'account_mode') <> 'zen', true))
 					-- 挂载白名单分支：新旧平台都在白名单内且 base_url 均为官方
 					-- OpenCode Go 基址（与 Ollama 同范式，允许白名单内跨平台）。
 					OR (platform IN (`+opencodeGoUsageMountPlatformsSQL+`)
 						AND $2 IN (`+opencodeGoUsageMountPlatformsSQL+`)
-						AND `+opencodeGoBaseURLMatchSQLPrefix+`credentials ->> 'base_url'`+opencodeGoBaseURLMatchSQLSuffix+`
+						AND `+opencodeGoBaseURLMatchSQLPrefix+`credentials_meta ->> 'base_url'`+opencodeGoBaseURLMatchSQLSuffix+`
 						AND `+opencodeGoBaseURLMatchSQLPrefix+`$4::jsonb ->> 'base_url'`+opencodeGoBaseURLMatchSQLSuffix+`)
 				)
 				AND type = 'apikey'
 				AND $3 = 'apikey'
-				AND credentials -> 'api_key' IS NOT DISTINCT FROM $4::jsonb -> 'api_key',
+				AND credentials_api_key_hash IS NOT DISTINCT FROM $6,
 				false
 			),
 			extra -> 'opencode_go_usage_auto_refresh',
@@ -686,7 +736,7 @@ func lockAndMergeAccountProbeExtra(
 		FROM accounts
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR NO KEY UPDATE
-	`, account.ID, account.Platform, account.Type, string(credentials), proxyID)
+	`, account.ID, account.Platform, account.Type, string(credentials), proxyID, credentialAPIKeyHashArg(account.Credentials), credentialHashHex(account.Credentials))
 	if err != nil {
 		return nil, err
 	}
@@ -910,16 +960,16 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				-- ollama.com 基址正则）：Ollama 行不会被 OpenCode 分支遮蔽；
 				-- opencode_go 平台行不在 Ollama 白名单内，与 Ollama 分支真互斥。
 				WHEN type = 'apikey'
-					AND credentials IS DISTINCT FROM $1::jsonb
+					AND credentials_hash IS DISTINCT FROM $4
 					AND (
 						-- 旧行按新谓词属于 OpenCode 用量身份
 						(platform = 'opencode_go'
-							AND COALESCE(btrim(credentials ->> 'account_mode') <> 'zen', true))
+							AND COALESCE(btrim(credentials_meta ->> 'account_mode') <> 'zen', true))
 						OR (platform IN (`+opencodeGoUsageMountPlatformsSQL+`)
-							AND `+opencodeGoBaseURLMatchSQLPrefix+`credentials ->> 'base_url'`+opencodeGoBaseURLMatchSQLSuffix+`)
+							AND `+opencodeGoBaseURLMatchSQLPrefix+`credentials_meta ->> 'base_url'`+opencodeGoBaseURLMatchSQLSuffix+`)
 					)
 					AND (
-						credentials -> 'api_key' IS DISTINCT FROM $1::jsonb -> 'api_key'
+						credentials_api_key_hash IS DISTINCT FROM $3
 						-- 或组身份不再成立：opencode_go 转 Zen（COALESCE 恒非 NULL，
 						-- IS NOT TRUE 等价于判定为假；平台条件必须在 IS NOT TRUE 作用
 						-- 域之外，否则挂载行的 FALSE IS NOT TRUE 会误判为已变化）；
@@ -941,11 +991,11 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				-- 非 Ollama 账号的无变化持久化误清探测快照或重写 NULL extra。
 				WHEN platform IN (`+ollamaCloudUsagePlatformsSQL+`)
 					AND type = 'apikey'
-					AND credentials IS DISTINCT FROM $1::jsonb
+					AND credentials_hash IS DISTINCT FROM $4
 					AND (
-						credentials -> 'api_key' IS DISTINCT FROM $1::jsonb -> 'api_key'
+						credentials_api_key_hash IS DISTINCT FROM $3
 						OR NOT (
-							`+ollamaCloudBaseURLMatchesSQL("credentials ->> 'base_url'")+`
+							`+ollamaCloudBaseURLMatchesSQL("credentials_meta ->> 'base_url'")+`
 							AND `+ollamaCloudBaseURLMatchesSQL("$1::jsonb ->> 'base_url'")+`
 						)
 					)
@@ -957,13 +1007,13 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				-- 上游倍率探测已放宽到全部 API-key 平台：凭证变化即视为探测
 				-- 身份变化，丢弃 stale 快照。
 				WHEN type = 'apikey'
-					AND credentials IS DISTINCT FROM $1::jsonb
+					AND credentials_hash IS DISTINCT FROM $4
 				THEN COALESCE(extra, '{}'::jsonb) - 'upstream_billing_probe'
 				ELSE extra
 			END,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
-	`, string(payload), id)
+	`, string(payload), id, credentialAPIKeyHashArg(credentials), credentialHashHex(credentials))
 	if err != nil {
 		return err
 	}
@@ -1362,9 +1412,11 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 			AND type = 'oauth'`
 	}
 	if options.RequireRefreshToken {
+		// 读 credentials_meta 里的派生事实（见 REPORT-refresh-token-presence.md §2.5 方案 ①）。
+		// 原来的 `credentials ? 'refresh_token'` 本就是冗余的：键存在但值为空串时会被
+		// 下一行否掉，真正生效的只有"非空"判定，而它现在由这个布尔值表达。
 		query += `
-			AND credentials ? 'refresh_token'
-			AND btrim(credentials->>'refresh_token') <> ''`
+			AND credentials_meta @> '{"has_refresh_token": true}'`
 	}
 	if options.ExcludeRetryCooldown {
 		query += `
@@ -1533,7 +1585,7 @@ func (r *accountRepository) SetGrokCredentialErrorIfMatch(
 			AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW())
 			AND (a.overload_until IS NULL OR a.overload_until <= NOW())
 			AND (a.auto_pause_on_expired IS NOT TRUE OR a.expires_at IS NULL OR a.expires_at > NOW())
-			AND a.credentials = $7::jsonb
+			AND a.credentials_hash = $11
 			AND a.proxy_id IS NOT DISTINCT FROM $8
 			AND ($2 <> $9 OR (
 				a.proxy_id IS NOT NULL AND NOT EXISTS (
@@ -1546,7 +1598,7 @@ func (r *accountRepository) SetGrokCredentialErrorIfMatch(
 		SELECT $10, updated.id, NULL, NULL FROM updated
 	`, service.StatusError, errorMsg, id, service.StatusActive, service.PlatformGrok, service.AccountTypeOAuth,
 		snapshot.CredentialsJSON, snapshot.ProxyID, string(service.GrokCredentialReasonProxyInvalid),
-		service.SchedulerOutboxEventAccountChanged)
+		service.SchedulerOutboxEventAccountChanged, credentialHashOfRawJSON(snapshot.CredentialsJSON))
 	if err != nil {
 		return false, err
 	}
@@ -1572,6 +1624,16 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 	if r == nil || r.sql == nil {
 		return false, errors.New("account repository SQL executor is not configured")
 	}
+	// 等价改写（原 SQL 里这条谓词是冗余的，见 REPORT-refresh-token-presence.md §1）：
+	// 语句已要求 `a.credentials_hash = sha256(expectedCredentials)`，命中即意味着行上的
+	// 文档就是 expectedCredentials，于是"refresh_token 是否为空"完全由入参决定——
+	// 它是入参的纯函数，与数据库里的那一行无关。
+	//   - 入参 refresh_token 非空  -> 原谓词恒假 -> 0 行受影响 -> 返回 (false, nil)
+	//   - 入参 refresh_token 为空  -> 原谓词恒真 -> 行为完全不变
+	// 提前返回省一次往返，也让这条语句不再依赖明文列（阶段四 drop 明文的前提）。
+	if credentialHasRefreshToken(expectedCredentials) {
+		return false, nil
+	}
 	expectedJSON, err := json.Marshal(normalizeJSONMap(expectedCredentials))
 	if err != nil {
 		return false, err
@@ -1588,8 +1650,7 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 			AND a.platform = $4
 			AND a.type = $5
 			AND a.status = $6
-			AND a.credentials = $7::jsonb
-			AND NULLIF(BTRIM(a.credentials->>'refresh_token'), '') IS NULL
+			AND a.credentials_hash = $9
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
@@ -1603,6 +1664,7 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 		service.StatusActive,
 		string(expectedJSON),
 		service.SchedulerOutboxEventAccountChanged,
+		credentialHashOfRawJSON(string(expectedJSON)),
 	)
 	if err != nil {
 		return false, err
@@ -1641,16 +1703,29 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 	if err != nil {
 		return false, err
 	}
+	// 双写派生列。这是整份替换（不是合并），所以派生值可以在这里算准。
+	credColumns, err := r.credentialCryptoColumnsFor(credentials)
+	if err != nil {
+		return false, err
+	}
+	metaJSON, err := json.Marshal(credColumns.Meta)
+	if err != nil {
+		return false, err
+	}
 	result, err := r.sql.ExecContext(ctx, `
 		WITH updated AS (
 		UPDATE accounts AS a
 		SET credentials = $1::jsonb,
+			credentials_meta = $8::jsonb,
+			credentials_encrypted = $9,
+			credentials_hash = $10,
+			credentials_api_key_hash = $11,
 			updated_at = NOW()
 		WHERE a.id = $2
 			AND a.deleted_at IS NULL
 			AND a.platform = $3
 			AND a.type = $4
-			AND a.credentials = $5::jsonb
+			AND a.credentials_hash = $12
 			AND a.proxy_id IS NOT DISTINCT FROM $6
 		RETURNING a.id
 		)
@@ -1664,6 +1739,10 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 		string(expectedJSON),
 		expectedProxyID,
 		service.SchedulerOutboxEventAccountChanged,
+		metaJSON,
+		credColumns.Encrypted,
+		credColumns.Hash,
+		credColumns.APIKeyHash,
 	)
 	if err != nil {
 		return false, err
@@ -1709,7 +1788,7 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 			AND a.platform = $4
 			AND a.type = $5
 			AND a.status = $6
-			AND a.credentials = $7::jsonb
+			AND a.credentials_hash = $10
 			AND a.proxy_id IS NOT DISTINCT FROM $8
 		RETURNING a.id
 		)
@@ -1725,6 +1804,7 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 		string(expectedJSON),
 		expectedProxyID,
 		service.SchedulerOutboxEventAccountChanged,
+		credentialHashOfRawJSON(string(expectedJSON)),
 	)
 	if err != nil {
 		return false, err
@@ -1769,7 +1849,7 @@ func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnc
 			AND a.platform = $4
 			AND a.type = $5
 			AND a.status = $6
-			AND a.credentials = $7::jsonb
+			AND a.credentials_hash = $10
 			AND a.proxy_id IS NOT DISTINCT FROM $8
 			AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until < $1)
 		RETURNING a.id
@@ -1786,6 +1866,7 @@ func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnc
 		string(expectedJSON),
 		expectedProxyID,
 		service.SchedulerOutboxEventAccountChanged,
+		credentialHashOfRawJSON(string(expectedJSON)),
 	)
 	if err != nil {
 		return false, err
@@ -2574,14 +2655,14 @@ func (r *accountRepository) SetGrokCredentialTempUnschedulableIfMatch(
 			AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW())
 			AND (a.overload_until IS NULL OR a.overload_until <= NOW())
 			AND (a.auto_pause_on_expired IS NOT TRUE OR a.expires_at IS NULL OR a.expires_at > NOW())
-			AND a.credentials = $7::jsonb
+			AND a.credentials_hash = $10
 			AND a.proxy_id IS NOT DISTINCT FROM $8
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
 		SELECT $9, updated.id, NULL, NULL FROM updated
 	`, until, reason, id, service.StatusActive, service.PlatformGrok, service.AccountTypeOAuth,
-		snapshot.CredentialsJSON, snapshot.ProxyID, service.SchedulerOutboxEventAccountChanged)
+		snapshot.CredentialsJSON, snapshot.ProxyID, service.SchedulerOutboxEventAccountChanged, credentialHashOfRawJSON(snapshot.CredentialsJSON))
 	if err != nil {
 		return false, err
 	}
@@ -2971,13 +3052,13 @@ func (r *accountRepository) updateUpstreamBillingProbeSnapshotInTx(
 		WHERE id = $2
 			AND platform = $3
 			AND type = $4
-			AND credentials = $5::jsonb
+			AND credentials_hash = $11
 			AND proxy_id IS NOT DISTINCT FROM $6
 			AND COALESCE(extra -> 'upstream_billing_probe', 'null'::jsonb) = $7::jsonb
 			AND COALESCE(extra -> 'upstream_billing_probe_enabled', 'null'::jsonb) = $8::jsonb
 			AND COALESCE(extra -> 'upstream_billing_rate_sync_enabled', 'null'::jsonb) = $9::jsonb
 			AND deleted_at IS NULL
-	`, string(payload), account.ID, account.Platform, account.Type, string(credentials), proxyID, string(expectedSnapshotJSON), string(expectedEnabledJSON), string(expectedRateSyncEnabledJSON), rateMultiplier)
+	`, string(payload), account.ID, account.Platform, account.Type, string(credentials), proxyID, string(expectedSnapshotJSON), string(expectedEnabledJSON), string(expectedRateSyncEnabledJSON), rateMultiplier, credentialHashOfRawJSON(string(credentials)))
 	if err != nil {
 		return err
 	}
@@ -3136,6 +3217,8 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 	// JSONB 需要合并而非覆盖，使用 raw SQL 保持旧行为。
 	credentialPlaceholder := ""
+	apiKeyHashPlaceholder := ""
+	deriveAfterMerge := false
 	if len(updates.Credentials) > 0 {
 		payload, err := json.Marshal(updates.Credentials)
 		if err != nil {
@@ -3145,15 +3228,32 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb")
 		args = append(args, payload)
 		idx++
+		// 身份变化判定改比指纹：合并表达式之后，SQL 侧已经拿不到"新 api_key"。
+		// 只在 updates 真带了 api_key 时分配占位符，没带时不产生多余参数
+		// （否则占位符与 args 数量会对不上）。
+		if _, hasAPIKey := updates.Credentials["api_key"]; hasAPIKey {
+			apiKeyHashPlaceholder = "$" + itoa(idx)
+			args = append(args, credentialAPIKeyHashArg(updates.Credentials))
+			idx++
+		}
+		// 这里是 SQL 侧合并，Go 拿不到"合并后的完整文档"，所以派生列无法在**写之前**
+		// 算出真值。先置回"未派生"状态（保证不会留下与明文不一致的过期派生值），
+		// 合并语句执行后在同一事务里回读明文重新推导（见 deriveCredentialColumnsAfterMerge）。
+		deriveAfterMerge = true
+		setClauses = append(setClauses,
+			"credentials_meta = '{}'::jsonb",
+			"credentials_hash = NULL",
+			"credentials_api_key_hash = NULL",
+		)
 	}
 
 	ollamaGroupIdentityChanges := make([]string, 0, 2)
 	if _, ok := updates.Credentials["api_key"]; ok {
-		ollamaGroupIdentityChanges = append(ollamaGroupIdentityChanges, "credentials -> 'api_key' IS DISTINCT FROM "+credentialPlaceholder+"::jsonb -> 'api_key'")
+		ollamaGroupIdentityChanges = append(ollamaGroupIdentityChanges, "credentials_api_key_hash IS DISTINCT FROM "+apiKeyHashPlaceholder)
 	}
 	if _, ok := updates.Credentials["base_url"]; ok {
 		ollamaGroupIdentityChanges = append(ollamaGroupIdentityChanges,
-			"NOT ("+ollamaCloudBaseURLMatchesSQL("credentials ->> 'base_url'")+
+			"NOT ("+ollamaCloudBaseURLMatchesSQL("credentials_meta ->> 'base_url'")+
 				" AND "+ollamaCloudBaseURLMatchesSQL(credentialPlaceholder+"::jsonb ->> 'base_url'")+")")
 	}
 
@@ -3162,15 +3262,15 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	// 才可能持有受管键，且只在该组身份（api_key / normalized base URL /
 	// account_mode）真正变化或不再 eligible 时清除，避免与 Ollama 分支交叉误清。
 	opencodeGroupIdentityChanges := make([]string, 0, 3)
-	opencodeOldBaseURL := opencodeGoBaseURLMatchSQLPrefix + "credentials ->> 'base_url'" + opencodeGoBaseURLMatchSQLSuffix
+	opencodeOldBaseURL := opencodeGoBaseURLMatchSQLPrefix + "credentials_meta ->> 'base_url'" + opencodeGoBaseURLMatchSQLSuffix
 	// 旧行 OpenCode 用量身份谓词（与 opencodeGoUsageEligibleSQL 的行侧条件镜像；
 	// type 由 opencodeEligibleAccount 统一携带）。account_mode 未设置/为 null/非
 	// zen 均视为 Go 订阅，与 GetOpenCodeAccountMode 默认兼容一致。
-	opencodeOldUsageIdentity := "((platform = 'opencode_go' AND COALESCE(btrim(credentials ->> 'account_mode') <> 'zen', true))" +
+	opencodeOldUsageIdentity := "((platform = 'opencode_go' AND COALESCE(btrim(credentials_meta ->> 'account_mode') <> 'zen', true))" +
 		" OR (platform IN (" + opencodeGoUsageMountPlatformsSQL + ") AND " + opencodeOldBaseURL + "))"
 	if _, ok := updates.Credentials["api_key"]; ok {
 		opencodeGroupIdentityChanges = append(opencodeGroupIdentityChanges,
-			opencodeOldUsageIdentity+" AND credentials -> 'api_key' IS DISTINCT FROM "+credentialPlaceholder+"::jsonb -> 'api_key'")
+			opencodeOldUsageIdentity+" AND credentials_api_key_hash IS DISTINCT FROM "+apiKeyHashPlaceholder)
 	}
 	if _, ok := updates.Credentials["base_url"]; ok {
 		// 仅挂载行身份钉在官方基址上（opencode_go 行的 base_url 不参与资格，两个
@@ -3185,7 +3285,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		// 仅 opencode_go 行身份钉在 Go 订阅上（挂载行的 account_mode 与 OpenCode
 		// 资格无关，不由此子句清理）。模式转 Zen 即不再 eligible。
 		opencodeGroupIdentityChanges = append(opencodeGroupIdentityChanges,
-			"platform = 'opencode_go' AND COALESCE(btrim(credentials ->> 'account_mode') <> 'zen', true)"+
+			"platform = 'opencode_go' AND COALESCE(btrim(credentials_meta ->> 'account_mode') <> 'zen', true)"+
 				" AND COALESCE(btrim("+credentialPlaceholder+"::jsonb ->> 'account_mode') <> 'zen', true) IS NOT TRUE")
 	}
 
@@ -3312,6 +3412,13 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
+	}
+	if deriveAfterMerge {
+		// 同一事务内回读合并后的明文并重算派生列。失败必须整体回滚——
+		// 留下"明文已合并、派生列是空的"行会让阶段四之后读不到凭据。
+		if err := deriveCredentialColumnsAfterMerge(ctx, exec, r.cryptorOrNil(), ids); err != nil {
+			return 0, err
+		}
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
@@ -3456,7 +3563,10 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 
 	outAccounts := make([]service.Account, 0, len(accounts))
 	for _, acc := range accounts {
-		out := accountEntityToService(acc)
+		out, err := r.accountEntityToService(acc)
+		if err != nil {
+			return nil, err
+		}
 		if out == nil {
 			continue
 		}
@@ -3673,7 +3783,40 @@ func buildSchedulerGroupPayload(groupIDs []int64) any {
 	return map[string]any{"group_ids": groupIDs}
 }
 
-func accountEntityToService(m *dbent.Account) *service.Account {
+// accountEntityToService 是**加解密的唯一边界**（读侧）：DB 行 -> 领域实体。
+//
+// 读路径规则见 design D1 / D3，实现见 credentialsFromEntity。
+func (r *accountRepository) accountEntityToService(m *dbent.Account) (*service.Account, error) {
+	if m == nil {
+		return nil, nil
+	}
+	credentials, err := r.credentialsFromEntity(m)
+	if err != nil {
+		return nil, err
+	}
+	return accountEntityToServiceCore(m, credentials), nil
+}
+
+// accountEntityToServiceWithoutCredentials 供**只需要账号标识**的调用方使用
+// （目前只有用量日志的 loadAccounts：它的 DTO 只取 ID 与 Name，
+// 注释原文就是"避免泄露敏感字段"）。
+//
+// 刻意传 nil 而不是解出凭据：那条路径既不解密、也不把凭据塞进返回的结构体，
+// 顺带消掉一条无谓的凭据传播面。解密只发生在真正需要凭据的地方。
+func accountEntityToServiceWithoutCredentials(m *dbent.Account) *service.Account {
+	return accountEntityToServiceCore(m, nil)
+}
+
+// accountEntityToService 是**加解密的唯一边界**：DB 行 -> 领域实体。
+//
+// 读路径规则（design D1 / D3）：
+//   - 密文列非空  -> 解密后反序列化（唯一正确的读法）
+//   - 密文列为空  -> 回落明文列 + 计数（迁移窗口内的过渡态）
+//   - 密文列非空但没配加密器 -> **报错**，绝不把密文当明文交给调用方
+//
+// 为什么必须报错而不是回落：密文当成明文发上游，等于把 base64 乱码当 API key，
+// 会以"上游 401"这种完全误导的形态暴露，而真正的病因（配错加密器）查不到。
+func accountEntityToServiceCore(m *dbent.Account, credentials map[string]any) *service.Account {
 	if m == nil {
 		return nil
 	}
@@ -3686,7 +3829,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		Notes:                   m.Notes,
 		Platform:                m.Platform,
 		Type:                    m.Type,
-		Credentials:             copyJSONMap(m.Credentials),
+		Credentials:             credentials,
 		Extra:                   copyJSONMap(m.Extra),
 		ProxyID:                 m.ProxyID,
 		ProxyFallbackOriginID:   m.ProxyFallbackOriginID,
@@ -4144,7 +4287,11 @@ func (r *accountRepository) ListShadowsByParent(ctx context.Context, parentID in
 	}
 	out := make([]*service.Account, 0, len(rows))
 	for _, m := range rows {
-		out = append(out, accountEntityToService(m))
+		converted, err := r.accountEntityToService(m)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, converted)
 	}
 	return out, nil
 }

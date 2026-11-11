@@ -105,6 +105,54 @@ func (_c *AccountCreate) SetCredentials(v map[string]interface{}) *AccountCreate
 	return _c
 }
 
+// SetCredentialsMeta sets the "credentials_meta" field.
+func (_c *AccountCreate) SetCredentialsMeta(v map[string]interface{}) *AccountCreate {
+	_c.mutation.SetCredentialsMeta(v)
+	return _c
+}
+
+// SetCredentialsEncrypted sets the "credentials_encrypted" field.
+func (_c *AccountCreate) SetCredentialsEncrypted(v string) *AccountCreate {
+	_c.mutation.SetCredentialsEncrypted(v)
+	return _c
+}
+
+// SetNillableCredentialsEncrypted sets the "credentials_encrypted" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableCredentialsEncrypted(v *string) *AccountCreate {
+	if v != nil {
+		_c.SetCredentialsEncrypted(*v)
+	}
+	return _c
+}
+
+// SetCredentialsHash sets the "credentials_hash" field.
+func (_c *AccountCreate) SetCredentialsHash(v string) *AccountCreate {
+	_c.mutation.SetCredentialsHash(v)
+	return _c
+}
+
+// SetNillableCredentialsHash sets the "credentials_hash" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableCredentialsHash(v *string) *AccountCreate {
+	if v != nil {
+		_c.SetCredentialsHash(*v)
+	}
+	return _c
+}
+
+// SetCredentialsAPIKeyHash sets the "credentials_api_key_hash" field.
+func (_c *AccountCreate) SetCredentialsAPIKeyHash(v string) *AccountCreate {
+	_c.mutation.SetCredentialsAPIKeyHash(v)
+	return _c
+}
+
+// SetNillableCredentialsAPIKeyHash sets the "credentials_api_key_hash" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableCredentialsAPIKeyHash(v *string) *AccountCreate {
+	if v != nil {
+		_c.SetCredentialsAPIKeyHash(*v)
+	}
+	return _c
+}
+
 // SetExtra sets the "extra" field.
 func (_c *AccountCreate) SetExtra(v map[string]interface{}) *AccountCreate {
 	_c.mutation.SetExtra(v)
@@ -546,6 +594,13 @@ func (_c *AccountCreate) defaults() error {
 		v := account.DefaultCredentials()
 		_c.mutation.SetCredentials(v)
 	}
+	if _, ok := _c.mutation.CredentialsMeta(); !ok {
+		if account.DefaultCredentialsMeta == nil {
+			return fmt.Errorf("ent: uninitialized account.DefaultCredentialsMeta (forgotten import ent/runtime?)")
+		}
+		v := account.DefaultCredentialsMeta()
+		_c.mutation.SetCredentialsMeta(v)
+	}
 	if _, ok := _c.mutation.Extra(); !ok {
 		if account.DefaultExtra == nil {
 			return fmt.Errorf("ent: uninitialized account.DefaultExtra (forgotten import ent/runtime?)")
@@ -618,6 +673,19 @@ func (_c *AccountCreate) check() error {
 	}
 	if _, ok := _c.mutation.Credentials(); !ok {
 		return &ValidationError{Name: "credentials", err: errors.New(`ent: missing required field "Account.credentials"`)}
+	}
+	if _, ok := _c.mutation.CredentialsMeta(); !ok {
+		return &ValidationError{Name: "credentials_meta", err: errors.New(`ent: missing required field "Account.credentials_meta"`)}
+	}
+	if v, ok := _c.mutation.CredentialsHash(); ok {
+		if err := account.CredentialsHashValidator(v); err != nil {
+			return &ValidationError{Name: "credentials_hash", err: fmt.Errorf(`ent: validator failed for field "Account.credentials_hash": %w`, err)}
+		}
+	}
+	if v, ok := _c.mutation.CredentialsAPIKeyHash(); ok {
+		if err := account.CredentialsAPIKeyHashValidator(v); err != nil {
+			return &ValidationError{Name: "credentials_api_key_hash", err: fmt.Errorf(`ent: validator failed for field "Account.credentials_api_key_hash": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.Extra(); !ok {
 		return &ValidationError{Name: "extra", err: errors.New(`ent: missing required field "Account.extra"`)}
@@ -716,6 +784,22 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Credentials(); ok {
 		_spec.SetField(account.FieldCredentials, field.TypeJSON, value)
 		_node.Credentials = value
+	}
+	if value, ok := _c.mutation.CredentialsMeta(); ok {
+		_spec.SetField(account.FieldCredentialsMeta, field.TypeJSON, value)
+		_node.CredentialsMeta = value
+	}
+	if value, ok := _c.mutation.CredentialsEncrypted(); ok {
+		_spec.SetField(account.FieldCredentialsEncrypted, field.TypeString, value)
+		_node.CredentialsEncrypted = &value
+	}
+	if value, ok := _c.mutation.CredentialsHash(); ok {
+		_spec.SetField(account.FieldCredentialsHash, field.TypeString, value)
+		_node.CredentialsHash = &value
+	}
+	if value, ok := _c.mutation.CredentialsAPIKeyHash(); ok {
+		_spec.SetField(account.FieldCredentialsAPIKeyHash, field.TypeString, value)
+		_node.CredentialsAPIKeyHash = &value
 	}
 	if value, ok := _c.mutation.Extra(); ok {
 		_spec.SetField(account.FieldExtra, field.TypeJSON, value)
@@ -1032,6 +1116,72 @@ func (u *AccountUpsert) SetCredentials(v map[string]interface{}) *AccountUpsert 
 // UpdateCredentials sets the "credentials" field to the value that was provided on create.
 func (u *AccountUpsert) UpdateCredentials() *AccountUpsert {
 	u.SetExcluded(account.FieldCredentials)
+	return u
+}
+
+// SetCredentialsMeta sets the "credentials_meta" field.
+func (u *AccountUpsert) SetCredentialsMeta(v map[string]interface{}) *AccountUpsert {
+	u.Set(account.FieldCredentialsMeta, v)
+	return u
+}
+
+// UpdateCredentialsMeta sets the "credentials_meta" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateCredentialsMeta() *AccountUpsert {
+	u.SetExcluded(account.FieldCredentialsMeta)
+	return u
+}
+
+// SetCredentialsEncrypted sets the "credentials_encrypted" field.
+func (u *AccountUpsert) SetCredentialsEncrypted(v string) *AccountUpsert {
+	u.Set(account.FieldCredentialsEncrypted, v)
+	return u
+}
+
+// UpdateCredentialsEncrypted sets the "credentials_encrypted" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateCredentialsEncrypted() *AccountUpsert {
+	u.SetExcluded(account.FieldCredentialsEncrypted)
+	return u
+}
+
+// ClearCredentialsEncrypted clears the value of the "credentials_encrypted" field.
+func (u *AccountUpsert) ClearCredentialsEncrypted() *AccountUpsert {
+	u.SetNull(account.FieldCredentialsEncrypted)
+	return u
+}
+
+// SetCredentialsHash sets the "credentials_hash" field.
+func (u *AccountUpsert) SetCredentialsHash(v string) *AccountUpsert {
+	u.Set(account.FieldCredentialsHash, v)
+	return u
+}
+
+// UpdateCredentialsHash sets the "credentials_hash" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateCredentialsHash() *AccountUpsert {
+	u.SetExcluded(account.FieldCredentialsHash)
+	return u
+}
+
+// ClearCredentialsHash clears the value of the "credentials_hash" field.
+func (u *AccountUpsert) ClearCredentialsHash() *AccountUpsert {
+	u.SetNull(account.FieldCredentialsHash)
+	return u
+}
+
+// SetCredentialsAPIKeyHash sets the "credentials_api_key_hash" field.
+func (u *AccountUpsert) SetCredentialsAPIKeyHash(v string) *AccountUpsert {
+	u.Set(account.FieldCredentialsAPIKeyHash, v)
+	return u
+}
+
+// UpdateCredentialsAPIKeyHash sets the "credentials_api_key_hash" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateCredentialsAPIKeyHash() *AccountUpsert {
+	u.SetExcluded(account.FieldCredentialsAPIKeyHash)
+	return u
+}
+
+// ClearCredentialsAPIKeyHash clears the value of the "credentials_api_key_hash" field.
+func (u *AccountUpsert) ClearCredentialsAPIKeyHash() *AccountUpsert {
+	u.SetNull(account.FieldCredentialsAPIKeyHash)
 	return u
 }
 
@@ -1585,6 +1735,83 @@ func (u *AccountUpsertOne) SetCredentials(v map[string]interface{}) *AccountUpse
 func (u *AccountUpsertOne) UpdateCredentials() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateCredentials()
+	})
+}
+
+// SetCredentialsMeta sets the "credentials_meta" field.
+func (u *AccountUpsertOne) SetCredentialsMeta(v map[string]interface{}) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetCredentialsMeta(v)
+	})
+}
+
+// UpdateCredentialsMeta sets the "credentials_meta" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateCredentialsMeta() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateCredentialsMeta()
+	})
+}
+
+// SetCredentialsEncrypted sets the "credentials_encrypted" field.
+func (u *AccountUpsertOne) SetCredentialsEncrypted(v string) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetCredentialsEncrypted(v)
+	})
+}
+
+// UpdateCredentialsEncrypted sets the "credentials_encrypted" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateCredentialsEncrypted() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateCredentialsEncrypted()
+	})
+}
+
+// ClearCredentialsEncrypted clears the value of the "credentials_encrypted" field.
+func (u *AccountUpsertOne) ClearCredentialsEncrypted() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearCredentialsEncrypted()
+	})
+}
+
+// SetCredentialsHash sets the "credentials_hash" field.
+func (u *AccountUpsertOne) SetCredentialsHash(v string) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetCredentialsHash(v)
+	})
+}
+
+// UpdateCredentialsHash sets the "credentials_hash" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateCredentialsHash() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateCredentialsHash()
+	})
+}
+
+// ClearCredentialsHash clears the value of the "credentials_hash" field.
+func (u *AccountUpsertOne) ClearCredentialsHash() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearCredentialsHash()
+	})
+}
+
+// SetCredentialsAPIKeyHash sets the "credentials_api_key_hash" field.
+func (u *AccountUpsertOne) SetCredentialsAPIKeyHash(v string) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetCredentialsAPIKeyHash(v)
+	})
+}
+
+// UpdateCredentialsAPIKeyHash sets the "credentials_api_key_hash" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateCredentialsAPIKeyHash() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateCredentialsAPIKeyHash()
+	})
+}
+
+// ClearCredentialsAPIKeyHash clears the value of the "credentials_api_key_hash" field.
+func (u *AccountUpsertOne) ClearCredentialsAPIKeyHash() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearCredentialsAPIKeyHash()
 	})
 }
 
@@ -2370,6 +2597,83 @@ func (u *AccountUpsertBulk) SetCredentials(v map[string]interface{}) *AccountUps
 func (u *AccountUpsertBulk) UpdateCredentials() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateCredentials()
+	})
+}
+
+// SetCredentialsMeta sets the "credentials_meta" field.
+func (u *AccountUpsertBulk) SetCredentialsMeta(v map[string]interface{}) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetCredentialsMeta(v)
+	})
+}
+
+// UpdateCredentialsMeta sets the "credentials_meta" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateCredentialsMeta() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateCredentialsMeta()
+	})
+}
+
+// SetCredentialsEncrypted sets the "credentials_encrypted" field.
+func (u *AccountUpsertBulk) SetCredentialsEncrypted(v string) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetCredentialsEncrypted(v)
+	})
+}
+
+// UpdateCredentialsEncrypted sets the "credentials_encrypted" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateCredentialsEncrypted() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateCredentialsEncrypted()
+	})
+}
+
+// ClearCredentialsEncrypted clears the value of the "credentials_encrypted" field.
+func (u *AccountUpsertBulk) ClearCredentialsEncrypted() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearCredentialsEncrypted()
+	})
+}
+
+// SetCredentialsHash sets the "credentials_hash" field.
+func (u *AccountUpsertBulk) SetCredentialsHash(v string) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetCredentialsHash(v)
+	})
+}
+
+// UpdateCredentialsHash sets the "credentials_hash" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateCredentialsHash() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateCredentialsHash()
+	})
+}
+
+// ClearCredentialsHash clears the value of the "credentials_hash" field.
+func (u *AccountUpsertBulk) ClearCredentialsHash() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearCredentialsHash()
+	})
+}
+
+// SetCredentialsAPIKeyHash sets the "credentials_api_key_hash" field.
+func (u *AccountUpsertBulk) SetCredentialsAPIKeyHash(v string) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetCredentialsAPIKeyHash(v)
+	})
+}
+
+// UpdateCredentialsAPIKeyHash sets the "credentials_api_key_hash" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateCredentialsAPIKeyHash() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateCredentialsAPIKeyHash()
+	})
+}
+
+// ClearCredentialsAPIKeyHash clears the value of the "credentials_api_key_hash" field.
+func (u *AccountUpsertBulk) ClearCredentialsAPIKeyHash() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearCredentialsAPIKeyHash()
 	})
 }
 

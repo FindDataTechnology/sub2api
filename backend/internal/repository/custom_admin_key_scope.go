@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	dbaccountgroup "github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	dbpredicate "github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -31,47 +31,43 @@ func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.Pa
 	if err != nil {
 		return nil, 0, err
 	}
-	// SQL 只投影模型映射子字段，不加载 Token、API Key、接入地址或其他凭证。
-	var rows []struct {
-		ID           int64
-		Name         string
-		Notes        *string
-		Platform     string
-		Type         string
-		Status       string
-		Schedulable  bool
-		Concurrency  int
-		Priority     int
-		ModelMapping json.RawMessage `json:"model_mapping"`
-	}
-	err = q.Offset(p.Offset()).Limit(p.Limit()).Order(dbaccount.ByID()).
-		Select(dbaccount.FieldID, dbaccount.FieldName, dbaccount.FieldNotes, dbaccount.FieldPlatform, dbaccount.FieldType, dbaccount.FieldStatus, dbaccount.FieldSchedulable, dbaccount.FieldConcurrency, dbaccount.FieldPriority).
-		Aggregate(func(s *entsql.Selector) string {
-			return s.C(dbaccount.FieldCredentials) + "->'model_mapping' AS model_mapping"
-		}).Scan(ctx, &rows)
+	// model_mapping 原先用 SQL 聚合 `credentials->'model_mapping'` 直接投影。
+	// drop 明文列之后那条聚合会运行期报错，所以改成**解密后取值**：
+	// 凭据只在 Go 侧出现，返回体里也只有 model_mapping，其余字段不外带。
+	models, err := q.Offset(p.Offset()).Limit(p.Limit()).Order(dbaccount.ByID()).
+		Select(dbaccount.FieldID, dbaccount.FieldName, dbaccount.FieldNotes,
+			dbaccount.FieldPlatform, dbaccount.FieldType, dbaccount.FieldStatus,
+			dbaccount.FieldSchedulable, dbaccount.FieldConcurrency, dbaccount.FieldPriority,
+			dbaccount.FieldCredentials, dbaccount.FieldCredentialsEncrypted).
+		All(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
-	accounts := make([]service.Account, 0, len(rows))
-	for _, row := range rows {
-		groups, e := r.loadAccountGroupIDs(ctx, row.ID)
+	accounts := make([]service.Account, 0, len(models))
+	for _, m := range models {
+		groups, e := r.loadAccountGroupIDs(ctx, m.ID)
 		if e != nil {
 			return nil, 0, e
 		}
-		var rawMapping map[string]any
 		mapping := map[string]string{}
-		if json.Unmarshal(row.ModelMapping, &rawMapping) == nil {
-			for source, target := range rawMapping {
+		creds, credErr := r.credentialsFromEntity(m)
+		if credErr != nil {
+			// 这一列只用于展示：解不开就让该行映射为空，别把整页列表打成 500。
+			// 但必须留痕，否则"管理端看不到路由配置"会变成查不出原因的现象。
+			logger.LegacyPrintf("repository.scopedadmin",
+				"[ScopedAdminList] cannot resolve credentials for account=%d: %v; returning empty model_mapping", m.ID, credErr)
+		} else if raw, ok := creds["model_mapping"].(map[string]any); ok {
+			for source, target := range raw {
 				if value, ok := target.(string); ok {
 					mapping[source] = value
 				}
 			}
 		}
-		var credentials map[string]any
+		var outCredentials map[string]any
 		if len(mapping) > 0 {
-			credentials = map[string]any{"model_mapping": mapping}
+			outCredentials = map[string]any{"model_mapping": mapping}
 		}
-		accounts = append(accounts, service.Account{ID: row.ID, Name: row.Name, Notes: row.Notes, Platform: row.Platform, Type: row.Type, Status: row.Status, Schedulable: row.Schedulable, Concurrency: row.Concurrency, Priority: row.Priority, GroupIDs: groups, Credentials: credentials})
+		accounts = append(accounts, service.Account{ID: m.ID, Name: m.Name, Notes: m.Notes, Platform: m.Platform, Type: m.Type, Status: m.Status, Schedulable: m.Schedulable, Concurrency: m.Concurrency, Priority: m.Priority, GroupIDs: groups, Credentials: outCredentials})
 	}
 	return accounts, int64(total), nil
 }
@@ -159,6 +155,14 @@ func scopedAdminAccountPredicates(policy adminaccess.Policy, permission string) 
 
 // ScopedAdminCodexCandidates 按导入身份逐级匹配，最多返回一个候选的身份字段。
 // 不向应用加载其他账户的凭证；真正合并凭证仍在写事务锁内进行。
+//
+// 匹配在 **Go 侧**完成（design.md A4 选项 C）：原实现把身份谓词拼成 SQL
+// （`"accounts"."credentials"->'key'`），drop 明文列之后整族失效。现在只把
+// **权限范围**（scope）+ platform/type 留在 SQL 里，身份匹配改在解密后的凭据上做。
+// 顺序语义不变：先命中者胜，同一谓词内取 id 最大者（与原来的 ORDER BY id DESC LIMIT 1 等价）。
+//
+// 等价性由 TestScopedCodexIdentityPredicates_SQLAndGoAgree 守着（每条谓词 × 每行）；
+// 反向实验证明 trim / 大小写 / 数字归一化 / 顺序任一处漂移都会让它变红。
 func (r *accountRepository) ScopedAdminCodexCandidates(ctx context.Context, identity service.ScopedCodexIdentity) ([]service.Account, error) {
 	principal := adminaccess.FromContext(ctx)
 	if principal == nil {
@@ -168,29 +172,53 @@ func (r *accountRepository) ScopedAdminCodexCandidates(ctx context.Context, iden
 	if len(scope) == 0 {
 		return []service.Account{}, nil
 	}
-	for _, match := range scopedCodexIdentityPredicates(identity) {
-		var rows []struct {
-			ID          int64
-			Credentials json.RawMessage
-		}
-		err := r.accountListFilteredQuery(service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "").
-			Where(dbaccount.Or(scope...), match).Order(dbaccount.ByID(entsql.OrderDesc())).Limit(1).
-			Select(dbaccount.FieldID).Aggregate(func(s *entsql.Selector) string {
-			c := s.C(dbaccount.FieldCredentials)
-			return "jsonb_build_object('chatgpt_account_id', " + c + "->'chatgpt_account_id', 'chatgpt_user_id', " + c + "->'chatgpt_user_id', 'email', " + c + "->'email', 'access_token', " + c + "->'access_token') AS credentials"
-		}).Scan(ctx, &rows)
-		if err != nil {
-			return nil, err
-		}
-		if len(rows) != 0 {
-			var credentials map[string]any
-			if err := json.Unmarshal(rows[0].Credentials, &credentials); err != nil {
-				return nil, err
-			}
-			return []service.Account{{ID: rows[0].ID, Credentials: credentials}}, nil
-		}
+	if len(scopedCodexIdentityMatchers(identity)) == 0 {
+		// 身份字段一个都没给：原实现此时不生成任何谓词，直接空结果。
+		return []service.Account{}, nil
 	}
-	return []service.Account{}, nil
+
+	// 一次取候选再在 Go 里筛。代价是这条路径要解密全部候选行 —— 它是人工触发的
+	// 低频导入，不是请求热路径（A4 选项 C 的取舍）。
+	// **不加 LIMIT**：加了就把"按 id 降序第一个命中"变成"前 N 行里第一个命中"，语义变了。
+	rows, err := r.accountListFilteredQuery(service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "").
+		Where(dbaccount.Or(scope...)).
+		Order(dbaccount.ByID(entsql.OrderDesc())).
+		Select(dbaccount.FieldID, dbaccount.FieldCredentials, dbaccount.FieldCredentialsEncrypted).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	resolved := make(map[int64]map[string]any, len(rows))
+	picked := scopedCodexIdentityPick(rows, func(m *dbent.Account) map[string]any {
+		creds, err := r.credentialsFromEntity(m)
+		if err != nil {
+			// 解密失败就跳过这一行，但必须留痕：静默跳过会让"导入时找不到已有账号"
+			// 变成一个查不出原因的现象。注意返回 nil 不会误命中任何谓词
+			// ——每条谓词都在与一个非空值比较。
+			logger.LegacyPrintf("repository.scopedadmin",
+				"[ScopedCodexIdentity] cannot resolve credentials for account=%d: %v; skipping candidate", m.ID, err)
+			return nil
+		}
+		resolved[m.ID] = creds
+		return creds
+	}, identity)
+	if picked == nil {
+		return []service.Account{}, nil
+	}
+
+	// 只回传这四个身份字段（与原 SQL 的 jsonb_build_object 投影一致），
+	// 不把整份凭据交给调用方。
+	creds := resolved[picked.ID]
+	return []service.Account{{
+		ID: picked.ID,
+		Credentials: map[string]any{
+			"chatgpt_account_id": creds["chatgpt_account_id"],
+			"chatgpt_user_id":    creds["chatgpt_user_id"],
+			"email":              creds["email"],
+			"access_token":       creds["access_token"],
+		},
+	}}, nil
 }
 
 // 与导入器的 account_user / user / email / access / account 优先级保持一致。
