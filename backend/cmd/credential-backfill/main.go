@@ -103,8 +103,10 @@ func main() {
 	}
 
 	fmt.Printf("[credential-backfill] 完成，耗时 %s\n", time.Since(started).Round(time.Millisecond))
-	fmt.Printf("  accounts: scanned=%d updated=%d skipped=%d failed=%d\n",
-		result.AccountsScanned, result.AccountsUpdated, result.AccountsSkipped, result.AccountsFailed)
+	// accounts 没有 skipped 一说：判据只选出"派生列还缺"的行，空凭据也必须被派生
+	// （否则 credentials_encrypted 永远是 NULL、闸门永远过不去）。
+	fmt.Printf("  accounts: scanned=%d updated=%d failed=%d\n",
+		result.AccountsScanned, result.AccountsUpdated, result.AccountsFailed)
 	fmt.Printf("  api_keys: scanned=%d updated=%d skipped=%d failed=%d\n",
 		result.APIKeysScanned, result.APIKeysUpdated, result.APIKeysSkipped, result.APIKeysFailed)
 	if result.APIKeysSkipped > 0 {

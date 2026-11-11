@@ -36,9 +36,6 @@ type CredentialBackfillOptions struct {
 type CredentialBackfillResult struct {
 	AccountsScanned int
 	AccountsUpdated int
-	// AccountsSkipped 是"形态上无需回填"的行（例如凭据本来就是空的）——
-	// 它不是失败，CLI MUST NOT 因为它退出非零。
-	AccountsSkipped int
 	AccountsFailed  int
 	APIKeysScanned  int
 	APIKeysUpdated  int
