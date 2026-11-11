@@ -41,10 +41,13 @@ func TestScopedAdminAccountListScopesCountAndPageInSQL(t *testing.T) {
 			if where != countScope {
 				return fmt.Errorf("分页和统计范围不同")
 			}
-			// 允许模型映射子字段投影，禁止读取完整 credentials。
-			projected := strings.ReplaceAll(actual, `"accounts"."credentials"->'model_mapping' AS model_mapping`, "model_mapping")
-			if strings.Contains(projected, `"credentials"`) || strings.Contains(projected, `"extra"`) {
-				return fmt.Errorf("读取了敏感字段")
+			// 契约（2026-11-11 更新）：禁止读取**明文** `accounts.credentials` 列
+			// —— drop 之后这一列不存在；也禁止 `extra`。
+			// 允许 `credentials_encrypted`：它是 drop 之后 model_mapping 的唯一来源，
+			// 且不是明文。用带右引号的完整列名做判据，所以 `"credentials_encrypted"`
+			// 不会误命中（旧版用子串 `"credentials"`，把这个面允许读的东西也一起禁了）。
+			if strings.Contains(actual, `"accounts"."credentials"`) || strings.Contains(actual, `"extra"`) {
+				return fmt.Errorf("读取了敏感字段（明文 credentials 或 extra）")
 			}
 		}
 		return nil
@@ -148,10 +151,27 @@ func TestScopedAdminAccountListPostgresRulesAndPagination(t *testing.T) {
 }
 
 func TestScopedAdminCodexCandidatesQueryIsBounded(t *testing.T) {
+	// 契约（2026-11-11 更新，随 drop 明文列的必要性而来）：
+	// 旧版要求 SQL 的 WHERE 里出现 `credentials`（=按身份子键筛选）且带 ` LIMIT `。
+	// drop 明文列之后"身份只存在于明文 JSON"这条前提不成立，于是身份匹配搬到 Go
+	// （design D8 / A4 选项 C，另有 TestScopedCodexIdentityPredicates_SQLAndGoAgree
+	// 做 20 组身份 × 10 行 × 每条谓词序的等价性）。
+	// 新契约是**更严**的两条：
+	//   ① 不得读明文列（`"accounts"."credentials"` 整词，密文列允许）；
+	//   ② WHERE 必须带权限范围谓词（`account_groups`/platform/type），不能裸扫全表。
+	// 注：这里**不要求 LIMIT**。加 LIMIT 会把"按 id 降序第一个命中"变成
+	// "前 N 行里第一个命中"，从而把更早的合法账号判成不存在、导入出重复账号 ——
+	// 语义代价已在实现处写明，成本则用候选数 WARN 日志观测（>500 行打日志）。
 	matcher := sqlmock.QueryMatcherFunc(func(_, actual string) error {
 		where := actual[strings.Index(actual, " WHERE "):]
-		if !strings.Contains(where, "credentials") || !strings.Contains(actual, " LIMIT ") {
-			return fmt.Errorf("导入候选未按身份筛选并限制数量: %s", actual)
+		if strings.Contains(actual, `"accounts"."credentials"`) {
+			return fmt.Errorf("导入候选读取了明文凭据列（drop 之后会直接报错）: %s", actual)
+		}
+		if !strings.Contains(actual, `"accounts"."credentials_encrypted"`) {
+			return fmt.Errorf("导入候选必须只读密文列（明文列在 drop 后不存在）: %s", actual)
+		}
+		if !strings.Contains(where, `"platform"`) || !strings.Contains(where, `"type"`) {
+			return fmt.Errorf("导入候选缺少平台/类型谓词（会退化成全表扫描）: %s", actual)
 		}
 		return nil
 	})
