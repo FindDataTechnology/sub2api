@@ -207,17 +207,23 @@ func (r *apiKeyRepository) lookupAPIKeyByHashThenPlaintext(
 		return nil, err
 	}
 
-	byPlaintext, err := apply(r.activeQuery().Where(apikey.KeyEQ(key))).Only(ctx)
-	if err != nil {
-		if dbent.IsNotFound(err) {
-			return nil, service.ErrAPIKeyNotFound
-		}
-		return nil, err
-	}
-	apiKeyPlaintextLookupFallbacks.Add(1)
-	logger.LegacyPrintf("repository.apikey",
-		"[APIKeyLookup] plaintext fallback: id=%d has no usable key_hash yet", byPlaintext.ID)
-	return byPlaintext, nil
+	// 阶段 3.4：**按明文列查找的回落分支已删除**。
+	//
+	// 为什么删（三条都成立才删）：
+	//  1. 生产判据 B 已为 0（`key <> '' AND (key_hash IS NULL OR key_hash = '')` 无行），
+	//     也就是每一行能认证的 key 都有指纹，回落分支在线上一次都不会被用到；
+	//  2. 留着它就是留一个**绕过复核**的入口：人工改过明文列的行，用那个新值去查
+	//     会命中并放行（`TestAuth_StalePlaintextColumnIsStillReachableViaFallback...`
+	//     记录的正是这件事）；
+	//  3. 5.2 drop 明文列之后这条 SQL 根本不存在，留着只能让 drop 前的最后一段窗口
+	//     维持一个"drop 当天才会炸"的假安全。
+	//
+	// 计数 `APIKeyPlaintextLookupFallbackCount` 仍然导出（阶段 3.4 之后恒为 0），
+	// 让 3.3 的仪表读数在两版之间可比。
+	//
+	// 这里**不打日志**：这条分支现在覆盖所有"key 无效"的请求（含扫描/爆破），
+	// 每次打一行会把日志冲掉，反而让真正的回落痕迹更难找。
+	return nil, service.ErrAPIKeyNotFound
 }
 
 func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
@@ -736,10 +742,10 @@ func (r *apiKeyRepository) CountByUserID(ctx context.Context, userID int64) (int
 
 // ExistsByKey 判断某个明文 key 是否已存在。
 //
-// 改比**指纹**而不是明文列：drop `api_keys.key` 之后明文列不存在，
-// 而指纹与原值一一对应（tombstone 改写 key 时会同步改写指纹，见 Delete），
-// 语义完全等价。回填窗口内指纹可能还为 NULL，所以保留明文回落并计数，
-// 与鉴权查找同一套口径（`APIKeyPlaintextLookupFallbackCount`）。
+// 只比**指纹**：drop `api_keys.key` 之后明文列不存在，而指纹与原值一一对应
+// （tombstone 改写 key 时会同步改写指纹，见 Delete），语义完全等价。
+// 阶段 3.4 删掉了"指纹没命中再按明文列查一遍"的回落：留着它等于保留
+// `column "key" does not exist` 的定时炸弹，而且会让"指纹写漏的行"看起来仍然可用。
 func (r *apiKeyRepository) ExistsByKey(ctx context.Context, key string) (bool, error) {
 	if key == "" {
 		return false, nil
@@ -748,19 +754,6 @@ func (r *apiKeyRepository) ExistsByKey(ctx context.Context, key string) (bool, e
 	count, err := r.activeQuery().Where(apikey.KeyHashEQ(hash)).Count(ctx)
 	if err != nil {
 		return false, err
-	}
-	if count > 0 {
-		return true, nil
-	}
-	count, err = r.activeQuery().Where(apikey.KeyEQ(key)).Count(ctx)
-	if err != nil {
-		return false, err
-	}
-	if count > 0 {
-		apiKeyPlaintextLookupFallbacks.Add(1)
-		// 同上：必须含 `plaintext fallback`（3.3 的判据就是 grep 这一个词）。
-		logger.LegacyPrintf("repository.apikey",
-			"[APIKeyLookup] plaintext fallback: ExistsByKey matched the key column (no key_hash yet)")
 	}
 	return count > 0, nil
 }

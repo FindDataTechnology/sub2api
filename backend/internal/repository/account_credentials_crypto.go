@@ -188,11 +188,23 @@ func (r *accountRepository) credentialsFromEntity(m *dbent.Account) (map[string]
 		return decoded, nil
 	}
 
-	// 回落：迁移窗口内的过渡态。有内容才算一次"未迁移"。
+	// 阶段 3.4：**回落分支已删除**。有明文却没有密文 = 硬错误。
+	//
+	// 为什么不能再"读不到密文就用明文凑"：
+	//  1. drop 明文列之后本来就无明文可读，这段代码只是在掩盖"这一行没回填"；
+	//  2. 它会把配置/迁移问题伪装成正常服务，症状退化成"凭据看起来是空的"，最难查；
+	//  3. 留着它，就永远没有证据说明"可以安全地 drop 明文列"。
+	// 观察期（3.3）已在生产上确认回落次数为 0，才做的这一步。
+	//
+	// 合法终态仍放行：明文字段为空（新建未填凭据的账号）返回 nil 且不报错
+	// —— 与原行为一致（原来走的就是 copyJSONMap(nil)），避免让调用方多一种判空形态。
 	if len(m.Credentials) > 0 {
 		credentialPlaintextFallbacks.Add(1)
 		logger.LegacyPrintf("repository.credential",
-			"[CredentialAtRest] plaintext fallback: account=%d has no credentials_encrypted yet", m.ID)
+			"[CredentialAtRest] missing ciphertext: account=%d has plaintext credentials but no credentials_encrypted", m.ID)
+		return nil, fmt.Errorf(
+			"account %d has plaintext credentials but no credentials_encrypted: "+
+				"stage-3.4 removed the plaintext fallback; re-run cmd/credential-backfill", m.ID)
 	}
 	return copyJSONMap(m.Credentials), nil
 }

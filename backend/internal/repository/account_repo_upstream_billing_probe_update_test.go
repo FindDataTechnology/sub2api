@@ -473,6 +473,26 @@ func TestBulkUpdateRollsBackWhenOutboxFails(t *testing.T) {
 }
 
 func updatedAccountRows(id int64, extra string) *sqlmock.Rows {
+	return updatedAccountRowsRow(id, extra, []byte(`{}`), nil, nil, nil)
+}
+
+// updatedAccountRowsEncrypted 与 updatedAccountRows 同形，但凭据派生列**按生产形状填满**
+// （密文/指纹/meta 都有）。
+//
+// 为什么必须有这一版（阶段 3.4）：删掉明文回落之后，"只有明文、没有密文"的行读出来是
+// **硬错误**（不是回落）。凡是让读路径真的去解凭据的用例，夹具就必须像回填后的生产库
+// 一样带密文；否则测的是一种线上不存在的状态，而且失败信息还会指向"回填没跑"。
+func updatedAccountRowsEncrypted(t *testing.T, id int64, extra string, cryptor service.SecretEncryptor) *sqlmock.Rows {
+	t.Helper()
+	creds := map[string]any{"api_key": "sk-test"}
+	cols, err := CredentialCryptoColumnsFor(creds, cryptor)
+	require.NoError(t, err)
+	require.NotNil(t, cols.Encrypted, "带加密器时必须产出密文")
+	require.NotNil(t, cols.Hash)
+	return updatedAccountRowsRow(id, extra, []byte(mustJSON(t, cols.Meta)), cols.Encrypted, cols.Hash, cols.APIKeyHash)
+}
+
+func updatedAccountRowsRow(id int64, extra string, meta []byte, encrypted, hash, apiKeyHash *string) *sqlmock.Rows {
 	now := time.Now()
 	// 列序必须与 ent 生成的 dbaccount.Columns 一致：credentials 之后紧跟
 	// credentials_meta / credentials_encrypted / credentials_hash / credentials_api_key_hash，
@@ -480,9 +500,17 @@ func updatedAccountRows(id int64, extra string) *sqlmock.Rows {
 	// "Expected number of values to match number of columns"。
 	return sqlmock.NewRows(dbaccount.Columns).AddRow(
 		id, now, now, nil, "test", nil, service.PlatformOpenAI, service.AccountTypeAPIKey,
-		[]byte(`{"api_key":"sk-test"}`), []byte(`{}`), nil, nil, nil,
+		[]byte(`{"api_key":"sk-test"}`), meta, nullable(encrypted), nullable(hash), nullable(apiKeyHash),
 		[]byte(extra), nil, nil, 1, nil, 1, 1.0,
 		service.StatusActive, nil, nil, nil, false, true, nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, service.QuotaDimensionGlobal,
 	)
+}
+
+// nullable 把 *string 变成 sqlmock 能接受的 nil / 值（直接传 *string 会被当成**指针**扫进目标列）。
+func nullable(s *string) any {
+	if s == nil {
+		return nil
+	}
+	return *s
 }

@@ -180,23 +180,29 @@ func TestLookupAPIKey_WrongKeyNotFound(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrAPIKeyNotFound, "错 key 必须查不到")
 }
 
-// 指纹为 NULL 的行（回填窗口内）仍必须能认证到，且计数 +1。
-func TestLookupAPIKey_FallsBackWhenHashMissing(t *testing.T) {
+// 指纹为 NULL 的行（回填窗口内）在阶段 3.4 之后**查不到了** —— 这是有意的：
+// 只剩指纹一条查找路径，回落明文列那条已经删掉。
+//
+// 为什么不再保留：生产判据 B 为 0（每条能认证的 key 都有指纹），所以"缺指纹"在线上
+// 不存在；而保留回落等于保留一个绕过复核的入口，且 drop 明文列当天必然炸。
+// 代价写在这里以免日后被当成故障：**若真有缺指纹的行，它从此无法认证**，
+// 这正是 `cmd/credential-backfill` 必须在 3.4 之前跑完的原因（判据 A/B 全 0）。
+func TestLookupAPIKey_HashMissingIsNotFoundAfterStage34(t *testing.T) {
 	cryptor := credentialTestEncryptor(t)
 	repo, db := apiKeyScratchRepo(t, cryptor)
 	ctx := context.Background()
 
 	key := &service.APIKey{UserID: 1, Key: "sk-legacy", Name: "k", Status: service.StatusActive}
 	require.NoError(t, repo.Create(ctx, key))
-	// 模拟"回填还没跑到这一行"
+	// 模拟"回填没跑到这一行"
 	_, err := db.Exec(`UPDATE api_keys SET key_hash = NULL WHERE id = $1`, key.ID)
 	require.NoError(t, err)
 
 	resetAPIKeyPlaintextLookupFallbackCount()
-	found, err := repo.GetByKeyForAuth(ctx, "sk-legacy")
-	require.NoError(t, err)
-	require.Equal(t, key.ID, found.ID)
-	require.Equal(t, int64(1), APIKeyPlaintextLookupFallbackCount(), "回落必须可见")
+	_, err = repo.GetByKeyForAuth(ctx, "sk-legacy")
+	require.ErrorIs(t, err, service.ErrAPIKeyNotFound,
+		"阶段 3.4：没有指纹 = 查不到（不再回落明文列）；这类行必须在回填里补齐，不能靠认证路径兜")
+	require.Zero(t, APIKeyPlaintextLookupFallbackCount(), "回落已删除，计数恒为 0")
 }
 
 // 权威源的顺序被翻转了：**密文 → 明文列**（drop 之后前者是唯一副本）。
@@ -234,8 +240,8 @@ func TestAuth_StalePlaintextColumnDoesNotBlockTheRealKey(t *testing.T) {
 // 它正是阶段 3.4（摘回落）与阶段 5（drop 明文列）要消掉的东西：
 // 明文列没了，回落分支就没有可查的列。所以这条测试是**特性化测试**：
 // 它记录现在的行为，并在回落被摘掉时翻转成"查不到"。
-func TestAuth_StalePlaintextColumnIsStillReachableViaFallback_WILL_FLIP_AT_STAGE3(t *testing.T) {
-	const fallbackStillAlive = true // 阶段 3.4 摘掉回落时改成 false，本测试随即断言"查不到"
+func TestAuth_StalePlaintextColumnIsUnreachableAfterStage34(t *testing.T) {
+	const fallbackStillAlive = false // 阶段 3.4 已摘掉回落：明文列里的脏值不再能认证
 
 	cryptor := credentialTestEncryptor(t)
 	repo, db := apiKeyScratchRepo(t, cryptor)
@@ -256,6 +262,7 @@ func TestAuth_StalePlaintextColumnIsStillReachableViaFallback_WILL_FLIP_AT_STAGE
 	} else {
 		require.ErrorIs(t, err, service.ErrAPIKeyNotFound,
 			"回落已摘：只有指纹+密文能认证，明文列里的脏值查不到")
+		require.Nil(t, found)
 	}
 }
 
@@ -402,9 +409,14 @@ func TestReadPaths_ReturnPlaintextWithoutPlaintextColumn(t *testing.T) {
 
 // ExistsByKey 改比指纹之后的语义（drop 明文列前置）。
 //
-// 三件事必须同时成立：命中指纹即返回 true（不碰明文列）、
-// 未回填的行仍能被判存在（回落明文并计数）、不存在的 key 返回 false。
-func TestExistsByKey_UsesHashThenPlaintextFallback(t *testing.T) {
+// 阶段 3.4 之后三件事：命中指纹即返回 true（不碰明文列）、
+// **缺指纹的行判不出来（返回 false）**、不存在的 key 返回 false。
+//
+// ② 的代价与安全边界：缺指纹 + 同 key 再建一次时，新行带指纹、旧行 NULL，
+// 部分唯一索引（WHERE key_hash IS NOT NULL）不会拦 —— 于是库里可能并存两行同值。
+// 但旧行在 3.4 之后**认证不了**，所以这不会造成"两个账号共享一把可用 key"。
+// 真要让这条彻底不可能，靠的是回填把判据 B 打到 0（生产已为 0），而不是保留回落。
+func TestExistsByKey_UsesHashOnly(t *testing.T) {
 	cryptor := credentialTestEncryptor(t)
 	repo, db := apiKeyScratchRepo(t, cryptor)
 	ctx := context.Background()
@@ -428,7 +440,9 @@ func TestExistsByKey_UsesHashThenPlaintextFallback(t *testing.T) {
 	require.True(t, exists, "明文列没了也必须判得出存在")
 	require.Zero(t, APIKeyPlaintextLookupFallbackCount(), "仍然不该回落")
 
-	// ③ 回填窗口：指纹为 NULL 时回落明文并计数（否则老数据会被判"不存在"）
+	// ③ 阶段 3.4：缺指纹的行判不出来 —— 回落已删除。
+	// 生产判据 B 为 0，所以这类行在线上不存在；万一出现，宁可"判不存在"（建新 key 时
+	// 旧行本来也已认证不了）也不要读明文列（drop 当天必炸，且绕开校验）。
 	other := &service.APIKey{UserID: 1, Key: "sk-exists-legacy", Name: "k2", Status: service.StatusActive}
 	require.NoError(t, repo.Create(ctx, other))
 	_, err = db.Exec(`UPDATE api_keys SET key_hash = NULL WHERE id = $1`, other.ID)
@@ -436,8 +450,8 @@ func TestExistsByKey_UsesHashThenPlaintextFallback(t *testing.T) {
 	resetAPIKeyPlaintextLookupFallbackCount()
 	exists, err = repo.ExistsByKey(ctx, "sk-exists-legacy")
 	require.NoError(t, err)
-	require.True(t, exists, "缺指纹时必须回落明文，否则会误判不存在 → 允许重复创建")
-	require.Equal(t, int64(1), APIKeyPlaintextLookupFallbackCount(), "回落必须可见")
+	require.False(t, exists, "缺指纹 = 判不出来；判据 B 必须为 0，靠回填保证而不是靠回落兜")
+	require.Zero(t, APIKeyPlaintextLookupFallbackCount(), "回落已删除，计数恒为 0")
 
 	// ④ 不存在 → false（且空串直接 false）
 	exists, err = repo.ExistsByKey(ctx, "sk-truly-missing")

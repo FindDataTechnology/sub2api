@@ -20,7 +20,7 @@ import (
 // 断言粒度比"最终选中哪一行"更细：只比最终结果的话，两条谓词互换顺序仍可能撞出同一行，
 // 而顺序本身是语义（先命中者胜）。
 func TestScopedCodexIdentityPredicates_SQLAndGoAgree(t *testing.T) {
-	client, ids := seedScopedIdentityMatrix(t)
+	client, ids, cryptor := seedScopedIdentityMatrix(t)
 	ctx := context.Background()
 
 	// 覆盖每一支分支：account+user / user-only / email-only / token / account-only /
@@ -74,7 +74,8 @@ func TestScopedCodexIdentityPredicates_SQLAndGoAgree(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, len(ids))
 
-	repo := newAccountRepositoryWithSQL(nil, client, nil)
+	// 与生产一致：夹具带密文，这一路必须真解密才能读回凭据（阶段 3.4 之后没有回落）。
+	repo := newAccountRepositoryWithSQLCrypto(nil, client, nil, cryptor)
 	credentialsOf := func(m *dbent.Account) map[string]any {
 		creds, err := repo.credentialsFromEntity(m)
 		require.NoError(t, err)

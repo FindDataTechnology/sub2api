@@ -17,12 +17,13 @@ import (
 //
 // 金标测试与等价性测试**共用同一份夹具**：两份夹具会漂移，而漂移之后
 // "仪器绿了"就不再意味着"新实现和旧实现一致"。
-func seedScopedIdentityMatrix(t *testing.T) (*dbent.Client, map[string]int64) {
+func seedScopedIdentityMatrix(t *testing.T) (*dbent.Client, map[string]int64, service.SecretEncryptor) {
 	t.Helper()
 	dsn := os.Getenv("SUB2API_CREDENTIAL_DIFF_DSN")
 	if dsn == "" {
 		t.Skip("SUB2API_CREDENTIAL_DIFF_DSN 未设置；身份匹配夹具需要真 PostgreSQL")
 	}
+	cryptor := credentialTestEncryptor(t)
 	db, err := sql.Open("postgres", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
@@ -54,14 +55,27 @@ func seedScopedIdentityMatrix(t *testing.T) (*dbent.Client, map[string]int64) {
 
 	ids := make(map[string]int64, len(matrix))
 	for _, row := range matrix {
-		m, err := client.Account.Create().
+		// 双写派生列：阶段 3.4 之后读路径只认密文，"只有明文"的行读出来是硬错误。
+		// 夹具必须造生产回填后的形状，否则测的是一种线上不存在的状态。
+		cols, err := CredentialCryptoColumnsFor(row.creds, cryptor)
+		require.NoError(t, err)
+		require.NotNil(t, cols.Hash, "非空凭据必须有指纹（否则夹具本身不合法）")
+		create := client.Account.Create().
 			SetName("matrix-" + row.name).
 			SetPlatform(service.PlatformOpenAI).
 			SetType(service.AccountTypeOAuth).
 			SetCredentials(row.creds).
-			Save(ctx)
+			SetCredentialsMeta(cols.Meta).
+			SetCredentialsHash(*cols.Hash)
+		if cols.Encrypted != nil {
+			create = create.SetCredentialsEncrypted(*cols.Encrypted)
+		}
+		if cols.APIKeyHash != nil {
+			create = create.SetCredentialsAPIKeyHash(*cols.APIKeyHash)
+		}
+		m, err := create.Save(ctx)
 		require.NoError(t, err)
 		ids[row.name] = m.ID
 	}
-	return client, ids
+	return client, ids, cryptor
 }
