@@ -137,9 +137,23 @@ func (e *taskExecutor) run(ctx context.Context, job *service.LanesTaskJob, attem
 //
 // mode=now 时任务行还不存在（成功才落行），拿不到 job.ID，
 // 故由调用方先生成一个字符集安全的 id 传进来。
-func (e *taskExecutor) runWithRequestID(ctx context.Context, job *service.LanesTaskJob, requestID string) attemptOutcome {
-	res := attemptOutcome{RequestID: requestID, StartedAt: time.Now()}
-	defer func() { res.EndedAt = time.Now() }()
+// 命名返回值是必需的：下面的 defer 要在**返回值上**写 EndedAt。
+// 用局部变量 + return res 的话，defer 改的是局部量、改不到已拷贝的返回值，
+// EndedAt 会恒为零值 —— 真机实测后果有三：
+//
+//	① lanes_task_attempts.finished_at 落成 0001-01-01，按类 p95 立刻不可用；
+//	② CompletedSince 按 finished_at 过滤，完成速率恒 0（可行性判定退化为保守兜底）；
+//	③ **最严重**：调度器用 out.EndedAt.Add(backoff) 算下次尝试时刻，
+//	   零值时间 + 退避 ⇒ next_attempt_at 落在过去 ⇒ 退避被清零、失败任务立刻重打，
+//	   在上游抖动时正好制造放大。
+func (e *taskExecutor) runWithRequestID(ctx context.Context, job *service.LanesTaskJob, requestID string) (res attemptOutcome) {
+	res = attemptOutcome{RequestID: requestID, StartedAt: time.Now()}
+	defer func() {
+		res.EndedAt = time.Now()
+		if res.StartedAt.IsZero() {
+			res.StartedAt = res.EndedAt
+		}
+	}()
 
 	// 已经在库里跑不了就别发：gin 的 ServeHTTP **不检查** ctx 取消，
 	// 直接调用会让一个已断开的 mode=now 调用继续烧上游与计费。
