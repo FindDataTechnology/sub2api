@@ -32,6 +32,14 @@ import (
 // 任务行 → 账单行可以一对一追。**每次尝试必须不同的 id**，否则撞
 // usage_logs 的 (request_id, api_key_id) 唯一索引（迁移 027）。
 
+// taskRunner 是调度器与端点依赖的最小执行面。
+//
+// 抽成接口的唯一目的是让「调度状态机」可以被真库 + 桩执行器驱动着测：
+// 截止淘汰、退避重排、终态分流这些判据不该依赖真的 LLM。
+type taskRunner interface {
+	runWithRequestID(ctx context.Context, job *service.LanesTaskJob, requestID string) attemptOutcome
+}
+
 // taskExecutor 执行一次尝试。
 type taskExecutor struct {
 	engine *gin.Engine
