@@ -259,14 +259,21 @@ GROUP BY j.model
 ORDER BY attempts DESC;
 
 -- ⑥ 血缘抽查：任务行能否追到账单行
---    usage_logs.request_id 形如 'client:task-<job>-<attempt>'，前缀按尝试号唯一。
+--    usage_logs.request_id 形如 'client:task-<job>-<attempt>'，按尝试号唯一。
+--    关联口径：优先按 attempts 表（每次执行一行，最精确）；
+--    attempts 缺失时回退到 j.last_request_id（历史行与 v0.2.19-6 之前的 mode=now 属于这类，
+--    它们**确实开票了**，若只看 attempts 会误报「未开票」—— 实测踩过）。
 SELECT j.id AS job_id, j.status,
        a.attempt_no, a.outcome,
-       u.id AS usage_log_id, u.request_id, u.actual_cost,
+       COALESCE(a.request_id, j.last_request_id) AS request_id,
+       (a.request_id IS NULL)                    AS lineage_from_job_row,
+       u.id AS usage_log_id, u.actual_cost,
        (u.id IS NOT NULL) AS billed
 FROM lanes_task_jobs j
 LEFT JOIN lanes_task_attempts a ON a.job_id = j.id AND a.outcome = 'completed'
-LEFT JOIN usage_logs u ON u.request_id = 'client:' || a.request_id AND u.api_key_id = j.api_key_id
+LEFT JOIN usage_logs u
+       ON u.request_id = 'client:' || COALESCE(a.request_id, j.last_request_id)
+      AND u.api_key_id = j.api_key_id
 WHERE j.created_at >= now() - interval '2 days'
 ORDER BY j.id DESC
 LIMIT 50;
