@@ -42,7 +42,7 @@ func TestScopedAdminReviewGroupPriorityAndStatus(t *testing.T) {
 	_, err = db.Exec(`CREATE TABLE scheduler_outbox(id BIGSERIAL PRIMARY KEY,event_type TEXT,account_id BIGINT,group_id BIGINT,payload JSONB,dedup_key TEXT,created_at TIMESTAMPTZ DEFAULT NOW());CREATE UNIQUE INDEX review_outbox_dedup ON scheduler_outbox(dedup_key) WHERE dedup_key IS NOT NULL`)
 	require.NoError(t, err)
 	cache := &scopedReviewSchedulerCache{accounts: make(map[int64]*service.Account)}
-	repo := NewAdminAccountRepository(client, db, cache)
+	repo := NewAdminAccountRepository(client, db, cache, credentialTestEncryptor(t))
 	groups := NewAdminGroupRepository(client, db)
 	admin := service.NewAdminService(nil, nil, groups, repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, client, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	scoped := admin.(service.ScopedAdminAccounts)

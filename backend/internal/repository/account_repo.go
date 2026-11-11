@@ -115,14 +115,21 @@ func stripCodexFingerprintSeedFromExtraUpdate(extra map[string]any) map[string]a
 
 // NewAccountRepository 创建账户仓储实例。
 // 这是对外暴露的构造函数，返回接口类型以便于依赖注入。
-func NewAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCache service.SchedulerCache) service.AccountRepository {
-	return newAccountRepositoryWithSQL(client, sqlDB, schedulerCache)
+//
+// **cryptor 不是可选项**（2026-11-11 事故后改的）：回填之后每个账号都有密文，
+// 任何没有加密器的实例在读到它们时都会硬失败（"has encrypted credentials but no
+// encryptor is configured"）。上线 sha-19612f0 时这条构造函数还在传 nil，
+// 调度快照/计费探测整批重建失败 → **全站推理 503 约 75 分钟**。
+// 现在把它做成必填参数：少传一个参数编译不过，wire 也必须解析出 secretEncryptor。
+func NewAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCache service.SchedulerCache, cryptor service.SecretEncryptor) service.AccountRepository {
+	return newAccountRepositoryWithSQLCrypto(client, sqlDB, schedulerCache, cryptor)
 }
 
 // NewAdminAccountRepository exposes the account repository's atomic duplication capability
 // as an explicit dependency of the admin service.
-func NewAdminAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCache service.SchedulerCache) service.AdminAccountRepository {
-	return newAccountRepositoryWithSQL(client, sqlDB, schedulerCache)
+// 同上：cryptor 必填。
+func NewAdminAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCache service.SchedulerCache, cryptor service.SecretEncryptor) service.AdminAccountRepository {
+	return newAccountRepositoryWithSQLCrypto(client, sqlDB, schedulerCache, cryptor)
 }
 
 // newAccountRepositoryWithSQL 是内部构造函数，支持依赖注入 SQL 执行器。
