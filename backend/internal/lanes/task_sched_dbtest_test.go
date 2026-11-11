@@ -5,11 +5,13 @@ package lanes
 import (
 	"context"
 	"database/sql"
+	"net/http"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
@@ -210,6 +212,49 @@ func TestSchedulerCompletesAndStoresResult(t *testing.T) {
 	var outcome string
 	require.NoError(t, db.QueryRow(`SELECT outcome FROM lanes_task_attempts WHERE job_id=$1`, id).Scan(&outcome))
 	require.Equal(t, AttemptCompleted, outcome)
+}
+
+// 真执行器 × 真库：5xx 一次之后，退避必须落在**将来**，且 attempts.finished_at
+// 不能是零值。
+//
+// 为什么单独一条：上面几条用例用的是 stubRunner，它自己填了 EndedAt=now，
+// 所以「执行器把 EndedAt 留在零值」这种坑在上面几条里**永远照不出来**。
+// 实测 -7 上生产的 lanes_task_attempts.finished_at 全是 0001-01-01，而
+// 调度器算下次尝试时刻用的是 out.EndedAt.Add(backoff) —— 零值 + 退避 = 过去，
+// 于是退避被清零、失败任务立刻重打，在上游抖动时正好制造放大。
+func TestSchedulerBackoffUsesRealExecutorTimestamps(t *testing.T) {
+	db := openLanesScratchDB(t)
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.POST("/v1/chat/completions", func(c *gin.Context) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"message": "upstream down"}})
+	})
+	exec := &taskExecutor{
+		engine:     engine,
+		resolveKey: func(context.Context, int64) (string, error) { return "sk-test-abc", nil },
+	}
+	lane := newSchedTestLane(t, db, exec)
+	store := service.GetLanesTaskStore()
+
+	deadline := time.Now().Add(2 * time.Hour)
+	id := insertDeferJob(t, db, &deadline)
+	before := time.Now()
+
+	lane.schedulerTick(context.Background())
+
+	job, err := store.Get(context.Background(), id)
+	require.NoError(t, err)
+	require.Equal(t, "pending", job.Status, "5xx 必须重排，不能终态")
+	require.True(t, job.NextAttemptAt.After(before.Add(time.Second)),
+		"退避必须落在将来：零值 EndedAt 会让 next_attempt_at 落在过去，失败任务立刻重打")
+
+	var finished time.Time
+	require.NoError(t, db.QueryRow(
+		`SELECT finished_at FROM lanes_task_attempts WHERE job_id=$1`, id).Scan(&finished))
+	require.False(t, finished.IsZero(),
+		"attempts.finished_at 不得为零值（defer 必须写在命名返回值上）")
+	require.False(t, finished.Before(before), "finished_at 不得早于本次 tick 的时刻")
 }
 
 // I4：调度器**没有**任何账号维度输入。
