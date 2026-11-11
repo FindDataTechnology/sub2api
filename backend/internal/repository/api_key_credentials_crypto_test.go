@@ -399,3 +399,51 @@ func TestReadPaths_ReturnPlaintextWithoutPlaintextColumn(t *testing.T) {
 	require.Equal(t, sha256Hex([]byte("sk-readpath")), sha256Hex([]byte(state.Key)),
 		"喂给缓存失效的必须是明文（缓存键是 sha256(明文)）")
 }
+
+// ExistsByKey 改比指纹之后的语义（drop 明文列前置）。
+//
+// 三件事必须同时成立：命中指纹即返回 true（不碰明文列）、
+// 未回填的行仍能被判存在（回落明文并计数）、不存在的 key 返回 false。
+func TestExistsByKey_UsesHashThenPlaintextFallback(t *testing.T) {
+	cryptor := credentialTestEncryptor(t)
+	repo, db := apiKeyScratchRepo(t, cryptor)
+	ctx := context.Background()
+
+	key := &service.APIKey{UserID: 1, Key: "sk-exists-hash", Name: "k", Status: service.StatusActive}
+	require.NoError(t, repo.Create(ctx, key))
+
+	// ① 正常：走指纹，不读明文列
+	resetAPIKeyPlaintextLookupFallbackCount()
+	exists, err := repo.ExistsByKey(ctx, "sk-exists-hash")
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.Zero(t, APIKeyPlaintextLookupFallbackCount(), "有指纹时不该回落")
+
+	// ② drop 模拟：明文列清空，结果不变（这正是改成比指纹的理由）
+	_, err = db.Exec(`UPDATE api_keys SET key = '' WHERE id = $1`, key.ID)
+	require.NoError(t, err)
+	resetAPIKeyPlaintextLookupFallbackCount()
+	exists, err = repo.ExistsByKey(ctx, "sk-exists-hash")
+	require.NoError(t, err)
+	require.True(t, exists, "明文列没了也必须判得出存在")
+	require.Zero(t, APIKeyPlaintextLookupFallbackCount(), "仍然不该回落")
+
+	// ③ 回填窗口：指纹为 NULL 时回落明文并计数（否则老数据会被判"不存在"）
+	other := &service.APIKey{UserID: 1, Key: "sk-exists-legacy", Name: "k2", Status: service.StatusActive}
+	require.NoError(t, repo.Create(ctx, other))
+	_, err = db.Exec(`UPDATE api_keys SET key_hash = NULL WHERE id = $1`, other.ID)
+	require.NoError(t, err)
+	resetAPIKeyPlaintextLookupFallbackCount()
+	exists, err = repo.ExistsByKey(ctx, "sk-exists-legacy")
+	require.NoError(t, err)
+	require.True(t, exists, "缺指纹时必须回落明文，否则会误判不存在 → 允许重复创建")
+	require.Equal(t, int64(1), APIKeyPlaintextLookupFallbackCount(), "回落必须可见")
+
+	// ④ 不存在 → false（且空串直接 false）
+	exists, err = repo.ExistsByKey(ctx, "sk-truly-missing")
+	require.NoError(t, err)
+	require.False(t, exists)
+	exists, err = repo.ExistsByKey(ctx, "")
+	require.NoError(t, err)
+	require.False(t, exists, "空 key 不应被判存在")
+}
