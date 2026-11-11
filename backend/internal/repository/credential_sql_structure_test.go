@@ -170,3 +170,54 @@ func TestCredentialSQLStructure_StillWritesPlaintextColumn(t *testing.T) {
 		"明文列的 SQL 写入应为 3 处：UpdateCredentials 的 SET、UpdateGrokOAuthCredentials 的 SET、BulkUpdate 的合并。"+
 			"若这是有意的阶段四动作，必须先完成迁移并单独审批")
 }
+
+// TestCredentialSQLStructure_QuotedIdentifierSubkeyRefsArePinned
+//
+// 第三形态：**带引号的标识符** —— `"accounts"."credentials"->'key'`。
+// 前两条守卫只认 `credentials ->'字面量'` 与 `s.C(FieldCredentials) + "->'x'"`，
+// 而 scoped-admin 的 Codex 身份匹配是用
+//
+//	raw := `"accounts"."credentials"->'` + key + `'`
+//
+// 拼出来的：`->'` 后面跟的是**变量**，上面两个正则都匹配不到。
+// 结果是一整族谓词（account_user / user / email / access_token）从来没被守卫看见，
+// 而它们每一条在 drop `credentials` 之后都会运行期报错 —— 属于 13b 之外的**新发现**。
+//
+// 本测试只做一件事：把这种写法的出现次数钉死（当前 2 处，都在
+// scopedCodexIdentityPredicates 的 field() 里，一个 raw 一个 value），
+// 让这一类不能继续静默增长。
+func TestCredentialSQLStructure_QuotedIdentifierSubkeyRefsArePinned(t *testing.T) {
+	// 引号紧跟 -> 才算这一族（避免把 `credentials ->> 'x'` 之类算进来）
+	re := regexp.MustCompile(`credentials"\s*->>?`)
+
+	const wantTotal = 2
+	const wantFile = "custom_admin_key_scope.go"
+
+	var hits []string
+	total := 0
+	for name, src := range productionRepositorySources(t) {
+		for _, line := range strings.Split(src, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+			// 数**出现次数**而不是行数：同一行里再拼一次也是新增一处，
+			// 按行计数会漏掉（反向实验时实测：同加倍一处仍绿）。
+			matches := re.FindAllString(trimmed, -1)
+			if len(matches) == 0 {
+				continue
+			}
+			total += len(matches)
+			hits = append(hits, name+": "+trimmed)
+		}
+	}
+
+	require.Equal(t, wantTotal, total,
+		"带引号标识符的 credentials 子键引用应为 %d 处（%s 的 field()）。"+
+			"这一族是 drop 明文列的阻碍（含 access_token）：新增一处说明又有 SQL 直接吃了明文列",
+		wantTotal, wantFile)
+	for _, h := range hits {
+		require.Contains(t, h, wantFile,
+			"出现了清单外的带引号子键引用（%s）；这一类必须显式登记并纳入阶段四改造清单", h)
+	}
+}
