@@ -43,7 +43,7 @@ func main() {
 		dsn       = flag.String("dsn", "", "PostgreSQL DSN（必填），例如 postgres://user:pass@host:5432/sub2api?sslmode=disable")
 		keyHex    = flag.String("key", "", "AES-256 密钥（64 位 hex）。留空则读 env TOTP_ENCRYPTION_KEY")
 		batchSize = flag.Int("batch", 200, "每批行数")
-		limit     = flag.Int("limit", 0, "本次最多处理多少行（0=不限）；建议生产先跑 50")
+		limit     = flag.Int("limit", 0, "**每张表**本次最多处理多少行（0=不限）；建议生产先跑 50。accounts 与 api_keys 各算各的，-limit 50 最多写 100 行")
 		apply     = flag.Bool("apply", false, "真正写库。不加此参数为演练模式（零写入）")
 	)
 	flag.Parse()
@@ -131,7 +131,20 @@ func main() {
 		return
 	}
 	if pendingAccounts > 0 || pendingKeys > 0 {
-		fmt.Fprintln(os.Stderr, "[credential-backfill] ⚠️ 仍有未回填行，阶段二 MUST NOT 上线")
+		// exit 1 刻意保留：迁移确实没完成，脚本调用方必须被挡住（"选可验证更严的一侧"）。
+		// 但**原因要说对**：清单建议生产先跑 `-limit 50`，那是分片试跑，剩余非零是
+		// 预期结果；若和"没加 -limit 却仍有剩余"（说明有行反复失败）共用一句
+		// "⚠️ 仍有未回填行"，运维会把正常的试跑读成故障，然后学会忽略这句话。
+		if *limit > 0 {
+			fmt.Fprintf(os.Stderr,
+				"[credential-backfill] ⏸ 分片运行未完成（预期）：-limit=%d 是每张表的上限，剩余 accounts=%d api_keys=%d。\n",
+				*limit, pendingAccounts, pendingKeys)
+			fmt.Fprintln(os.Stderr,
+				"[credential-backfill]   这不是故障；但迁移仍未完成，阶段二 MUST NOT 上线。继续跑（再跑一次或去掉 -limit）直到剩余为 0。")
+		} else {
+			fmt.Fprintln(os.Stderr,
+				"[credential-backfill] ⚠️ 未加 -limit 却仍有剩余：说明这些行反复失败（上面应有逐行日志），阶段二 MUST NOT 上线")
+		}
 		os.Exit(1)
 	}
 	fmt.Println("[credential-backfill] 全部回填完成，阶段二可以开始。")
