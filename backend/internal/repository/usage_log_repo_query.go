@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	dbusersub "github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -388,7 +390,20 @@ func (r *usageLogRepository) loadAPIKeys(ctx context.Context, ids []int64) (map[
 		return nil, err
 	}
 	for _, m := range models {
-		out[m.ID] = apiKeyEntityToService(m)
+		// Key 只用于展示（掩码/审计），所以这里的失败语义与鉴权不同：
+		// 解不开就把 Key 置空并打日志，不让一条坏数据把整页用量日志打成 500。
+		key, keyErr := apiKeyPlaintextFromCiphertext(r.cryptor, m.ID, m.KeyEncrypted)
+		switch {
+		case keyErr == nil:
+		case errors.Is(keyErr, errNoAPIKeyCiphertext):
+			// 回填窗口内：仍可从明文列取（drop 之后这一支自然消失）
+			key = m.Key
+		default:
+			logger.LegacyPrintf("repository.usagelog",
+				"[APIKeyLookup] cannot resolve plaintext for id=%d: %v; returning empty key so nothing leaks", m.ID, keyErr)
+			key = ""
+		}
+		out[m.ID] = apiKeyEntityToServiceWithKey(m, key)
 	}
 	return out, nil
 }
@@ -403,7 +418,7 @@ func (r *usageLogRepository) loadAccounts(ctx context.Context, ids []int64) (map
 		return nil, err
 	}
 	for _, m := range models {
-		out[m.ID] = accountEntityToService(m)
+		out[m.ID] = accountEntityToServiceWithoutCredentials(m)
 	}
 	return out, nil
 }

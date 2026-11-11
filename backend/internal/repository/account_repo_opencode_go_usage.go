@@ -40,12 +40,12 @@ const (
 	opencodeGoUsageEligibleSQL = `
 	(
 		(platform = 'opencode_go'
-			AND COALESCE(btrim(credentials ->> 'account_mode') <> 'zen', true))
+			AND COALESCE(btrim(credentials_meta ->> 'account_mode') <> 'zen', true))
 		OR (platform IN (` + opencodeGoUsageMountPlatformsSQL + `)
-			AND ` + opencodeGoBaseURLMatchSQLPrefix + `credentials ->> 'base_url'` + opencodeGoBaseURLMatchSQLSuffix + `)
+			AND ` + opencodeGoBaseURLMatchSQLPrefix + `credentials_meta ->> 'base_url'` + opencodeGoBaseURLMatchSQLSuffix + `)
 	)
 	AND type = 'apikey'
-	AND jsonb_typeof(credentials -> 'api_key') = 'string'
+	AND credentials_api_key_hash IS NOT NULL
 `
 )
 
@@ -80,9 +80,9 @@ func (r *accountRepository) ListOpenCodeGoUsageGroupAccounts(ctx context.Context
 		FROM accounts
 		WHERE deleted_at IS NULL
 			AND `+opencodeGoUsageEligibleSQL+`
-			AND credentials ->> 'api_key' = ANY($1)
+			AND credentials_api_key_hash = ANY($1)
 		ORDER BY id
-	`, pq.Array(keys))
+	`, pq.Array(credentialAPIKeyHashHexes(keys)))
 	if err != nil {
 		return nil, err
 	}
@@ -258,9 +258,9 @@ func (r *accountRepository) updateOpenCodeGoUsageGroup(
 				updated_at = NOW()
 			WHERE deleted_at IS NULL
 				AND `+opencodeGoUsageEligibleSQL+`
-				AND credentials ->> 'api_key' = $2
+				AND credentials_api_key_hash = $2
 				AND id = ANY($3)
-		`, string(encoded), apiKey, pq.Array(memberIDs))
+		`, string(encoded), credentialAPIKeyHashHex(apiKey), pq.Array(memberIDs))
 		if err != nil {
 			return err
 		}
@@ -311,17 +311,17 @@ func lockOpenCodeGoUsageGroup(
 			id = $2
 				AND platform = $3
 				AND type = $4
-				AND credentials = $5::jsonb
+				AND credentials_hash = $7
 				AND proxy_id IS NOT DISTINCT FROM $6,
 			COALESCE((extra -> 'opencode_go_usage_auto_refresh')::text, 'null'),
 			COALESCE((extra -> 'opencode_go_usage_snapshot')::text, 'null')
 		FROM accounts
 		WHERE deleted_at IS NULL
 			AND `+opencodeGoUsageEligibleSQL+`
-			AND credentials ->> 'api_key' = $1
+			AND credentials_api_key_hash = $1
 		ORDER BY id
 		FOR NO KEY UPDATE
-	`, apiKey, account.ID, account.Platform, account.Type, string(credentials), proxyID)
+	`, credentialAPIKeyHashHex(apiKey), account.ID, account.Platform, account.Type, string(credentials), proxyID, credentialHashOfRawJSON(string(credentials)))
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +379,7 @@ func (r *accountRepository) ListDueOpenCodeGoUsageAccounts(
 	rows, err := r.sql.QueryContext(ctx, `
 		WITH eligible AS (
 			SELECT id,
-				credentials ->> 'api_key' AS api_key,
+				credentials_api_key_hash AS api_key_hash,
 				last_used_at,
 				extra -> 'opencode_go_usage_snapshot' AS snapshot
 			FROM accounts
@@ -388,23 +388,23 @@ func (r *accountRepository) ListDueOpenCodeGoUsageAccounts(
 				AND `+opencodeGoUsageEligibleSQL+`
 				AND extra @> '{"opencode_go_usage_auto_refresh": true}'::jsonb
 		), group_activity AS (
-			SELECT credentials ->> 'api_key' AS api_key,
+			SELECT credentials_api_key_hash AS api_key_hash,
 				MAX(last_used_at) AS group_last_used_at
 			FROM accounts
 			WHERE deleted_at IS NULL
 				AND `+opencodeGoUsageEligibleSQL+`
-				AND jsonb_typeof(credentials -> 'api_key') = 'string'
-			GROUP BY credentials ->> 'api_key'
+				AND credentials_api_key_hash IS NOT NULL
+			GROUP BY credentials_api_key_hash
 		), joined AS (
-			SELECT e.id, e.api_key, e.snapshot, g.group_last_used_at,
+			SELECT e.id, e.api_key_hash, e.snapshot, g.group_last_used_at,
 				e.snapshot #>> '{status}' AS status,
 				e.snapshot #>> '{fetched_at}' AS fetched_at,
 				e.snapshot #>> '{last_attempt_at}' AS last_attempt_at,
 				e.snapshot #>> '{next_refresh_at}' AS next_refresh_at
 			FROM eligible e
-			JOIN group_activity g ON g.api_key = e.api_key
+			JOIN group_activity g ON g.api_key_hash = e.api_key_hash
 		), parsed AS MATERIALIZED (
-			SELECT id, api_key, snapshot, group_last_used_at, status,
+			SELECT id, api_key_hash, snapshot, group_last_used_at, status,
 				`+ollamaCloudUsageParseRFC3339SQL("fetched_at")+` AS parsed_fetched_at,
 				`+ollamaCloudUsageParseRFC3339SQL("last_attempt_at")+` AS parsed_last_attempt_at,
 				`+ollamaCloudUsageParseRFC3339SQL("next_refresh_at")+` AS parsed_next_refresh_at
@@ -450,9 +450,9 @@ func (r *accountRepository) ListDueOpenCodeGoUsageAccounts(
 				activity_due_at AS due_at
 			FROM timed
 		), ranked AS (
-			SELECT id, api_key, group_last_used_at, due_class, due_at,
+			SELECT id, api_key_hash, group_last_used_at, due_class, due_at,
 				row_number() OVER (
-					PARTITION BY api_key
+					PARTITION BY api_key_hash
 					ORDER BY due_class,
 						due_at NULLS FIRST,
 						id

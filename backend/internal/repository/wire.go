@@ -66,7 +66,7 @@ func ProvideSchedulerCache(rdb *redis.Client, cfg *config.Config) service.Schedu
 // ProviderSet is the Wire provider set for all repositories
 var ProviderSet = wire.NewSet(
 	NewUserRepository,
-	NewAPIKeyRepository,
+	NewAPIKeyRepositoryCrypto,
 	NewGroupRepository,
 	NewAdminGroupRepository,
 	NewCompositeModelRouteRepository,
@@ -79,7 +79,9 @@ var ProviderSet = wire.NewSet(
 	NewPromoCodeRepository,
 	NewAnnouncementRepository,
 	NewAnnouncementReadRepository,
-	NewUsageLogRepository,
+	// 用 Crypto 版：用量日志附带 APIKey 供展示，drop 明文列后明文只能从密文解。
+	// 换这里而不是只手改 wire_gen —— 否则下一次 `wire` 会把它覆盖回旧构造。
+	NewUsageLogRepositoryCrypto,
 	NewUsageBillingRepository,
 	NewBatchImageRepository,
 	NewGeminiCachedContentRepository,

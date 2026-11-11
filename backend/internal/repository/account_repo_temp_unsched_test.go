@@ -60,11 +60,11 @@ func TestAccountRepository_GrokCredentialConditionalMutationsAreEligibleAndAtomi
 		require.Contains(t, normalized, "a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW()")
 		require.Contains(t, normalized, "a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW()")
 		require.Contains(t, normalized, "a.overload_until IS NULL OR a.overload_until <= NOW()")
-		require.Contains(t, normalized, "a.credentials = $7::jsonb")
+		require.Contains(t, normalized, "a.credentials_hash = $11")
 		require.Contains(t, normalized, "a.proxy_id IS NOT DISTINCT FROM $8")
 		require.Contains(t, normalized, "NOT EXISTS ( SELECT 1 FROM proxies p")
 		require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
-		require.Len(t, exec.execArgs[0], 10)
+		require.Len(t, exec.execArgs[0], 11)
 		require.Equal(t, snapshot.CredentialsJSON, exec.execArgs[0][6])
 		require.Equal(t, &proxyID, exec.execArgs[0][7])
 		require.Equal(t, string(service.GrokCredentialReasonProxyInvalid), exec.execArgs[0][8])
@@ -88,10 +88,10 @@ func TestAccountRepository_GrokCredentialConditionalMutationsAreEligibleAndAtomi
 		require.Contains(t, normalized, "a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW()")
 		require.Contains(t, normalized, "a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW()")
 		require.Contains(t, normalized, "a.overload_until IS NULL OR a.overload_until <= NOW()")
-		require.Contains(t, normalized, "a.credentials = $7::jsonb")
+		require.Contains(t, normalized, "a.credentials_hash = $10")
 		require.Contains(t, normalized, "a.proxy_id IS NOT DISTINCT FROM $8")
 		require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
-		require.Len(t, exec.execArgs[0], 9)
+		require.Len(t, exec.execArgs[0], 10)
 		require.Equal(t, snapshot.CredentialsJSON, exec.execArgs[0][6])
 		require.Equal(t, &proxyID, exec.execArgs[0][7])
 		require.Equal(t, service.SchedulerOutboxEventAccountChanged, exec.execArgs[0][8])
@@ -156,8 +156,10 @@ func TestAccountRepository_SetGrokOAuthErrorIfCredentialsUnchanged_RequiresActiv
 	require.Contains(t, normalized, "platform = $4")
 	require.Contains(t, normalized, "type = $5")
 	require.Contains(t, normalized, "status = $6")
-	require.Contains(t, normalized, "credentials = $7::jsonb")
-	require.Contains(t, normalized, "NULLIF(BTRIM(a.credentials->>'refresh_token'), '') IS NULL")
+	require.Contains(t, normalized, "credentials_hash = $9")
+	// 该谓词已搬到 Go（先返回 false,nil），SQL 里 MUST 不再依赖明文列——
+	// 这是阶段四 drop 明文列的前提之一。
+	require.NotContains(t, normalized, "refresh_token")
 	require.Len(t, exec.execArgs, 1)
 	require.Equal(t, service.StatusActive, exec.execArgs[0][5])
 	require.Contains(t, exec.execArgs[0][6], `"_token_version":7`)
@@ -200,13 +202,13 @@ func TestAccountRepository_SetGrokOAuthRefreshErrorIfCredentialsUnchanged_UsesAt
 	require.False(t, applied)
 	require.Len(t, exec.execQueries, 1)
 	normalized := normalizeSQLWhitespace(exec.execQueries[0])
-	require.Contains(t, normalized, "credentials = $7::jsonb")
+	require.Contains(t, normalized, "credentials_hash = $10")
 	require.Contains(t, normalized, "proxy_id IS NOT DISTINCT FROM $8")
 	require.NotContains(t, normalized, "credentials->>'refresh_token'",
 		"background invalid_grant CAS must accept the attempted refresh token; only reconciliation requires it missing")
 	require.Equal(t, &proxyID, exec.execArgs[0][7])
 	require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
-	require.Len(t, exec.execArgs[0], 9)
+	require.Len(t, exec.execArgs[0], 10)
 }
 
 func TestAccountRepository_SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnchanged_UsesAttemptCredentialsAndProxy(t *testing.T) {
@@ -227,10 +229,10 @@ func TestAccountRepository_SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnch
 	require.False(t, applied)
 	require.Len(t, exec.execQueries, 1)
 	normalized := normalizeSQLWhitespace(exec.execQueries[0])
-	require.Contains(t, normalized, "credentials = $7::jsonb")
+	require.Contains(t, normalized, "credentials_hash = $10")
 	require.Contains(t, normalized, "proxy_id IS NOT DISTINCT FROM $8")
 	require.Contains(t, normalized, "a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until < $1")
-	require.Len(t, exec.execArgs[0], 9)
+	require.Len(t, exec.execArgs[0], 10)
 	require.Equal(t, &proxyID, exec.execArgs[0][7])
 	require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
 }
@@ -254,11 +256,27 @@ func TestAccountRepository_UpdateGrokOAuthCredentialsIfUnchanged_UsesExactAttemp
 	normalized := normalizeSQLWhitespace(exec.execQueries[0])
 	require.Contains(t, normalized, "WITH updated AS")
 	require.Contains(t, normalized, "credentials = $1::jsonb")
-	require.Contains(t, normalized, "credentials = $5::jsonb")
+	require.NotContains(t, normalized, "AND a.credentials = $5::jsonb")
 	require.Contains(t, normalized, "proxy_id IS NOT DISTINCT FROM $6")
 	require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
-	require.Len(t, exec.execArgs[0], 7)
+	// 双写派生列（阶段一）：整份替换能算准派生值，所以这里必须真写而非置空。
+	require.Contains(t, normalized, "credentials_hash = $12")
+	require.Contains(t, normalized, "credentials_api_key_hash = $11")
+	require.Len(t, exec.execArgs[0], 11)
 	require.Equal(t, &proxyID, exec.execArgs[0][5])
+
+	// $9 是密文列：repo 用 newAccountRepositoryWithSQL 构造（cryptor=nil），
+	// 所以必须为 nil —— 不是空串。"nil 就写 NULL" 是刻意的：让读路径回落明文，
+	// 而不是把空串当密文去解密。
+	require.Nil(t, exec.execArgs[0][8])
+
+	// $10 是 sha256(规范化明文)，$11 是 sha256(api_key)。
+	// 这份凭据没有 api_key，所以 $11 必须是 nil 而不是空串的 sha256。
+	hash, ok := exec.execArgs[0][9].(*string)
+	require.True(t, ok, "credentials_hash 必须是指针，nil 才表示列写 NULL")
+	require.NotNil(t, hash)
+	require.Len(t, *hash, 64)
+	require.Nil(t, exec.execArgs[0][10], "无 api_key 时指纹必须是 NULL")
 }
 
 func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T) {
@@ -296,8 +314,11 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T)
 	require.Contains(t, normalized, "platform = ANY($1)")
 	require.NotContains(t, normalized, "platform IN ('anthropic'",
 		"candidate platforms must come from the refresher registry instead of a second hard-coded list")
-	require.Contains(t, normalized, "credentials ? 'refresh_token'")
-	require.Contains(t, normalized, "btrim(credentials->>'refresh_token') <> ''")
+	// 站点 A 方案 ①：候选筛选改读 credentials_meta 里的派生事实（加密后密文不透明，
+	// SQL 无法判断密钥子键是否存在）。断言同时要求旧谓词不再出现。
+	require.Contains(t, normalized, `credentials_meta @> '{"has_refresh_token": true}'`)
+	require.NotContains(t, normalized, "credentials ? 'refresh_token'")
+	require.NotContains(t, normalized, "credentials->>'refresh_token'")
 	require.Contains(t, normalized, "temp_unschedulable_until > NOW()")
 	require.Contains(t, normalized, "temp_unschedulable_reason LIKE 'token refresh retry exhausted:%'")
 	require.Contains(t, normalized, "IS NOT TRUE",
@@ -381,6 +402,13 @@ type recordingSQLExecutor struct {
 	afterExec   func()
 	execQueries []string
 	execArgs    [][]any
+
+	// queryRows / queryQueries / queryArgs 让需要"回读"的路径（BulkUpdate 合并后
+	// 重新推导派生列）在单测里也能跑。为 nil 时保持旧行为（返回 ErrNoRows），
+	// 这样不关心回读的既有用例完全不受影响。
+	queryRows    func(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	queryQueries []string
+	queryArgs    [][]any
 }
 
 func (e *recordingSQLExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
@@ -396,5 +424,25 @@ func (e *recordingSQLExecutor) ExecContext(ctx context.Context, query string, ar
 }
 
 func (e *recordingSQLExecutor) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if e.queryRows != nil {
+		e.queryQueries = append(e.queryQueries, query)
+		e.queryArgs = append(e.queryArgs, append([]any(nil), args...))
+		return e.queryRows(ctx, query, args...)
+	}
 	return nil, sql.ErrNoRows
+}
+
+// emptyCredentialQueryRows 让 recordingSQLExecutor 的"回读"返回**空结果集**而不是
+// ErrNoRows——真实执行器在"没有匹配行"时就是返回空结果集。
+// 返回 ErrNoRows 会让 BulkUpdate 的合并后推导误以为是故障。
+func emptyCredentialQueryRows(t *testing.T) func(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectQuery("SELECT id, credentials").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "credentials"}))
+	return func(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+		return db.QueryContext(ctx, query, args...)
+	}
 }
