@@ -60,15 +60,31 @@ full_read_ok() {
   "$PG_RESTORE" -f /dev/null "$dump" >/dev/null 2>"$errfile"
 }
 
-# 逐行比对密文指纹（md5 足够——这里判的是"是不是同一串字节"，不是抗碰撞）。
+# 逐行比对某一列的指纹（md5 足够——这里判的是"是不是同一串字节"，不是抗碰撞）。
 # 比 count(*) 更严：能抓出"行数对但内容被截断/替换"的情况。
-compare_ciphertext() {
-  local src="$1" dst="$2" work="$3"
-  local src_fp="$work/src.fp" dst_fp="$work/dst.fp"
-  psql -d "$src" -tAc "SELECT id || ':' || coalesce(md5(credentials_encrypted),'-') FROM accounts ORDER BY id" >"$src_fp"
-  psql -d "$dst" -tAc "SELECT id || ':' || coalesce(md5(credentials_encrypted),'-') FROM accounts ORDER BY id" >"$dst_fp"
+compare_column() {
+  local src="$1" dst="$2" work="$3" table="$4" column="$5"
+  # 工作目录必须自己建：重定向写进不存在的目录会返回非零，于是"写文件失败"会被
+  # 静默读成"两库不一致"（我第一版自检就这么假绿过一次）。
+  mkdir -p "$work"
+  local src_fp="$work/src.$table.$column.fp" dst_fp="$work/dst.$table.$column.fp"
+  psql -d "$src" -tAc "SELECT id || ':' || coalesce(md5($column),'-') FROM $table ORDER BY id" >"$src_fp"
+  psql -d "$dst" -tAc "SELECT id || ':' || coalesce(md5($column),'-') FROM $table ORDER BY id" >"$dst_fp"
   diff -q "$src_fp" "$dst_fp" >/dev/null || { diff "$src_fp" "$dst_fp" | head -10 >&2; return 1; }
   printf '%s' "$(wc -l <"$src_fp" | tr -d ' ')"
+}
+
+# 判据 3：**两张表的密文列都要比**。
+#
+# 只比 accounts 是漏的：`api_keys.key_encrypted` 在 drop 之后同样是明文的唯一副本，
+# 它被截断/替换照样会让"备份能用"这个结论变成假话。判据必须对准坏的那个本身，
+# 而不是它旁边那个看起来更重要的列。
+compare_ciphertext() {
+  local src="$1" dst="$2" work="$3" rows
+  rows=$(compare_column "$src" "$dst" "$work" accounts credentials_encrypted) || return 1
+  printf 'accounts.credentials_encrypted %s 行；' "$rows"
+  rows=$(compare_column "$src" "$dst" "$work" api_keys key_encrypted) || return 1
+  printf 'api_keys.key_encrypted %s 行' "$rows"
 }
 
 # 泄漏计数（出现次数，不是行数）。
@@ -86,15 +102,21 @@ leak_count() {
 }
 
 # ── 演练主体 ────────────────────────────────────────────────────────────────
-# run_drill <源DSN> <工作目录> <期望> ；期望 ∈ interactive | expect-leaks | expect-clean
-# 结束时导出 DRILL_DUMP / DRILL_RESTORE_DB 供自检复用。
+# run_drill <源DSN> <工作目录> <期望> [恢复库名]
+# 期望 ∈ interactive | expect-leaks | expect-clean
+# 恢复库名由调用方给：自检会在子 shell 里跑"错期望"探针，库名若在函数内部生成，
+# 子 shell 就登记不到父 shell 的清理表里，必然留下野库。
+# 结束时导出 DRILL_DUMP 供自检复用。
 run_drill() {
   local src="$1" work="$2" expect="$3"
+  local restore_db="${4:-}"
+  if [ -z "$restore_db" ]; then
+    restore_db="sub2api_drill_restore_$$_$RANDOM"
+    DBS_TO_DROP+=("$restore_db")
+  fi
   mkdir -p "$work"
   local dump="$work/credential-drill.dump"
-  local restore_db="sub2api_drill_restore_$$_$RANDOM"
-  DBS_TO_DROP+=("$restore_db")
-  DRILL_DUMP="$dump"; DRILL_RESTORE_DB="$restore_db"
+  DRILL_DUMP="$dump"
 
   log "工作目录: $work"
 
@@ -130,7 +152,7 @@ run_drill() {
 
   local rows
   rows=$(compare_ciphertext "$src" "$restore_db" "$work") || fail "密文列在恢复库与源库不一致——备份不可用"
-  log "       判据 3 密文指纹逐一相同（$rows 行）"
+  log "       判据 3 密文指纹逐一相同（${rows}）"
 
   # 4) 泄漏判据
   local leaks
@@ -226,20 +248,34 @@ SQL
 }
 
 run_self_test() {
+  local mismatch_db="sub2api_drill_mismatch_$$"
   local pre="sub2api_drill_fx_pre_$$" post="sub2api_drill_fx_post_$$" corrupt="sub2api_drill_fx_corrupt_$$"
+  local a_db="sub2api_drill_A_$$" b_db="sub2api_drill_B_$$"
   local work
   work="$(mktemp -d)"
-  DBS_TO_DROP+=("$pre" "$post" "$corrupt")
+  # 显式给了库名就必须显式登记清理：write_drill 只在**自己生成**名字时才登记，
+  # 漏登记的结果是演练跑完留下野库（第一次跑 E 探针时就这么漏了两个）。
+  DBS_TO_DROP+=("$pre" "$post" "$corrupt" "$mismatch_db" "$a_db" "$b_db")
   log "自检开始（工作目录 ${work}）"
 
   seed_fixture "$pre" yes
   seed_fixture "$post" no
 
   log "── 自检 A：明文列尚在 → 判据 4 必须命中 ──"
-  run_drill "$pre" "$work/pre" expect-leaks
+  run_drill "$pre" "$work/pre" expect-leaks "$a_db"
 
   log "── 自检 B：明文列已 drop → 判据 4 必须为 0 ──"
-  run_drill "$post" "$work/post" expect-clean
+  run_drill "$post" "$work/post" expect-clean "$b_db"
+
+  # 期望值写反时必须失败。少了这一条，A/B "两档都通过"无法区分
+  # "判据真的在判"与"判据是空的"——空断言同样能让两边都过。
+  # 放在子 shell 里跑是因为 fail 会 exit 1，正好用来判退出码；
+  # 库名由父 shell 给，否则子 shell 登记不进清理表，会留野库。
+  log "── 自检 E：期望值写反时自检必须失败（证明 A/B 不是空断言）──"
+  if ( run_drill "$post" "$work/mismatch" expect-leaks "$mismatch_db" ) >/dev/null 2>&1; then
+    fail "自检 E 失效：明文已 drop 的库用 expect-leaks 竟然通过 —— 期望分支是空的"
+  fi
+  log "       错期望按预期失败"
 
   log "── 自检 C：截断包上，pg_restore -l 绿而完整读红 ──"
   local dump="$DRILL_DUMP" trunc="$work/truncated.dump"
@@ -253,14 +289,33 @@ run_self_test() {
   [ "$toc_rc" -eq 0 ] || fail "自检 C 前提不成立：-l 在截断包上报错了；这个版本的 TOC 或许不在文件头，注释需订正"
   [ "$read_rc" -ne 0 ] || fail "自检 C 失效：完整读**没**发现截断 —— 判据 1 是永远绿的假门"
 
-  log "── 自检 D：把恢复库里一处密文翻一个字节 → 判据 3 必须打红 ──"
-  createdb "$corrupt"
-  "$PG_RESTORE" -d "$corrupt" --no-owner --no-privileges "$dump" >/dev/null 2>&1 || fail "自检 D 准备失败：无法恢复"
-  psql -q -d "$corrupt" -c "UPDATE accounts SET credentials_encrypted = credentials_encrypted || 'X' WHERE id = 1" >/dev/null
-  if compare_ciphertext "$post" "$corrupt" "$work/corrupt" >/dev/null 2>&1; then
-    fail "自检 D 失效：密文已被改一个字节，判据 3 仍然通过 —— 是假门"
+  log "── 自检 D：把恢复库里一处密文翻一个字节 → 判据 3 必须打红（两列各验一次）──"
+  local table column db
+  for probe in "accounts credentials_encrypted" "api_keys key_encrypted"; do
+    set -- $probe; table="$1"; column="$2"
+    db="${corrupt}_${table}"
+    DBS_TO_DROP+=("$db")
+    createdb "$db"
+    "$PG_RESTORE" -d "$db" --no-owner --no-privileges "$dump" >/dev/null 2>&1 || fail "自检 D 准备失败：无法恢复"
+    # 先证明"没坏的时候比对是通过的"。少了这一步，一个**永远失败**的比对函数
+    # 也能让下面的负例通过 —— 那样这条自检本身就是假绿的（我第一版就栽在这里：
+    # 重定向写进不存在的目录 → 比对恒失败 → 负例"按预期打红"，其实什么都没验）。
+    if ! compare_ciphertext "$post" "$db" "$work/intact.$table" >/dev/null 2>&1; then
+      fail "自检 D 前提不成立：未损坏的恢复库上判据 3 就不通过，无法据此判断负例"
+    fi
+    psql -q -d "$db" -c "UPDATE $table SET $column = $column || 'X' WHERE id = 1" >/dev/null
+    if compare_ciphertext "$post" "$db" "$work/corrupt.$table" >/dev/null 2>&1; then
+      fail "自检 D 失效：$table.$column 已被改一个字节，判据 3 仍然通过 —— 这列是没被比对的假覆盖"
+    fi
+    log "       $table.${column}：未损坏时通过、改一字节后打红"
+  done
+
+  # 证明新增的 api_keys 覆盖不是装饰：在**上面那个 api_keys 已损坏的库**上，
+  # 只比 accounts 仍然通过 —— 也就是说旧版判据会把这份坏备份判成"可用"。
+  if ! compare_column "$post" "${corrupt}_api_keys" "$work/old-scope" accounts credentials_encrypted >/dev/null 2>&1; then
+    fail "自检 D 前提不成立：该库的 accounts 列也不一致，无法证明新增覆盖是必要的"
   fi
-  log "       判据 3 按预期打红"
+  log "       旧版（只比 accounts）在同一个坏库上仍然通过 —— 新增的 api_keys 覆盖确实必要"
 
   log "自检全部通过：三条判据都能分辨好坏（不是永真条件）"
   log "临时库将在退出时清理：${DBS_TO_DROP[*]}"
