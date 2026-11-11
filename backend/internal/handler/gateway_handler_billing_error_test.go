@@ -60,8 +60,12 @@ func TestExtractQuotaResetSeconds_T19_HappyPath(t *testing.T) {
 		"window_resets_at": time.Now().Add(10 * time.Second).UTC().Format(time.RFC3339),
 	})
 	got := extractQuotaResetSeconds(err)
-	if got < 10 || got > 11 {
-		t.Errorf("T19: got %d, want 10 or 11 (math.Ceil boundary)", got)
+	// 下界必须是 9 而不是 10：这条用例把"现在+10s"格式化到**秒**再断言剩余 ≈10s，
+	// 而格式化会丢掉小数部分；并行跑全量测试时，"构造错误"到"测量"之间若超过 1s
+	// （调度抖动），合法结果就是 9。上界 11 覆盖 Ceil 与秒级截断的另一个方向。
+	// 断言意图仍是"约 10 秒"，不是精确值——改成 9 只是去掉对机器负载的依赖。
+	if got < 9 || got > 11 {
+		t.Errorf("T19: got %d, want 9..11 (≈10s with second-precision truncation)", got)
 	}
 }
 

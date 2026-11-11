@@ -142,6 +142,9 @@ type usageLogRepository struct {
 	client *dbent.Client
 	sql    sqlExecutor
 	db     *sql.DB
+	// cryptor 用于从 `api_keys.key_encrypted` 解出明文（drop 明文列之后那是唯一副本）。
+	// nil 时（单测/未配置）退回明文列兜底，行为与引入前一致。
+	cryptor service.SecretEncryptor
 
 	createBatchOnce     sync.Once
 	createBatchCh       chan usageLogCreateRequest
@@ -152,6 +155,14 @@ type usageLogRepository struct {
 
 func NewUsageLogRepository(client *dbent.Client, sqlDB *sql.DB) service.UsageLogRepository {
 	return newUsageLogRepositoryWithSQL(client, sqlDB)
+}
+
+// NewUsageLogRepositoryCrypto 带加密器：用量日志会附带 APIKey 实体供展示，
+// 而 drop `api_keys.key` 之后展示用的明文只能从 `key_encrypted` 解出来。
+func NewUsageLogRepositoryCrypto(client *dbent.Client, sqlDB *sql.DB, cryptor service.SecretEncryptor) service.UsageLogRepository {
+	repo := newUsageLogRepositoryWithSQL(client, sqlDB)
+	repo.cryptor = cryptor
+	return repo
 }
 
 func newUsageLogRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *usageLogRepository {

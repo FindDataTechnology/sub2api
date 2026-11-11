@@ -38,6 +38,19 @@ func (APIKey) Fields() []ent.Field {
 			MaxLen(128).
 			NotEmpty().
 			Unique(),
+		// key_hash: sha256(key) 的 hex，用于"拿 key 找行"而不必解密任何东西。
+		// 可空：迁移完成前为 NULL（Postgres 的唯一索引允许多个 NULL），
+		// 迁移完成后由应用层保证写入。
+		field.String("key_hash").
+			MaxLen(64).
+			Optional().
+			Nillable().
+			Unique(),
+		// key_encrypted: key 的 AES-256-GCM 密文。为空表示该行尚未迁移，
+		// 读路径回落到明文列 key 并打点计数。
+		field.String("key_encrypted").
+			Optional().
+			Nillable(),
 		field.String("name").
 			MaxLen(100).
 			NotEmpty(),

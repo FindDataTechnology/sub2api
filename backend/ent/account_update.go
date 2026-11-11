@@ -125,6 +125,72 @@ func (_u *AccountUpdate) SetCredentials(v map[string]interface{}) *AccountUpdate
 	return _u
 }
 
+// SetCredentialsMeta sets the "credentials_meta" field.
+func (_u *AccountUpdate) SetCredentialsMeta(v map[string]interface{}) *AccountUpdate {
+	_u.mutation.SetCredentialsMeta(v)
+	return _u
+}
+
+// SetCredentialsEncrypted sets the "credentials_encrypted" field.
+func (_u *AccountUpdate) SetCredentialsEncrypted(v string) *AccountUpdate {
+	_u.mutation.SetCredentialsEncrypted(v)
+	return _u
+}
+
+// SetNillableCredentialsEncrypted sets the "credentials_encrypted" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableCredentialsEncrypted(v *string) *AccountUpdate {
+	if v != nil {
+		_u.SetCredentialsEncrypted(*v)
+	}
+	return _u
+}
+
+// ClearCredentialsEncrypted clears the value of the "credentials_encrypted" field.
+func (_u *AccountUpdate) ClearCredentialsEncrypted() *AccountUpdate {
+	_u.mutation.ClearCredentialsEncrypted()
+	return _u
+}
+
+// SetCredentialsHash sets the "credentials_hash" field.
+func (_u *AccountUpdate) SetCredentialsHash(v string) *AccountUpdate {
+	_u.mutation.SetCredentialsHash(v)
+	return _u
+}
+
+// SetNillableCredentialsHash sets the "credentials_hash" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableCredentialsHash(v *string) *AccountUpdate {
+	if v != nil {
+		_u.SetCredentialsHash(*v)
+	}
+	return _u
+}
+
+// ClearCredentialsHash clears the value of the "credentials_hash" field.
+func (_u *AccountUpdate) ClearCredentialsHash() *AccountUpdate {
+	_u.mutation.ClearCredentialsHash()
+	return _u
+}
+
+// SetCredentialsAPIKeyHash sets the "credentials_api_key_hash" field.
+func (_u *AccountUpdate) SetCredentialsAPIKeyHash(v string) *AccountUpdate {
+	_u.mutation.SetCredentialsAPIKeyHash(v)
+	return _u
+}
+
+// SetNillableCredentialsAPIKeyHash sets the "credentials_api_key_hash" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableCredentialsAPIKeyHash(v *string) *AccountUpdate {
+	if v != nil {
+		_u.SetCredentialsAPIKeyHash(*v)
+	}
+	return _u
+}
+
+// ClearCredentialsAPIKeyHash clears the value of the "credentials_api_key_hash" field.
+func (_u *AccountUpdate) ClearCredentialsAPIKeyHash() *AccountUpdate {
+	_u.mutation.ClearCredentialsAPIKeyHash()
+	return _u
+}
+
 // SetExtra sets the "extra" field.
 func (_u *AccountUpdate) SetExtra(v map[string]interface{}) *AccountUpdate {
 	_u.mutation.SetExtra(v)
@@ -772,6 +838,16 @@ func (_u *AccountUpdate) check() error {
 			return &ValidationError{Name: "type", err: fmt.Errorf(`ent: validator failed for field "Account.type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.CredentialsHash(); ok {
+		if err := account.CredentialsHashValidator(v); err != nil {
+			return &ValidationError{Name: "credentials_hash", err: fmt.Errorf(`ent: validator failed for field "Account.credentials_hash": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.CredentialsAPIKeyHash(); ok {
+		if err := account.CredentialsAPIKeyHashValidator(v); err != nil {
+			return &ValidationError{Name: "credentials_api_key_hash", err: fmt.Errorf(`ent: validator failed for field "Account.credentials_api_key_hash": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := account.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Account.status": %w`, err)}
@@ -828,6 +904,27 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Credentials(); ok {
 		_spec.SetField(account.FieldCredentials, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.CredentialsMeta(); ok {
+		_spec.SetField(account.FieldCredentialsMeta, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.CredentialsEncrypted(); ok {
+		_spec.SetField(account.FieldCredentialsEncrypted, field.TypeString, value)
+	}
+	if _u.mutation.CredentialsEncryptedCleared() {
+		_spec.ClearField(account.FieldCredentialsEncrypted, field.TypeString)
+	}
+	if value, ok := _u.mutation.CredentialsHash(); ok {
+		_spec.SetField(account.FieldCredentialsHash, field.TypeString, value)
+	}
+	if _u.mutation.CredentialsHashCleared() {
+		_spec.ClearField(account.FieldCredentialsHash, field.TypeString)
+	}
+	if value, ok := _u.mutation.CredentialsAPIKeyHash(); ok {
+		_spec.SetField(account.FieldCredentialsAPIKeyHash, field.TypeString, value)
+	}
+	if _u.mutation.CredentialsAPIKeyHashCleared() {
+		_spec.ClearField(account.FieldCredentialsAPIKeyHash, field.TypeString)
 	}
 	if value, ok := _u.mutation.Extra(); ok {
 		_spec.SetField(account.FieldExtra, field.TypeJSON, value)
@@ -1262,6 +1359,72 @@ func (_u *AccountUpdateOne) SetNillableType(v *string) *AccountUpdateOne {
 // SetCredentials sets the "credentials" field.
 func (_u *AccountUpdateOne) SetCredentials(v map[string]interface{}) *AccountUpdateOne {
 	_u.mutation.SetCredentials(v)
+	return _u
+}
+
+// SetCredentialsMeta sets the "credentials_meta" field.
+func (_u *AccountUpdateOne) SetCredentialsMeta(v map[string]interface{}) *AccountUpdateOne {
+	_u.mutation.SetCredentialsMeta(v)
+	return _u
+}
+
+// SetCredentialsEncrypted sets the "credentials_encrypted" field.
+func (_u *AccountUpdateOne) SetCredentialsEncrypted(v string) *AccountUpdateOne {
+	_u.mutation.SetCredentialsEncrypted(v)
+	return _u
+}
+
+// SetNillableCredentialsEncrypted sets the "credentials_encrypted" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableCredentialsEncrypted(v *string) *AccountUpdateOne {
+	if v != nil {
+		_u.SetCredentialsEncrypted(*v)
+	}
+	return _u
+}
+
+// ClearCredentialsEncrypted clears the value of the "credentials_encrypted" field.
+func (_u *AccountUpdateOne) ClearCredentialsEncrypted() *AccountUpdateOne {
+	_u.mutation.ClearCredentialsEncrypted()
+	return _u
+}
+
+// SetCredentialsHash sets the "credentials_hash" field.
+func (_u *AccountUpdateOne) SetCredentialsHash(v string) *AccountUpdateOne {
+	_u.mutation.SetCredentialsHash(v)
+	return _u
+}
+
+// SetNillableCredentialsHash sets the "credentials_hash" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableCredentialsHash(v *string) *AccountUpdateOne {
+	if v != nil {
+		_u.SetCredentialsHash(*v)
+	}
+	return _u
+}
+
+// ClearCredentialsHash clears the value of the "credentials_hash" field.
+func (_u *AccountUpdateOne) ClearCredentialsHash() *AccountUpdateOne {
+	_u.mutation.ClearCredentialsHash()
+	return _u
+}
+
+// SetCredentialsAPIKeyHash sets the "credentials_api_key_hash" field.
+func (_u *AccountUpdateOne) SetCredentialsAPIKeyHash(v string) *AccountUpdateOne {
+	_u.mutation.SetCredentialsAPIKeyHash(v)
+	return _u
+}
+
+// SetNillableCredentialsAPIKeyHash sets the "credentials_api_key_hash" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableCredentialsAPIKeyHash(v *string) *AccountUpdateOne {
+	if v != nil {
+		_u.SetCredentialsAPIKeyHash(*v)
+	}
+	return _u
+}
+
+// ClearCredentialsAPIKeyHash clears the value of the "credentials_api_key_hash" field.
+func (_u *AccountUpdateOne) ClearCredentialsAPIKeyHash() *AccountUpdateOne {
+	_u.mutation.ClearCredentialsAPIKeyHash()
 	return _u
 }
 
@@ -1925,6 +2088,16 @@ func (_u *AccountUpdateOne) check() error {
 			return &ValidationError{Name: "type", err: fmt.Errorf(`ent: validator failed for field "Account.type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.CredentialsHash(); ok {
+		if err := account.CredentialsHashValidator(v); err != nil {
+			return &ValidationError{Name: "credentials_hash", err: fmt.Errorf(`ent: validator failed for field "Account.credentials_hash": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.CredentialsAPIKeyHash(); ok {
+		if err := account.CredentialsAPIKeyHashValidator(v); err != nil {
+			return &ValidationError{Name: "credentials_api_key_hash", err: fmt.Errorf(`ent: validator failed for field "Account.credentials_api_key_hash": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.Status(); ok {
 		if err := account.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Account.status": %w`, err)}
@@ -1998,6 +2171,27 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if value, ok := _u.mutation.Credentials(); ok {
 		_spec.SetField(account.FieldCredentials, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.CredentialsMeta(); ok {
+		_spec.SetField(account.FieldCredentialsMeta, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.CredentialsEncrypted(); ok {
+		_spec.SetField(account.FieldCredentialsEncrypted, field.TypeString, value)
+	}
+	if _u.mutation.CredentialsEncryptedCleared() {
+		_spec.ClearField(account.FieldCredentialsEncrypted, field.TypeString)
+	}
+	if value, ok := _u.mutation.CredentialsHash(); ok {
+		_spec.SetField(account.FieldCredentialsHash, field.TypeString, value)
+	}
+	if _u.mutation.CredentialsHashCleared() {
+		_spec.ClearField(account.FieldCredentialsHash, field.TypeString)
+	}
+	if value, ok := _u.mutation.CredentialsAPIKeyHash(); ok {
+		_spec.SetField(account.FieldCredentialsAPIKeyHash, field.TypeString, value)
+	}
+	if _u.mutation.CredentialsAPIKeyHashCleared() {
+		_spec.ClearField(account.FieldCredentialsAPIKeyHash, field.TypeString)
 	}
 	if value, ok := _u.mutation.Extra(); ok {
 		_spec.SetField(account.FieldExtra, field.TypeJSON, value)
