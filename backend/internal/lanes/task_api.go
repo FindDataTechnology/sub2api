@@ -27,16 +27,22 @@ import (
 
 // TaskLane 是任务车道的运行时。
 type TaskLane struct {
-	exec    *taskExecutor
+	// exec 保留具体类型：装配期要往里塞 engine。
+	exec *taskExecutor
+	// runner 是调度与端点实际依赖的接口（生产即 exec，测试可换成桩）。
+	runner  taskRunner
 	apiKeys *service.APIKeyService
 
 	inflight  atomic.Int64
 	startOnce sync.Once
 	nowFn     func() time.Time // 测试可注入
+	// inlineExec 让调度器在 tick 内同步执行（仅测试用）。
+	// 生产必须异步：一个慢上游不能把心跳卡住，那会让 deadline 淘汰停摆。
+	inlineExec bool
 }
 
 func newTaskLane(exec *taskExecutor, apiKeys *service.APIKeyService) *TaskLane {
-	return &TaskLane{exec: exec, apiKeys: apiKeys, nowFn: time.Now}
+	return &TaskLane{exec: exec, runner: exec, apiKeys: apiKeys, nowFn: time.Now}
 }
 
 func (t *TaskLane) now() time.Time {
@@ -203,7 +209,7 @@ func (t *TaskLane) Submit(c *gin.Context) {
 // submitNow：立刻重放一次。成功才落行（容量不足返回 429 且不建行，见 task 2.2）。
 func (t *TaskLane) submitNow(c *gin.Context, store *service.LanesTaskStore, job *service.LanesTaskJob, estimate costEstimate) {
 	requestID := taskNowRequestID()
-	out := t.exec.runWithRequestID(c.Request.Context(), job, requestID)
+	out := t.runner.runWithRequestID(c.Request.Context(), job, requestID)
 	status := out.HTTPStatus
 
 	resultBody, truncated := truncateJSON(out.Body)

@@ -321,7 +321,11 @@ WHERE id = $1`, jobID, at, reason)
 }
 
 // Finish 落终态。终态只有 completed / failed 两种，且必须带可读 reason（失败时）。
-func (s *LanesTaskStore) Finish(ctx context.Context, jobID int64, status string, resultStatus *int, resultBody []byte, truncated bool, cost *float64, reason string) error {
+//
+// attempts 必须在这里**一起写**：只有 Reschedule 会推进 attempts 的话，
+// 首次就成功的任务会永久停在 attempts=0 —— 概览里的 avg_attempts 与
+// 端点回报的 attempts 都会撒谎（实测被 dbtest 抓到）。
+func (s *LanesTaskStore) Finish(ctx context.Context, jobID int64, attempts int, status string, resultStatus *int, resultBody []byte, truncated bool, cost *float64, reason string) error {
 	if err := s.ready(); err != nil {
 		return err
 	}
@@ -335,10 +339,10 @@ func (s *LanesTaskStore) Finish(ctx context.Context, jobID int64, status string,
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE lanes_task_jobs
-SET status = $2, result_status = $3, result_body = $4::jsonb, result_truncated = $5,
-    actual_cost_usd = COALESCE($6, actual_cost_usd), reason = $7,
+SET attempts = GREATEST(attempts, $2), status = $3, result_status = $4, result_body = $5::jsonb,
+    result_truncated = $6, actual_cost_usd = COALESCE($7, actual_cost_usd), reason = $8,
     finished_at = now(), updated_at = now()
-WHERE id = $1`, jobID, status, resultStatus, body, truncated, cost, reasonArg)
+WHERE id = $1`, jobID, attempts, status, resultStatus, body, truncated, cost, reasonArg)
 	return err
 }
 

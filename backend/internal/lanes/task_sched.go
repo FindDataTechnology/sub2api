@@ -27,7 +27,7 @@ import (
 
 func (t *TaskLane) startScheduler() {
 	t.startOnce.Do(func() {
-		if t.exec == nil || t.apiKeys == nil {
+		if t.runner == nil {
 			return
 		}
 		go t.schedulerLoop()
@@ -69,6 +69,11 @@ func (t *TaskLane) schedulerTick(ctx context.Context) {
 		return
 	}
 	for _, job := range jobs {
+		if t.inlineExec {
+			// 测试路径：同步跑完，调用方 tick 返回即可断言库里的状态。
+			t.execute(ctx, job)
+			continue
+		}
 		t.inflight.Add(1)
 		go func(j *service.LanesTaskJob) {
 			defer t.inflight.Add(-1)
@@ -91,7 +96,7 @@ func (t *TaskLane) execute(ctx context.Context, job *service.LanesTaskJob) {
 		logger.LegacyPrintf("lanes.tasks", "begin attempt failed: job=%d err=%v", job.ID, err)
 	}
 
-	out := t.exec.runWithRequestID(ctx, job, requestID)
+	out := t.runner.runWithRequestID(ctx, job, requestID)
 	cost, _ := store.UsageCostByRequestID(ctx, requestID)
 
 	_ = store.FinishAttempt(ctx, job.ID, attemptNo, out.HTTPStatus, out.Outcome, out.ErrMsg, cost, out.EndedAt)
@@ -100,7 +105,7 @@ func (t *TaskLane) execute(ctx context.Context, job *service.LanesTaskJob) {
 	case out.Outcome == AttemptCompleted:
 		body, truncated := truncateJSON(out.Body)
 		status := out.HTTPStatus
-		if err := store.Finish(ctx, job.ID, TaskStatusCompleted, &status, body, truncated, cost, ""); err != nil {
+		if err := store.Finish(ctx, job.ID, attemptNo, TaskStatusCompleted, &status, body, truncated, cost, ""); err != nil {
 			logger.LegacyPrintf("lanes.tasks", "finish completed failed: job=%d err=%v", job.ID, err)
 		}
 		return
@@ -110,11 +115,11 @@ func (t *TaskLane) execute(ctx context.Context, job *service.LanesTaskJob) {
 		// 截止硬约束：重排后的**最早**完成时刻若已越过 deadline，就不要再排 ——
 		// 直接 failed(deadline_exceeded)，理由可读。
 		if job.DeadlineAt != nil && nextAttemptAt.Add(taskEstDuration).After(*job.DeadlineAt) {
-			t.failDeadline(ctx, store, job, out)
+			t.failDeadline(ctx, store, job, out, attemptNo)
 			return
 		}
 		if attemptNo >= job.MaxAttempts {
-			t.failPermanent(ctx, store, job, out)
+			t.failPermanent(ctx, store, job, out, attemptNo)
 			return
 		}
 		reason := out.Outcome + ": " + trimOrEmpty(out.ErrMsg)
@@ -124,19 +129,19 @@ func (t *TaskLane) execute(ctx context.Context, job *service.LanesTaskJob) {
 		return
 
 	default:
-		t.failPermanent(ctx, store, job, out)
+		t.failPermanent(ctx, store, job, out, attemptNo)
 	}
 }
 
-func (t *TaskLane) failDeadline(ctx context.Context, store *service.LanesTaskStore, job *service.LanesTaskJob, out attemptOutcome) {
+func (t *TaskLane) failDeadline(ctx context.Context, store *service.LanesTaskStore, job *service.LanesTaskJob, out attemptOutcome, attemptNo int) {
 	reason := ReasonDeadlineExceeded + ": " + out.Outcome
 	if out.ErrMsg != "" {
 		reason += " (" + out.ErrMsg + ")"
 	}
-	_ = store.Finish(ctx, job.ID, TaskStatusFailed, nil, nil, false, nil, reason)
+	_ = store.Finish(ctx, job.ID, attemptNo, TaskStatusFailed, nil, nil, false, nil, reason)
 }
 
-func (t *TaskLane) failPermanent(ctx context.Context, store *service.LanesTaskStore, job *service.LanesTaskJob, out attemptOutcome) {
+func (t *TaskLane) failPermanent(ctx context.Context, store *service.LanesTaskStore, job *service.LanesTaskJob, out attemptOutcome, attemptNo int) {
 	status := out.HTTPStatus
 	reason := ReasonClientError
 	if out.Outcome == AttemptFailedPermanent {
@@ -148,5 +153,5 @@ func (t *TaskLane) failPermanent(ctx context.Context, store *service.LanesTaskSt
 	if out.ErrMsg != "" {
 		reason += ": " + out.ErrMsg
 	}
-	_ = store.Finish(ctx, job.ID, TaskStatusFailed, &status, nil, false, nil, reason)
+	_ = store.Finish(ctx, job.ID, attemptNo, TaskStatusFailed, &status, nil, false, nil, reason)
 }
