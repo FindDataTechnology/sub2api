@@ -45,6 +45,10 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 任务车道存储（add-ciyuan-task-lane）：DB 只在这一层可得，故与
+	// service.SetOpenAIGatewayService 同一惯例用包级 setter 注入。
+	// 未注入时任务端点返回 503，不假装执行（「没跑」必须可分）。
+	service.SetLanesTaskStore(service.NewLanesTaskStore(db))
 	userRepository := repository.NewUserRepository(client, db)
 	redeemCodeRepository := repository.NewRedeemCodeRepository(client)
 	redisClient := repository.ProvideRedis(configConfig)

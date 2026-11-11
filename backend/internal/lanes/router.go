@@ -33,6 +33,26 @@ func RegisterGatewayLanes(group *gin.RouterGroup, app *Lanes) {
 	// 能力快照（ciyuan-capability-endpoint）：只读、不计费。命名空间化以避开上游
 	// 未来新增的 /v1/* 端点，与 /v1/sub2api/billing 同构。
 	group.GET("/ciyuan/capabilities", func(c *gin.Context) { ServeCapabilities(c, app) })
+	// 任务车道（add-ciyuan-task-lane D1）：submit/poll 同形于 batch_image。
+	// 挂在组门之前：任务本身不绑 chat 分组语义，真正的执行重放时才走完整组门。
+	group.POST("/ciyuan/tasks", func(c *gin.Context) { serveTaskSubmit(c, app) })
+	group.GET("/ciyuan/tasks/:id", func(c *gin.Context) { serveTaskGet(c, app) })
+}
+
+func serveTaskSubmit(c *gin.Context, app *Lanes) {
+	if app == nil || app.Tasks == nil {
+		taskUnavailable(c)
+		return
+	}
+	app.Tasks.Submit(c)
+}
+
+func serveTaskGet(c *gin.Context, app *Lanes) {
+	if app == nil || app.Tasks == nil {
+		taskUnavailable(c)
+		return
+	}
+	app.Tasks.Get(c)
 }
 
 func serveLane(c *gin.Context, lane string, app *Lanes) {

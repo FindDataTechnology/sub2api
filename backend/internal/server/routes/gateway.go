@@ -182,6 +182,9 @@ func RegisterGatewayRoutes(
 	// 服务取 OpenAI 网关 handler / service 只读访问器（缝点台账§二；实现全在
 	// internal/lanes，只增）。
 	lanesApp := lanes.NewFromOpenAIHandler(h.OpenAIGateway, h.Gateway.LanesCapabilityModels, apiKeyService, cfg)
+	// 任务车道需要引擎本身：它把请求**重放回同一个引擎**来复用鉴权/分组门/
+	// 账号调度/计费（add-ciyuan-task-lane D5，避免第二套账）。
+	lanesApp.SetEngine(r)
 
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
