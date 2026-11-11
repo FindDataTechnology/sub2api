@@ -213,7 +213,8 @@ func (t *TaskLane) submitNow(c *gin.Context, store *service.LanesTaskStore, job 
 	status := out.HTTPStatus
 
 	resultBody, truncated := truncateJSON(out.Body)
-	cost := t.lookupCost(c, requestID)
+	// mode=now 有人等，只等 3 拍（≤300ms）；取不到就留空，绝不编造。
+	cost := waitActualCost(c.Request.Context(), store, requestID, 3)
 
 	switch out.Outcome {
 	case AttemptCompleted:
@@ -379,18 +380,6 @@ func toEstimateJSON(e costEstimate) *taskEstimateJSON {
 		BaseAvgCostUSD: e.BaseAvgCostUSD, AtPeakUSD: e.AtPeakUSD,
 		AtOffpeakUSD: e.AtOffpeakUSD, Source: e.Source,
 	}
-}
-
-func (t *TaskLane) lookupCost(c *gin.Context, requestID string) *float64 {
-	store := service.GetLanesTaskStore()
-	if store == nil {
-		return nil
-	}
-	cost, err := store.UsageCostByRequestID(c.Request.Context(), requestID)
-	if err != nil {
-		return nil
-	}
-	return cost
 }
 
 func parseDeadline(body []byte, now time.Time) (*time.Time, error) {
