@@ -170,7 +170,7 @@ func backfillAccountCredentialColumns(
 				result.AccountsUpdated++
 				continue
 			}
-			if _, err := db.ExecContext(ctx, `
+			res, err := db.ExecContext(ctx, `
 				UPDATE accounts
 				SET credentials_meta = $2::jsonb,
 					credentials_encrypted = $3,
@@ -178,9 +178,16 @@ func backfillAccountCredentialColumns(
 					credentials_api_key_hash = $5
 				WHERE id = $1 AND `+credentialNeedsBackfillSQL,
 				r.id, string(metaJSON), columns.Encrypted, columns.Hash, columns.APIKeyHash,
-			); err != nil {
+			)
+			if err != nil {
 				result.AccountsFailed++
 				logf("[CredentialBackfill] account %d: update: %v", r.id, err)
+				continue
+			}
+			// 只有真的写进去才算 updated。回填是在**活库**上跑的：语句里的谓词
+			// 就是防覆盖的闸（应用刚写过派生列 → 谓词为假 → 0 行），此时计 updated
+			// 会让"updated=5000"变成一个没人能核对的数。
+			if n, aerr := res.RowsAffected(); aerr == nil && n == 0 {
 				continue
 			}
 			result.AccountsUpdated++
@@ -276,14 +283,19 @@ func backfillAPIKeyColumns(
 				result.APIKeysUpdated++
 				continue
 			}
-			if _, err := db.ExecContext(ctx, `
+			res, err := db.ExecContext(ctx, `
 				UPDATE api_keys
 				SET key_hash = $2, key_encrypted = $3
 				WHERE id = $1 AND `+apiKeyNeedsBackfillSQL,
 				r.id, hash, encrypted,
-			); err != nil {
+			)
+			if err != nil {
 				result.APIKeysFailed++
 				logf("[CredentialBackfill] api_key %d: update: %v", r.id, err)
+				continue
+			}
+			// 同上：谓词为假（并发方已补好）时 0 行，不算 updated。
+			if n, aerr := res.RowsAffected(); aerr == nil && n == 0 {
 				continue
 			}
 			result.APIKeysUpdated++
