@@ -5,6 +5,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -79,6 +80,16 @@ func (l *Lanes) SetEngine(r *gin.Engine) {
 		return
 	}
 	l.Tasks.exec.engine = r
+	// 启动时把三件前提摊在日志里。
+	//
+	// 为什么要说：store 未注入时端点恒 503、调度器每 2s 空转后直接 return，两件事
+	// 都**不报错**。2026-11-11 线上哑了一版就是这么来的 —— wire 重新生成把
+	// service.SetLanesTaskStore(...) 静默覆盖掉，编译过、单测绿、pod 健康，
+	// 只有真打端点才看到 503；而「没接线」和「没流量」在日志里长得一模一样。
+	storeOK := service.GetLanesTaskStore() != nil
+	logger.LegacyPrintf("lanes.startup",
+		"[TaskLane] store_injected=%t engine_wired=%t scheduler_will_run=%t (store_injected=false ⇒ 装配层漏了 service.SetLanesTaskStore，任务端点会恒 503)",
+		storeOK, r != nil, l.Tasks.runner != nil && storeOK)
 	// 调度器在装配完成时就启动，而不是等第一个 defer 提交才启动：
 	// 否则**进程重启前入队的任务永远不会被领取**（库里躺着 pending，没有任何人在看）。
 	// startOnce 保证只启动一次。
