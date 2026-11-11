@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/lib/pq"
@@ -71,18 +72,36 @@ func TestStage4_RawSQLOnPlaintextColumnsFailsAfterDrop(t *testing.T) {
 		sql    string
 		args   []any
 		column string // 这条语句依赖的明文列（accounts=credentials / api_keys=key）
+		// drift 是这条语句在**源码里**必须仍然存在的片段（比较时去掉所有空白）。
+		// 为什么要有它：作业单是从源码抄下来的，而源码会改 ——
+		// 2026-11-11 实测就抓到一次：`UpdateGrokOAuthCredentialsIfUnchanged` 已经改成
+		// 写 credentials_meta=$8 / credentials_encrypted=$9 / WHERE credentials_hash=$12，
+		// 作业单里还是旧的 `$2` 两参数版本。抄件陈旧之后，这条测试仍然绿，
+		// 但它验的已经不是生产里跑的那条语句了。
+		drift struct {
+			file      string
+			mustMatch string
+		}
 	}
 	statements := []rawStatement{
 		{
-			// 读：account_credentials_crypto.go:322 deriveCredentialColumnsAfterMerge
+			// 读：account_credentials_crypto.go deriveCredentialColumnsAfterMerge
 			// BulkUpdate 在 SQL 侧合并凭据后，同事务回读明文重算派生列。
 			name:   "deriveCredentialColumnsAfterMerge.read",
 			column: "credentials",
 			sql:    `SELECT id, credentials FROM accounts WHERE id = ANY($1) AND deleted_at IS NULL`,
 			args:   []any{pq.Array([]int64{1})},
+			drift: struct{ file, mustMatch string }{
+				file:      "account_credentials_crypto.go",
+				mustMatch: "SELECT id, credentials FROM accounts WHERE id = ANY($1) AND deleted_at IS NULL",
+			},
 		},
 		{
-			// 写：account_repo.go:1718 UpdateGrokOAuthCredentialsIfUnchanged
+			// 写：account_repo.go UpdateGrokOAuthCredentialsIfUnchanged（整份替换）
+			//
+			// 这里把生产的 WHERE（platform/type/credentials_hash/proxy_id 四个条件）简化成
+			// `id = 1`，参数因此重编号为 $1..$6 —— 但**写的那一列没变**（credentials），
+			// 这正是本测试要验的东西。生产形态由下面的 drift 片段单独钉住。
 			name:   "UpdateGrokOAuthCredentialsIfUnchanged",
 			column: "credentials",
 			sql: `
@@ -90,20 +109,33 @@ func TestStage4_RawSQLOnPlaintextColumnsFailsAfterDrop(t *testing.T) {
 			UPDATE accounts AS a
 			SET credentials = $1::jsonb,
 				credentials_meta = $2::jsonb,
+				credentials_encrypted = $3,
+				credentials_hash = $4,
+				credentials_api_key_hash = $5,
 				updated_at = NOW()
 			WHERE a.id = 1 AND a.deleted_at IS NULL
 			RETURNING a.id
 			)
-			INSERT INTO scheduler_outbox (event_type, account_id)
-			SELECT 'account.changed', updated.id FROM updated`,
-			args: []any{[]byte(`{"k":"v"}`), []byte(`{}`)},
+			INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
+			SELECT $6, updated.id, NULL, NULL FROM updated`,
+			args: []any{
+				[]byte(`{"k":"v"}`), []byte(`{}`), "ciph", "hash", "akhash", "account.changed",
+			},
+			drift: struct{ file, mustMatch string }{
+				file:      "account_repo.go",
+				mustMatch: "SET credentials = $1::jsonb, credentials_meta = $8::jsonb, credentials_encrypted = $9, credentials_hash = $10, credentials_api_key_hash = $11",
+			},
 		},
 		{
-			// 写：account_repo.go:3228 BulkUpdate 的合并子句
+			// 写：account_repo.go BulkUpdate 的合并子句（占位符是拼出来的）
 			name:   "BulkUpdate.merge",
 			column: "credentials",
 			sql:    `UPDATE accounts SET credentials = COALESCE(credentials, '{}'::jsonb) || $1::jsonb WHERE id = 1`,
 			args:   []any{[]byte(`{"k":"v"}`)},
+			drift: struct{ file, mustMatch string }{
+				file:      "account_repo.go",
+				mustMatch: `"credentials = COALESCE(credentials, '{}'::jsonb) || "`,
+			},
 		},
 		{
 			// 写：UpdateCredentials 的整份替换
@@ -111,6 +143,10 @@ func TestStage4_RawSQLOnPlaintextColumnsFailsAfterDrop(t *testing.T) {
 			column: "credentials",
 			sql:    `UPDATE accounts SET credentials = $1::jsonb WHERE id = 1`,
 			args:   []any{[]byte(`{"k":"v"}`)},
+			drift: struct{ file, mustMatch string }{
+				file:      "account_repo.go",
+				mustMatch: "UPDATE accounts SET credentials = $1::jsonb,",
+			},
 		},
 		{
 			// 写：api_key_repo.go deleteWithTombstone —— 软删时把 key 改写为墓碑值。
@@ -120,7 +156,26 @@ func TestStage4_RawSQLOnPlaintextColumnsFailsAfterDrop(t *testing.T) {
 			column: "key",
 			sql:    `UPDATE api_keys SET key = $1, deleted_at = NOW(), updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL`,
 			args:   []any{"__deleted__sk-worklist", int64(1)},
+			drift: struct{ file, mustMatch string }{
+				file:      "api_key_repo.go",
+				mustMatch: "UPDATE api_keys SET key = $1, deleted_at = NOW(), updated_at = NOW()",
+			},
 		},
+	}
+
+	// ── 抄件漂移守卫：作业单里的语句必须仍在源码里存在 ──
+	// 不在 = 源码已经改过/搬走，抄件陈旧；此时下面那些"drop 之后会炸"的结论
+	// 说的已不是生产里跑的那条语句。修法：按源码更新作业单条目（并想清楚新形态是否还依赖明文列）。
+	squash := func(s string) string {
+		return strings.Join(strings.Fields(s), "")
+	}
+	for _, stmt := range statements {
+		raw, err := os.ReadFile(stmt.drift.file)
+		require.NoError(t, err, "读源码文件 %s 失败", stmt.drift.file)
+		require.Contains(t, squash(string(raw)), squash(stmt.drift.mustMatch),
+			"%s 在源码里已经不存在了 —— 作业单是陈旧的抄件。\n"+
+				"按 %s 的当前形态更新这条语句，并确认它还依赖明文列。",
+			stmt.name, stmt.drift.file)
 	}
 
 	// 读与写用同一个探针：Query 既能跑 SELECT 也能跑 UPDATE（不取结果即可）。
