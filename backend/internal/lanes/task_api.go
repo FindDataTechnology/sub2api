@@ -1,6 +1,7 @@
 package lanes
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -232,6 +234,14 @@ func (t *TaskLane) submitNow(c *gin.Context, store *service.LanesTaskStore, job 
 			taskStoreError(c, err)
 			return
 		}
+		// mode=now 也必须留一条尝试记录：attempts 表是「每次执行」的唯一账本，
+		// 漏掉它会同时造成两处失真 ——
+		//   ① 观测 SQL 的按类成功率/ p95 只统计 defer 流量（§⑤）；
+		//   ② 血缘抽查按 attempts.request_id 关联，mode=now 会误显示「未开票」（§⑥）。
+		// 仅重复提交（duplicate）不记，避免把同一行算两次。
+		if !dup {
+			recordNowAttempt(c.Request.Context(), store, id, requestID, out, cost)
+		}
 		c.JSON(http.StatusOK, taskSubmitResponse{
 			TaskID: id, Status: TaskStatusCompleted, Mode: TaskModeNow, Duplicate: dup,
 			Result: json.RawMessage(resultBody), Estimate: toEstimateJSON(estimate),
@@ -380,6 +390,16 @@ func toEstimateJSON(e costEstimate) *taskEstimateJSON {
 		BaseAvgCostUSD: e.BaseAvgCostUSD, AtPeakUSD: e.AtPeakUSD,
 		AtOffpeakUSD: e.AtOffpeakUSD, Source: e.Source,
 	}
+}
+
+// recordNowAttempt 为 mode=now 补写尝试行（成功且非重复时）。
+// 失败不写：mode=now 失败不建任务行，也就没有 job_id 可挂（与「不建行」一致）。
+func recordNowAttempt(ctx context.Context, store *service.LanesTaskStore, jobID int64, requestID string, out attemptOutcome, cost *float64) {
+	if err := store.BeginAttempt(ctx, jobID, 1, requestID, out.StartedAt); err != nil {
+		logger.LegacyPrintf("lanes.tasks", "begin attempt (now) failed: job=%d err=%v", jobID, err)
+		return
+	}
+	_ = store.FinishAttempt(ctx, jobID, 1, out.HTTPStatus, out.Outcome, out.ErrMsg, cost, out.EndedAt)
 }
 
 func parseDeadline(body []byte, now time.Time) (*time.Time, error) {
