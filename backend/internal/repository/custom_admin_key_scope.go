@@ -13,6 +13,7 @@ import (
 	dbaccountgroup "github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	dbpredicate "github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -159,6 +160,14 @@ func scopedAdminAccountPredicates(policy adminaccess.Policy, permission string) 
 
 // ScopedAdminCodexCandidates 按导入身份逐级匹配，最多返回一个候选的身份字段。
 // 不向应用加载其他账户的凭证；真正合并凭证仍在写事务锁内进行。
+//
+// 匹配在 **Go 侧**完成（design.md A4 选项 C）：原实现把身份谓词拼成 SQL
+// （`"accounts"."credentials"->'key'`），drop 明文列之后整族失效。现在只把
+// **权限范围**（scope）+ platform/type 留在 SQL 里，身份匹配改在解密后的凭据上做。
+// 顺序语义不变：先命中者胜，同一谓词内取 id 最大者（与原来的 ORDER BY id DESC LIMIT 1 等价）。
+//
+// 等价性由 TestScopedCodexIdentityPredicates_SQLAndGoAgree 守着（每条谓词 × 每行）；
+// 反向实验证明 trim / 大小写 / 数字归一化 / 顺序任一处漂移都会让它变红。
 func (r *accountRepository) ScopedAdminCodexCandidates(ctx context.Context, identity service.ScopedCodexIdentity) ([]service.Account, error) {
 	principal := adminaccess.FromContext(ctx)
 	if principal == nil {
@@ -168,29 +177,53 @@ func (r *accountRepository) ScopedAdminCodexCandidates(ctx context.Context, iden
 	if len(scope) == 0 {
 		return []service.Account{}, nil
 	}
-	for _, match := range scopedCodexIdentityPredicates(identity) {
-		var rows []struct {
-			ID          int64
-			Credentials json.RawMessage
-		}
-		err := r.accountListFilteredQuery(service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "").
-			Where(dbaccount.Or(scope...), match).Order(dbaccount.ByID(entsql.OrderDesc())).Limit(1).
-			Select(dbaccount.FieldID).Aggregate(func(s *entsql.Selector) string {
-			c := s.C(dbaccount.FieldCredentials)
-			return "jsonb_build_object('chatgpt_account_id', " + c + "->'chatgpt_account_id', 'chatgpt_user_id', " + c + "->'chatgpt_user_id', 'email', " + c + "->'email', 'access_token', " + c + "->'access_token') AS credentials"
-		}).Scan(ctx, &rows)
-		if err != nil {
-			return nil, err
-		}
-		if len(rows) != 0 {
-			var credentials map[string]any
-			if err := json.Unmarshal(rows[0].Credentials, &credentials); err != nil {
-				return nil, err
-			}
-			return []service.Account{{ID: rows[0].ID, Credentials: credentials}}, nil
-		}
+	if len(scopedCodexIdentityMatchers(identity)) == 0 {
+		// 身份字段一个都没给：原实现此时不生成任何谓词，直接空结果。
+		return []service.Account{}, nil
 	}
-	return []service.Account{}, nil
+
+	// 一次取候选再在 Go 里筛。代价是这条路径要解密全部候选行 —— 它是人工触发的
+	// 低频导入，不是请求热路径（A4 选项 C 的取舍）。
+	// **不加 LIMIT**：加了就把"按 id 降序第一个命中"变成"前 N 行里第一个命中"，语义变了。
+	rows, err := r.accountListFilteredQuery(service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "").
+		Where(dbaccount.Or(scope...)).
+		Order(dbaccount.ByID(entsql.OrderDesc())).
+		Select(dbaccount.FieldID, dbaccount.FieldCredentials, dbaccount.FieldCredentialsEncrypted).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	resolved := make(map[int64]map[string]any, len(rows))
+	picked := scopedCodexIdentityPick(rows, func(m *dbent.Account) map[string]any {
+		creds, err := r.credentialsFromEntity(m)
+		if err != nil {
+			// 解密失败就跳过这一行，但必须留痕：静默跳过会让"导入时找不到已有账号"
+			// 变成一个查不出原因的现象。注意返回 nil 不会误命中任何谓词
+			// ——每条谓词都在与一个非空值比较。
+			logger.LegacyPrintf("repository.scopedadmin",
+				"[ScopedCodexIdentity] cannot resolve credentials for account=%d: %v; skipping candidate", m.ID, err)
+			return nil
+		}
+		resolved[m.ID] = creds
+		return creds
+	}, identity)
+	if picked == nil {
+		return []service.Account{}, nil
+	}
+
+	// 只回传这四个身份字段（与原 SQL 的 jsonb_build_object 投影一致），
+	// 不把整份凭据交给调用方。
+	creds := resolved[picked.ID]
+	return []service.Account{{
+		ID: picked.ID,
+		Credentials: map[string]any{
+			"chatgpt_account_id": creds["chatgpt_account_id"],
+			"chatgpt_user_id":    creds["chatgpt_user_id"],
+			"email":              creds["email"],
+			"access_token":       creds["access_token"],
+		},
+	}}, nil
 }
 
 // 与导入器的 account_user / user / email / access / account 优先级保持一致。
