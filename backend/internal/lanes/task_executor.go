@@ -34,8 +34,15 @@ import (
 
 // taskExecutor 执行一次尝试。
 type taskExecutor struct {
-	engine  *gin.Engine
-	apiKeys *service.APIKeyService
+	engine *gin.Engine
+	// resolveKey 把 api_key_id 还原成可用的明文凭据（重放要带 Authorization）。
+	//
+	// 抽成函数而不是直接依赖 APIKeyService：
+	//   - 测试可注入，不必装配整套 service；
+	//   - key 落库形态一旦改成「哈希 + 单独加密副本」
+	//     （harden-sub2api-credential-storage 在途），只需换这里的实现，
+	//     车道的重放逻辑一行不改。
+	resolveKey func(ctx context.Context, apiKeyID int64) (string, error)
 }
 
 // attemptOutcome 是一次重放的结果。
@@ -126,13 +133,26 @@ func (e *taskExecutor) runWithRequestID(ctx context.Context, job *service.LanesT
 	res := attemptOutcome{RequestID: requestID, StartedAt: time.Now()}
 	defer func() { res.EndedAt = time.Now() }()
 
+	// 已经在库里跑不了就别发：gin 的 ServeHTTP **不检查** ctx 取消，
+	// 直接调用会让一个已断开的 mode=now 调用继续烧上游与计费。
+	// 调度器用的是 Background，永远不受此影响（defer 任务不该被客户端断连取消）。
+	if err := ctx.Err(); err != nil {
+		res.Outcome = AttemptFailedPermanent
+		res.ErrMsg = "request cancelled before execution: " + err.Error()
+		return res
+	}
 	if e.engine == nil {
 		res.Outcome = AttemptFailedPermanent
 		res.ErrMsg = "task lane executor not wired (engine missing)"
 		return res
 	}
-	key, err := e.apiKeys.GetByID(ctx, job.APIKeyID)
-	if err != nil || key == nil || strings.TrimSpace(key.Key) == "" {
+	if e.resolveKey == nil {
+		res.Outcome = AttemptFailedPermanent
+		res.ErrMsg = "task lane executor not wired (key resolver missing)"
+		return res
+	}
+	rawKey, err := e.resolveKey(ctx, job.APIKeyID)
+	if err != nil || strings.TrimSpace(rawKey) == "" {
 		res.Outcome = AttemptFailedPermanent
 		res.ErrMsg = ReasonAPIKeyUnavailable + ": cannot resolve api key for execution"
 		return res
@@ -153,7 +173,7 @@ func (e *taskExecutor) runWithRequestID(ctx context.Context, job *service.LanesT
 		return res
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+key.Key)
+	req.Header.Set("Authorization", "Bearer "+rawKey)
 	// UA 用可识别值：任务车道的上游日志里要能一眼看出「这是重放，不是客户端直连」。
 	// 不存客户端原始 UA —— 它对计费与准入无作用，存下来只是多一份可泄漏的指纹。
 	req.Header.Set("User-Agent", "ciyuan-task-lane/1")

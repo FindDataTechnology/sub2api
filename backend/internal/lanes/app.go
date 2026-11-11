@@ -45,13 +45,29 @@ func NewFromOpenAIHandler(openAI *handler.OpenAIGatewayHandler, capabilityModels
 	return &Lanes{
 		Meter: NewMeter(openAI.LanesBillingCacheService(), apiKeyService, gatewayService.RecordUsage, cfg),
 		Pool:  NewPool(repo, repo),
-		Tasks: newTaskLane(&taskExecutor{apiKeys: apiKeyService}, apiKeyService),
+		Tasks: newTaskLane(&taskExecutor{resolveKey: apiKeyResolver(apiKeyService)}, apiKeyService),
 		adapters: map[string]LaneAdapter{
 			LaneRerank:    NewRerankAdapter(),
 			LaneWebsearch: NewWebsearchAdapter(),
 			LaneAudio:     NewAudioAdapter(),
 		},
 		models: capabilityModels,
+	}
+}
+
+// apiKeyResolver 把 APIKeyService 适配成执行器要的取 key 函数。
+// 取不到或已停用的 key 返回空串 —— 由执行器落成 failed(api_key_unavailable)，
+// 而不是静默重试到 deadline。
+func apiKeyResolver(apiKeys *service.APIKeyService) func(context.Context, int64) (string, error) {
+	return func(ctx context.Context, apiKeyID int64) (string, error) {
+		if apiKeys == nil {
+			return "", nil
+		}
+		key, err := apiKeys.GetByID(ctx, apiKeyID)
+		if err != nil || key == nil || !key.IsActive() {
+			return "", err
+		}
+		return key.Key, nil
 	}
 }
 
