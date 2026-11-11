@@ -2,6 +2,7 @@ package lanes
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
@@ -86,14 +87,23 @@ func (l *Lanes) SetEngine(r *gin.Engine) {
 	// 都**不报错**。2026-11-11 线上哑了一版就是这么来的 —— wire 重新生成把
 	// service.SetLanesTaskStore(...) 静默覆盖掉，编译过、单测绿、pod 健康，
 	// 只有真打端点才看到 503；而「没接线」和「没流量」在日志里长得一模一样。
-	storeOK := service.GetLanesTaskStore() != nil
-	logger.LegacyPrintf("lanes.startup",
-		"[TaskLane] store_injected=%t engine_wired=%t scheduler_will_run=%t (store_injected=false ⇒ 装配层漏了 service.SetLanesTaskStore，任务端点会恒 503)",
-		storeOK, r != nil, l.Tasks.runner != nil && storeOK)
+	logger.LegacyPrintf("lanes.startup", "%s",
+		lanePrereqStatus(service.GetLanesTaskStore() != nil, r != nil, l.Tasks.runner != nil))
 	// 调度器在装配完成时就启动，而不是等第一个 defer 提交才启动：
 	// 否则**进程重启前入队的任务永远不会被领取**（库里躺着 pending，没有任何人在看）。
 	// startOnce 保证只启动一次。
 	l.Tasks.startScheduler()
+}
+
+// lanePrereqStatus 把车道的三条前提压成一行，供启动日志与用例共用同一套判据。
+//
+// scheduler_will_run = runner 有 + store 有：缺 store 时调度器每个 tick 都会在
+// 最前面 return，等于空转（不报错），所以它必须是这条判断的合取项而不是独立字段。
+func lanePrereqStatus(storeInjected, engineWired, runnerReady bool) string {
+	return fmt.Sprintf(
+		"[TaskLane] store_injected=%t engine_wired=%t scheduler_will_run=%t "+
+			"(store_injected=false ⇒ 装配层漏了 service.SetLanesTaskStore，任务端点会恒 503)",
+		storeInjected, engineWired, runnerReady && storeInjected)
 }
 
 // Adapter 返回车道适配器；未落地车道返回 nil（serveLane 保持 501 占位）。
