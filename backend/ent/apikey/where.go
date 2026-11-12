@@ -120,6 +120,26 @@ func ExpiresAt(v time.Time) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldExpiresAt, v))
 }
 
+// ConcurrencyRequest applies equality check predicate on the "concurrency_request" field. It's identical to ConcurrencyRequestEQ.
+func ConcurrencyRequest(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyLimit applies equality check predicate on the "concurrency_limit" field. It's identical to ConcurrencyLimitEQ.
+func ConcurrencyLimit(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldConcurrencyLimit, v))
+}
+
+// RpmLimit applies equality check predicate on the "rpm_limit" field. It's identical to RpmLimitEQ.
+func RpmLimit(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldRpmLimit, v))
+}
+
+// EffectiveAt applies equality check predicate on the "effective_at" field. It's identical to EffectiveAtEQ.
+func EffectiveAt(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldEffectiveAt, v))
+}
+
 // RateLimit5h applies equality check predicate on the "rate_limit_5h" field. It's identical to RateLimit5hEQ.
 func RateLimit5h(v float64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldRateLimit5h, v))
@@ -823,6 +843,176 @@ func ExpiresAtIsNil() predicate.APIKey {
 // ExpiresAtNotNil applies the NotNil predicate on the "expires_at" field.
 func ExpiresAtNotNil() predicate.APIKey {
 	return predicate.APIKey(sql.FieldNotNull(FieldExpiresAt))
+}
+
+// ConcurrencyRequestEQ applies the EQ predicate on the "concurrency_request" field.
+func ConcurrencyRequestEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyRequestNEQ applies the NEQ predicate on the "concurrency_request" field.
+func ConcurrencyRequestNEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyRequestIn applies the In predicate on the "concurrency_request" field.
+func ConcurrencyRequestIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldConcurrencyRequest, vs...))
+}
+
+// ConcurrencyRequestNotIn applies the NotIn predicate on the "concurrency_request" field.
+func ConcurrencyRequestNotIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldConcurrencyRequest, vs...))
+}
+
+// ConcurrencyRequestGT applies the GT predicate on the "concurrency_request" field.
+func ConcurrencyRequestGT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyRequestGTE applies the GTE predicate on the "concurrency_request" field.
+func ConcurrencyRequestGTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyRequestLT applies the LT predicate on the "concurrency_request" field.
+func ConcurrencyRequestLT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyRequestLTE applies the LTE predicate on the "concurrency_request" field.
+func ConcurrencyRequestLTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyLimitEQ applies the EQ predicate on the "concurrency_limit" field.
+func ConcurrencyLimitEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldConcurrencyLimit, v))
+}
+
+// ConcurrencyLimitNEQ applies the NEQ predicate on the "concurrency_limit" field.
+func ConcurrencyLimitNEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldConcurrencyLimit, v))
+}
+
+// ConcurrencyLimitIn applies the In predicate on the "concurrency_limit" field.
+func ConcurrencyLimitIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldConcurrencyLimit, vs...))
+}
+
+// ConcurrencyLimitNotIn applies the NotIn predicate on the "concurrency_limit" field.
+func ConcurrencyLimitNotIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldConcurrencyLimit, vs...))
+}
+
+// ConcurrencyLimitGT applies the GT predicate on the "concurrency_limit" field.
+func ConcurrencyLimitGT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldConcurrencyLimit, v))
+}
+
+// ConcurrencyLimitGTE applies the GTE predicate on the "concurrency_limit" field.
+func ConcurrencyLimitGTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldConcurrencyLimit, v))
+}
+
+// ConcurrencyLimitLT applies the LT predicate on the "concurrency_limit" field.
+func ConcurrencyLimitLT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldConcurrencyLimit, v))
+}
+
+// ConcurrencyLimitLTE applies the LTE predicate on the "concurrency_limit" field.
+func ConcurrencyLimitLTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldConcurrencyLimit, v))
+}
+
+// RpmLimitEQ applies the EQ predicate on the "rpm_limit" field.
+func RpmLimitEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldRpmLimit, v))
+}
+
+// RpmLimitNEQ applies the NEQ predicate on the "rpm_limit" field.
+func RpmLimitNEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldRpmLimit, v))
+}
+
+// RpmLimitIn applies the In predicate on the "rpm_limit" field.
+func RpmLimitIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldRpmLimit, vs...))
+}
+
+// RpmLimitNotIn applies the NotIn predicate on the "rpm_limit" field.
+func RpmLimitNotIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldRpmLimit, vs...))
+}
+
+// RpmLimitGT applies the GT predicate on the "rpm_limit" field.
+func RpmLimitGT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldRpmLimit, v))
+}
+
+// RpmLimitGTE applies the GTE predicate on the "rpm_limit" field.
+func RpmLimitGTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldRpmLimit, v))
+}
+
+// RpmLimitLT applies the LT predicate on the "rpm_limit" field.
+func RpmLimitLT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldRpmLimit, v))
+}
+
+// RpmLimitLTE applies the LTE predicate on the "rpm_limit" field.
+func RpmLimitLTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldRpmLimit, v))
+}
+
+// EffectiveAtEQ applies the EQ predicate on the "effective_at" field.
+func EffectiveAtEQ(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldEffectiveAt, v))
+}
+
+// EffectiveAtNEQ applies the NEQ predicate on the "effective_at" field.
+func EffectiveAtNEQ(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldEffectiveAt, v))
+}
+
+// EffectiveAtIn applies the In predicate on the "effective_at" field.
+func EffectiveAtIn(vs ...time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldEffectiveAt, vs...))
+}
+
+// EffectiveAtNotIn applies the NotIn predicate on the "effective_at" field.
+func EffectiveAtNotIn(vs ...time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldEffectiveAt, vs...))
+}
+
+// EffectiveAtGT applies the GT predicate on the "effective_at" field.
+func EffectiveAtGT(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldEffectiveAt, v))
+}
+
+// EffectiveAtGTE applies the GTE predicate on the "effective_at" field.
+func EffectiveAtGTE(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldEffectiveAt, v))
+}
+
+// EffectiveAtLT applies the LT predicate on the "effective_at" field.
+func EffectiveAtLT(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldEffectiveAt, v))
+}
+
+// EffectiveAtLTE applies the LTE predicate on the "effective_at" field.
+func EffectiveAtLTE(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldEffectiveAt, v))
+}
+
+// EffectiveAtIsNil applies the IsNil predicate on the "effective_at" field.
+func EffectiveAtIsNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldIsNull(FieldEffectiveAt))
+}
+
+// EffectiveAtNotNil applies the NotNil predicate on the "effective_at" field.
+func EffectiveAtNotNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotNull(FieldEffectiveAt))
 }
 
 // RateLimit5hEQ applies the EQ predicate on the "rate_limit_5h" field.
