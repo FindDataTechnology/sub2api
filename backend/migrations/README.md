@@ -12,6 +12,21 @@ Format: `NNN_description.sql`
 
 Example: `017_add_gemini_tier_id.sql`
 
+### 已知重号：`251`（历史事故，**不要重排**）
+
+目录里有两个 251，是两条线并行开发时撞号，且**两个文件都已应用到生产**：
+
+- `251_credential_drop_plaintext_columns.sql`
+- `251_lanes_task_jobs.sql`
+
+runner 用 `sort.Strings(files)` 按**文件名**排序执行，所以顺序是确定的
+（`251_credential_…` 在 `251_lanes_…` 之前），功能上没有错乱。
+
+**不要改名去"修正"它**：`schema_migrations` 按 filename 记 checksum，改名等于让 runner
+把同一个文件当成从未应用过的新迁移再跑一遍，而旧记录永远对不上。接受现状即可。
+
+新增迁移取「当前已占用的最大号 + 1」（现在用到 `253`），别只看"这个名字好像没重"。
+
 ### `_notx.sql` 命名与执行语义（并发索引专用）
 
 当迁移包含 `CREATE INDEX CONCURRENTLY` 或 `DROP INDEX CONCURRENTLY` 时，必须使用 `_notx.sql` 后缀，例如：
@@ -91,6 +106,37 @@ Why?
 - ❌ Delete migration files
 - ❌ Change migration file names
 - ❌ Reorder migration numbers
+
+### ⚠️ `DROP COLUMN` 必须连带检查函数与触发器
+
+Postgres 不会因为某个函数体里还写着 `OLD.<被删列>` 而阻止你删列——两者是解耦的，
+只有**下一次 UPDATE/DELETE 真正触发那个函数**时才会抛
+`record "old" has no field "<列名>"`。而这个异常发生在应用的事务里，往往表现为
+整笔业务回滚，外面看不见"函数坏了"这个事实，只看到"某功能静默不生效"。
+
+2026-11-12 的实例：迁移 251 删掉 `api_keys.key`，但
+`trg_api_keys_auth_cache_invalidation` 引用的函数仍写着 `OLD.key`，于是
+`api_keys` 上任何 UPDATE 都失败 —— 结算事务回滚，`quota_used` 永不累加（key 级限额
+形同虚设）、`DELETE /api/v1/keys/:id` 直接 500，且外部只看到"调用成功但费用没扣"。
+修复见 `253_fix_api_key_cache_invalidation_trigger.sql`。
+
+所以删列的那个迁移里请一并做：
+
+```sql
+-- 1) 先查（写进迁移前的 review，或直接跑一遍）
+SELECT p.proname, t.tgname
+FROM pg_proc p
+JOIN pg_trigger t ON t.tgfoid = p.oid
+WHERE p.prosrc ~ 'OLD\.<列名>\b|NEW\.<列名>\b';
+
+-- 2) 每个命中的函数都在同一个迁移里 CREATE OR REPLACE 掉，改成派生列或去掉
+-- 3) 改完必须用一次真实 UPDATE/DELETE 验证，别只看迁移成功
+```
+
+注意：`CREATE OR REPLACE FUNCTION` 是安全的幂等操作，可以放心写进迁移；
+但**改触发器函数时注意别把已有的二次哈希/二次转换再叠一层**——
+例如 `enqueue_auth_cache_invalidation()` 内部会 sha256 入参，而 `key_hash` 列本身
+已是 sha256(明文)，传进去就是双重哈希。
 
 ### 🔧 If You Accidentally Modified an Applied Migration
 
