@@ -50,6 +50,14 @@ type APIKey struct {
 	QuotaUsed float64 `json:"quota_used,omitempty"`
 	// Expiration time for this API key (null = never expires)
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// Guaranteed concurrency share (0 = no reservation); sum across active keys must not exceed the user's pool
+	ConcurrencyRequest int `json:"concurrency_request,omitempty"`
+	// Hard concurrency ceiling for this key (0 = no extra ceiling; may borrow up to the user pool)
+	ConcurrencyLimit int `json:"concurrency_limit,omitempty"`
+	// Requests-per-minute ceiling for this key (0 = unlimited)
+	RpmLimit int `json:"rpm_limit,omitempty"`
+	// Key becomes usable at this instant (null = effective immediately)
+	EffectiveAt *time.Time `json:"effective_at,omitempty"`
 	// Rate limit in USD per 5 hours (0 = unlimited)
 	RateLimit5h float64 `json:"rate_limit_5h,omitempty"`
 	// Rate limit in USD per day (0 = unlimited)
@@ -127,11 +135,11 @@ func (*APIKey) scanValues(columns []string) ([]any, error) {
 			values[i] = new([]byte)
 		case apikey.FieldQuota, apikey.FieldQuotaUsed, apikey.FieldRateLimit5h, apikey.FieldRateLimit1d, apikey.FieldRateLimit7d, apikey.FieldUsage5h, apikey.FieldUsage1d, apikey.FieldUsage7d:
 			values[i] = new(sql.NullFloat64)
-		case apikey.FieldID, apikey.FieldUserID, apikey.FieldGroupID:
+		case apikey.FieldID, apikey.FieldUserID, apikey.FieldGroupID, apikey.FieldConcurrencyRequest, apikey.FieldConcurrencyLimit, apikey.FieldRpmLimit:
 			values[i] = new(sql.NullInt64)
 		case apikey.FieldKeyHash, apikey.FieldKeyEncrypted, apikey.FieldName, apikey.FieldStatus:
 			values[i] = new(sql.NullString)
-		case apikey.FieldCreatedAt, apikey.FieldUpdatedAt, apikey.FieldDeletedAt, apikey.FieldLastUsedAt, apikey.FieldExpiresAt, apikey.FieldWindow5hStart, apikey.FieldWindow1dStart, apikey.FieldWindow7dStart:
+		case apikey.FieldCreatedAt, apikey.FieldUpdatedAt, apikey.FieldDeletedAt, apikey.FieldLastUsedAt, apikey.FieldExpiresAt, apikey.FieldEffectiveAt, apikey.FieldWindow5hStart, apikey.FieldWindow1dStart, apikey.FieldWindow7dStart:
 			values[i] = new(sql.NullTime)
 		default:
 			values[i] = new(sql.UnknownType)
@@ -253,6 +261,31 @@ func (_m *APIKey) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ExpiresAt = new(time.Time)
 				*_m.ExpiresAt = value.Time
+			}
+		case apikey.FieldConcurrencyRequest:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field concurrency_request", values[i])
+			} else if value.Valid {
+				_m.ConcurrencyRequest = int(value.Int64)
+			}
+		case apikey.FieldConcurrencyLimit:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field concurrency_limit", values[i])
+			} else if value.Valid {
+				_m.ConcurrencyLimit = int(value.Int64)
+			}
+		case apikey.FieldRpmLimit:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field rpm_limit", values[i])
+			} else if value.Valid {
+				_m.RpmLimit = int(value.Int64)
+			}
+		case apikey.FieldEffectiveAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field effective_at", values[i])
+			} else if value.Valid {
+				_m.EffectiveAt = new(time.Time)
+				*_m.EffectiveAt = value.Time
 			}
 		case apikey.FieldRateLimit5h:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -416,6 +449,20 @@ func (_m *APIKey) String() string {
 	builder.WriteString(", ")
 	if v := _m.ExpiresAt; v != nil {
 		builder.WriteString("expires_at=")
+		builder.WriteString(v.Format(time.ANSIC))
+	}
+	builder.WriteString(", ")
+	builder.WriteString("concurrency_request=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ConcurrencyRequest))
+	builder.WriteString(", ")
+	builder.WriteString("concurrency_limit=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ConcurrencyLimit))
+	builder.WriteString(", ")
+	builder.WriteString("rpm_limit=")
+	builder.WriteString(fmt.Sprintf("%v", _m.RpmLimit))
+	builder.WriteString(", ")
+	if v := _m.EffectiveAt; v != nil {
+		builder.WriteString("effective_at=")
 		builder.WriteString(v.Format(time.ANSIC))
 	}
 	builder.WriteString(", ")

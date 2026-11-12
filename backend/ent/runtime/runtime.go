@@ -107,28 +107,40 @@ func init() {
 	apikeyDescQuotaUsed := apikeyFields[10].Descriptor()
 	// apikey.DefaultQuotaUsed holds the default value on creation for the quota_used field.
 	apikey.DefaultQuotaUsed = apikeyDescQuotaUsed.Default.(float64)
+	// apikeyDescConcurrencyRequest is the schema descriptor for concurrency_request field.
+	apikeyDescConcurrencyRequest := apikeyFields[12].Descriptor()
+	// apikey.DefaultConcurrencyRequest holds the default value on creation for the concurrency_request field.
+	apikey.DefaultConcurrencyRequest = apikeyDescConcurrencyRequest.Default.(int)
+	// apikeyDescConcurrencyLimit is the schema descriptor for concurrency_limit field.
+	apikeyDescConcurrencyLimit := apikeyFields[13].Descriptor()
+	// apikey.DefaultConcurrencyLimit holds the default value on creation for the concurrency_limit field.
+	apikey.DefaultConcurrencyLimit = apikeyDescConcurrencyLimit.Default.(int)
+	// apikeyDescRpmLimit is the schema descriptor for rpm_limit field.
+	apikeyDescRpmLimit := apikeyFields[14].Descriptor()
+	// apikey.DefaultRpmLimit holds the default value on creation for the rpm_limit field.
+	apikey.DefaultRpmLimit = apikeyDescRpmLimit.Default.(int)
 	// apikeyDescRateLimit5h is the schema descriptor for rate_limit_5h field.
-	apikeyDescRateLimit5h := apikeyFields[12].Descriptor()
+	apikeyDescRateLimit5h := apikeyFields[16].Descriptor()
 	// apikey.DefaultRateLimit5h holds the default value on creation for the rate_limit_5h field.
 	apikey.DefaultRateLimit5h = apikeyDescRateLimit5h.Default.(float64)
 	// apikeyDescRateLimit1d is the schema descriptor for rate_limit_1d field.
-	apikeyDescRateLimit1d := apikeyFields[13].Descriptor()
+	apikeyDescRateLimit1d := apikeyFields[17].Descriptor()
 	// apikey.DefaultRateLimit1d holds the default value on creation for the rate_limit_1d field.
 	apikey.DefaultRateLimit1d = apikeyDescRateLimit1d.Default.(float64)
 	// apikeyDescRateLimit7d is the schema descriptor for rate_limit_7d field.
-	apikeyDescRateLimit7d := apikeyFields[14].Descriptor()
+	apikeyDescRateLimit7d := apikeyFields[18].Descriptor()
 	// apikey.DefaultRateLimit7d holds the default value on creation for the rate_limit_7d field.
 	apikey.DefaultRateLimit7d = apikeyDescRateLimit7d.Default.(float64)
 	// apikeyDescUsage5h is the schema descriptor for usage_5h field.
-	apikeyDescUsage5h := apikeyFields[15].Descriptor()
+	apikeyDescUsage5h := apikeyFields[19].Descriptor()
 	// apikey.DefaultUsage5h holds the default value on creation for the usage_5h field.
 	apikey.DefaultUsage5h = apikeyDescUsage5h.Default.(float64)
 	// apikeyDescUsage1d is the schema descriptor for usage_1d field.
-	apikeyDescUsage1d := apikeyFields[16].Descriptor()
+	apikeyDescUsage1d := apikeyFields[20].Descriptor()
 	// apikey.DefaultUsage1d holds the default value on creation for the usage_1d field.
 	apikey.DefaultUsage1d = apikeyDescUsage1d.Default.(float64)
 	// apikeyDescUsage7d is the schema descriptor for usage_7d field.
-	apikeyDescUsage7d := apikeyFields[17].Descriptor()
+	apikeyDescUsage7d := apikeyFields[21].Descriptor()
 	// apikey.DefaultUsage7d holds the default value on creation for the usage_7d field.
 	apikey.DefaultUsage7d = apikeyDescUsage7d.Default.(float64)
 	accountMixin := schema.Account{}.Mixin()
