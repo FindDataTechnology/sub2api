@@ -30,8 +30,6 @@ const (
 	FieldPlatform = "platform"
 	// FieldType holds the string denoting the type field in the database.
 	FieldType = "type"
-	// FieldCredentials holds the string denoting the credentials field in the database.
-	FieldCredentials = "credentials"
 	// FieldCredentialsMeta holds the string denoting the credentials_meta field in the database.
 	FieldCredentialsMeta = "credentials_meta"
 	// FieldCredentialsEncrypted holds the string denoting the credentials_encrypted field in the database.
@@ -146,7 +144,6 @@ var Columns = []string{
 	FieldNotes,
 	FieldPlatform,
 	FieldType,
-	FieldCredentials,
 	FieldCredentialsMeta,
 	FieldCredentialsEncrypted,
 	FieldCredentialsHash,
@@ -212,8 +209,6 @@ var (
 	PlatformValidator func(string) error
 	// TypeValidator is a validator for the "type" field. It is called by the builders before save.
 	TypeValidator func(string) error
-	// DefaultCredentials holds the default value on creation for the "credentials" field.
-	DefaultCredentials func() map[string]interface{}
 	// DefaultCredentialsMeta holds the default value on creation for the "credentials_meta" field.
 	DefaultCredentialsMeta func() map[string]interface{}
 	// CredentialsHashValidator is a validator for the "credentials_hash" field. It is called by the builders before save.

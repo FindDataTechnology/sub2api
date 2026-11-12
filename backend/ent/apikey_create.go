@@ -73,12 +73,6 @@ func (_c *APIKeyCreate) SetUserID(v int64) *APIKeyCreate {
 	return _c
 }
 
-// SetKey sets the "key" field.
-func (_c *APIKeyCreate) SetKey(v string) *APIKeyCreate {
-	_c.mutation.SetKey(v)
-	return _c
-}
-
 // SetKeyHash sets the "key_hash" field.
 func (_c *APIKeyCreate) SetKeyHash(v string) *APIKeyCreate {
 	_c.mutation.SetKeyHash(v)
@@ -461,14 +455,6 @@ func (_c *APIKeyCreate) check() error {
 	if _, ok := _c.mutation.UserID(); !ok {
 		return &ValidationError{Name: "user_id", err: errors.New(`ent: missing required field "APIKey.user_id"`)}
 	}
-	if _, ok := _c.mutation.Key(); !ok {
-		return &ValidationError{Name: "key", err: errors.New(`ent: missing required field "APIKey.key"`)}
-	}
-	if v, ok := _c.mutation.Key(); ok {
-		if err := apikey.KeyValidator(v); err != nil {
-			return &ValidationError{Name: "key", err: fmt.Errorf(`ent: validator failed for field "APIKey.key": %w`, err)}
-		}
-	}
 	if v, ok := _c.mutation.KeyHash(); ok {
 		if err := apikey.KeyHashValidator(v); err != nil {
 			return &ValidationError{Name: "key_hash", err: fmt.Errorf(`ent: validator failed for field "APIKey.key_hash": %w`, err)}
@@ -555,10 +541,6 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.DeletedAt(); ok {
 		_spec.SetField(apikey.FieldDeletedAt, field.TypeTime, value)
 		_node.DeletedAt = &value
-	}
-	if value, ok := _c.mutation.Key(); ok {
-		_spec.SetField(apikey.FieldKey, field.TypeString, value)
-		_node.Key = value
 	}
 	if value, ok := _c.mutation.KeyHash(); ok {
 		_spec.SetField(apikey.FieldKeyHash, field.TypeString, value)
@@ -777,18 +759,6 @@ func (u *APIKeyUpsert) SetUserID(v int64) *APIKeyUpsert {
 // UpdateUserID sets the "user_id" field to the value that was provided on create.
 func (u *APIKeyUpsert) UpdateUserID() *APIKeyUpsert {
 	u.SetExcluded(apikey.FieldUserID)
-	return u
-}
-
-// SetKey sets the "key" field.
-func (u *APIKeyUpsert) SetKey(v string) *APIKeyUpsert {
-	u.Set(apikey.FieldKey, v)
-	return u
-}
-
-// UpdateKey sets the "key" field to the value that was provided on create.
-func (u *APIKeyUpsert) UpdateKey() *APIKeyUpsert {
-	u.SetExcluded(apikey.FieldKey)
 	return u
 }
 
@@ -1231,20 +1201,6 @@ func (u *APIKeyUpsertOne) SetUserID(v int64) *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) UpdateUserID() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdateUserID()
-	})
-}
-
-// SetKey sets the "key" field.
-func (u *APIKeyUpsertOne) SetKey(v string) *APIKeyUpsertOne {
-	return u.Update(func(s *APIKeyUpsert) {
-		s.SetKey(v)
-	})
-}
-
-// UpdateKey sets the "key" field to the value that was provided on create.
-func (u *APIKeyUpsertOne) UpdateKey() *APIKeyUpsertOne {
-	return u.Update(func(s *APIKeyUpsert) {
-		s.UpdateKey()
 	})
 }
 
@@ -1911,20 +1867,6 @@ func (u *APIKeyUpsertBulk) SetUserID(v int64) *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) UpdateUserID() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdateUserID()
-	})
-}
-
-// SetKey sets the "key" field.
-func (u *APIKeyUpsertBulk) SetKey(v string) *APIKeyUpsertBulk {
-	return u.Update(func(s *APIKeyUpsert) {
-		s.SetKey(v)
-	})
-}
-
-// UpdateKey sets the "key" field to the value that was provided on create.
-func (u *APIKeyUpsertBulk) UpdateKey() *APIKeyUpsertBulk {
-	return u.Update(func(s *APIKeyUpsert) {
-		s.UpdateKey()
 	})
 }
 

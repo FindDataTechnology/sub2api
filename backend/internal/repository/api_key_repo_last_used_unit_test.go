@@ -56,7 +56,6 @@ func mustCreateAPIKeyRepoAccount(t *testing.T, ctx context.Context, client *dben
 		SetPlatform(service.PlatformOpenAI).
 		SetType(service.AccountTypeAPIKey).
 		SetStatus(service.StatusActive).
-		SetCredentials(map[string]any{"api_key": "sk-test"}).
 		Save(ctx)
 	require.NoError(t, err)
 	return a.ID

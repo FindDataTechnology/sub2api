@@ -33,8 +33,6 @@ type Account struct {
 	Platform string `json:"platform,omitempty"`
 	// Type holds the value of the "type" field.
 	Type string `json:"type,omitempty"`
-	// Credentials holds the value of the "credentials" field.
-	Credentials map[string]interface{} `json:"credentials,omitempty"`
 	// CredentialsMeta holds the value of the "credentials_meta" field.
 	CredentialsMeta map[string]interface{} `json:"credentials_meta,omitempty"`
 	// CredentialsEncrypted holds the value of the "credentials_encrypted" field.
@@ -177,7 +175,7 @@ func (*Account) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case account.FieldCredentials, account.FieldCredentialsMeta, account.FieldExtra:
+		case account.FieldCredentialsMeta, account.FieldExtra:
 			values[i] = new([]byte)
 		case account.FieldAutoPauseOnExpired, account.FieldSchedulable:
 			values[i] = new(sql.NullBool)
@@ -253,14 +251,6 @@ func (_m *Account) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field type", values[i])
 			} else if value.Valid {
 				_m.Type = value.String
-			}
-		case account.FieldCredentials:
-			if value, ok := values[i].(*[]byte); !ok {
-				return fmt.Errorf("unexpected type %T for field credentials", values[i])
-			} else if value != nil && len(*value) > 0 {
-				if err := json.Unmarshal(*value, &_m.Credentials); err != nil {
-					return fmt.Errorf("unmarshal field credentials: %w", err)
-				}
 			}
 		case account.FieldCredentialsMeta:
 			if value, ok := values[i].(*[]byte); !ok {
@@ -536,9 +526,6 @@ func (_m *Account) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("type=")
 	builder.WriteString(_m.Type)
-	builder.WriteString(", ")
-	builder.WriteString("credentials=")
-	builder.WriteString(fmt.Sprintf("%v", _m.Credentials))
 	builder.WriteString(", ")
 	builder.WriteString("credentials_meta=")
 	builder.WriteString(fmt.Sprintf("%v", _m.CredentialsMeta))

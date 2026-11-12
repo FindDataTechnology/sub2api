@@ -396,8 +396,8 @@ func (r *usageLogRepository) loadAPIKeys(ctx context.Context, ids []int64) (map[
 		switch {
 		case keyErr == nil:
 		case errors.Is(keyErr, errNoAPIKeyCiphertext):
-			// 回填窗口内：仍可从明文列取（drop 之后这一支自然消失）
-			key = m.Key
+			// 阶段 5.2：明文列已删除，没有第二副本可退。置空并让下面的日志说明原因
+			key = ""
 		default:
 			logger.LegacyPrintf("repository.usagelog",
 				"[APIKeyLookup] cannot resolve plaintext for id=%d: %v; returning empty key so nothing leaks", m.ID, keyErr)

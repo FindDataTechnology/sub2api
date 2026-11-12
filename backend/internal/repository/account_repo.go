@@ -181,7 +181,8 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		SetNillableNotes(account.Notes).
 		SetPlatform(account.Platform).
 		SetType(account.Type).
-		SetCredentials(normalizeJSONMap(account.Credentials)).
+		// 阶段 5.2：明文列已物理删除。凭据只写三份派生列（下面四行），
+		// 读侧统一走 credentialsFromEntity 解密。
 		SetCredentialsMeta(credColumns.Meta).
 		SetNillableCredentialsEncrypted(credColumns.Encrypted).
 		SetNillableCredentialsHash(credColumns.Hash).
@@ -596,7 +597,7 @@ func (r *accountRepository) updateLockedAccount(
 		SetNillableNotes(account.Notes).
 		SetPlatform(account.Platform).
 		SetType(account.Type).
-		SetCredentials(normalizeJSONMap(account.Credentials)).
+		// 阶段 5.2：明文列已物理删除；密文在下面按 credColumns 写入（含 Clear 分支）。
 		SetCredentialsMeta(credColumns.Meta).
 		SetNillableCredentialsHash(credColumns.Hash).
 		SetNillableCredentialsAPIKeyHash(credColumns.APIKeyHash).
@@ -951,10 +952,31 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 			client = tx.Client()
 		}
 	}
+	// 阶段 5.2：明文列已删除，写派生列。
+	// $3/$4 既用于 SET（写指纹）也用于下面 CASE 的"是否变化"判定：
+	// CASE 与 SET 都按**旧行 + 入参**求值，所以顺序不敏感。
+	credColumns, err := r.credentialCryptoColumnsFor(credentials)
+	if err != nil {
+		return err
+	}
+	// 阶段 5.2：明文列已删，凭据只有密文一条落盘通道。没有加密器时这里会写
+	// credentials_encrypted = NULL —— 那不是"照旧"，而是**静默把凭据删掉**，
+	// 下一次读到该账号就是"没配密钥"，症状退化成上游 401，真因看不见。
+	// 与 mergeAccountCredentialsInTx 保持同一条守卫（宁可写失败，不可写空）。
+	if credColumns.Encrypted == nil && len(credentials) > 0 {
+		return errors.New("update credentials: no encryptor configured (refusing to drop credentials)")
+	}
+	credMetaJSON, err := json.Marshal(credColumns.Meta)
+	if err != nil {
+		return err
+	}
 	result, err := client.ExecContext(ctx, `
 		UPDATE accounts
 		SET
-			credentials = $1::jsonb,
+			credentials_meta = $5::jsonb,
+			credentials_encrypted = $6,
+			credentials_hash = $4,
+			credentials_api_key_hash = $3,
 			extra = CASE
 				-- 正确性依赖（非防御）：OpenCode 分支必须先于 Ollama 分支求值。两分支
 				-- 的 WHEN 并不互斥：Ollama 分支的守卫是宽谓词——NOT(ollamaMatch(old)
@@ -1020,7 +1042,8 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 			END,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
-	`, string(payload), id, credentialAPIKeyHashArg(credentials), credentialHashHex(credentials))
+	`, string(payload), id, credentialAPIKeyHashArg(credentials), credentialHashHex(credentials),
+		string(credMetaJSON), credColumns.Encrypted)
 	if err != nil {
 		return err
 	}
@@ -1702,54 +1725,55 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 	if r == nil || r.sql == nil {
 		return false, errors.New("account repository SQL executor is not configured")
 	}
-	expectedJSON, err := json.Marshal(normalizeJSONMap(expectedCredentials))
-	if err != nil {
-		return false, err
-	}
-	credentialsJSON, err := json.Marshal(normalizeJSONMap(credentials))
-	if err != nil {
-		return false, err
-	}
 	// 双写派生列。这是整份替换（不是合并），所以派生值可以在这里算准。
 	credColumns, err := r.credentialCryptoColumnsFor(credentials)
 	if err != nil {
 		return false, err
 	}
+	// 同 UpdateCredentials：整份替换却没有加密器 = 写 NULL 密文 + 新哈希，
+	// 行上从此"哈希说已更新、密文说没有凭据"，等于静默删凭据。拒绝而不是降级。
+	if credColumns.Encrypted == nil && len(credentials) > 0 {
+		return false, errors.New("update grok oauth credentials: no encryptor configured (refusing to drop credentials)")
+	}
 	metaJSON, err := json.Marshal(credColumns.Meta)
 	if err != nil {
 		return false, err
 	}
+	// 参数按出现顺序排整齐（$1..$10）。这里**同时修掉一个早已存在的 bug**：
+	// 旧版 SQL 引用 `$12` 却只传 11 个参数（$5 从未被引用），Postgres 会直接
+	// 报"bind message supplies 11 parameters, but prepared statement requires 12"
+	// —— 也就是 Grok OAuth 换凭据这条路一调用就失败。
+	// 另外 CAS 条件原本拿 `credentials_hash` 比较 `string(expectedJSON)`（JSON 文本），
+	// 类型都对不上；改为比较**规范化 JSON 的哈希**，那才是这一列的语义。
 	result, err := r.sql.ExecContext(ctx, `
 		WITH updated AS (
 		UPDATE accounts AS a
-		SET credentials = $1::jsonb,
-			credentials_meta = $8::jsonb,
-			credentials_encrypted = $9,
-			credentials_hash = $10,
-			credentials_api_key_hash = $11,
+		SET credentials_meta = $5::jsonb,
+			credentials_encrypted = $6,
+			credentials_hash = $7,
+			credentials_api_key_hash = $8,
 			updated_at = NOW()
-		WHERE a.id = $2
+		WHERE a.id = $1
 			AND a.deleted_at IS NULL
-			AND a.platform = $3
-			AND a.type = $4
-			AND a.credentials_hash = $12
-			AND a.proxy_id IS NOT DISTINCT FROM $6
+			AND a.platform = $2
+			AND a.type = $3
+			AND a.credentials_hash = $4
+			AND a.proxy_id IS NOT DISTINCT FROM $9
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
-		SELECT $7, updated.id, NULL, NULL FROM updated
+		SELECT $10, updated.id, NULL, NULL FROM updated
 	`,
-		string(credentialsJSON),
 		id,
 		service.PlatformGrok,
 		service.AccountTypeOAuth,
-		string(expectedJSON),
-		expectedProxyID,
-		service.SchedulerOutboxEventAccountChanged,
+		credentialHashHex(expectedCredentials),
 		metaJSON,
 		credColumns.Encrypted,
 		credColumns.Hash,
 		credColumns.APIKeyHash,
+		expectedProxyID,
+		service.SchedulerOutboxEventAccountChanged,
 	)
 	if err != nil {
 		return false, err
@@ -3222,36 +3246,38 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 		updates.Extra[service.UpstreamBillingProbeEnabledExtraKey] = *updates.ProbeEnabled
 	}
-	// JSONB 需要合并而非覆盖，使用 raw SQL 保持旧行为。
+	// 凭据合并：阶段 5.2 起明文列已物理删除，`credentials = credentials || $n` 不再可能。
+	// 改为**主 UPDATE 之后**在同一事务里解密→合并→重算派生列（见 mergeAccountCredentialsInTx）。
+	//
+	// 为什么必须排在主 UPDATE 之后：下面 ollama/opencode 的组身份清理谓词里有
+	// `credentials_api_key_hash IS DISTINCT FROM $n`（拿**旧行**比新值）。若先把派生列写新值，
+	// 这条比较会变成"新值 ≠ 新值"恒 false，组身份清理就永远不触发 —— 静默失败。
+	// 主 UPDATE 的 WHERE 按 Postgres 语义读的是旧行，SET 里也不再动凭据列，所以顺序安全。
 	credentialPlaceholder := ""
 	apiKeyHashPlaceholder := ""
-	deriveAfterMerge := false
-	if len(updates.Credentials) > 0 {
+	mergeCredentials := len(updates.Credentials) > 0
+	// 入参 JSON 这个参数**只在**身份清理谓词里被引用（base_url / account_mode 两族）。
+	// 必须按需分配：无条件分配会让"只改 api_key"这类最常见的批量编辑变成
+	// 「参数给了但 SQL 里没有 $n」—— lib/pq 直接报
+	// `could not determine data type of parameter $1`，整条批量编辑失败。
+	// （sqlmock 不校验参数类型，所以这类错误只有真库才看得见。）
+	_, credDeltaHasBaseURL := updates.Credentials["base_url"]
+	_, credDeltaHasAccountMode := updates.Credentials["account_mode"]
+	if mergeCredentials && (credDeltaHasBaseURL || credDeltaHasAccountMode) {
 		payload, err := json.Marshal(updates.Credentials)
 		if err != nil {
 			return 0, err
 		}
 		credentialPlaceholder = "$" + itoa(idx)
-		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb")
 		args = append(args, payload)
 		idx++
-		// 身份变化判定改比指纹：合并表达式之后，SQL 侧已经拿不到"新 api_key"。
-		// 只在 updates 真带了 api_key 时分配占位符，没带时不产生多余参数
-		// （否则占位符与 args 数量会对不上）。
+	}
+	if mergeCredentials {
 		if _, hasAPIKey := updates.Credentials["api_key"]; hasAPIKey {
 			apiKeyHashPlaceholder = "$" + itoa(idx)
 			args = append(args, credentialAPIKeyHashArg(updates.Credentials))
 			idx++
 		}
-		// 这里是 SQL 侧合并，Go 拿不到"合并后的完整文档"，所以派生列无法在**写之前**
-		// 算出真值。先置回"未派生"状态（保证不会留下与明文不一致的过期派生值），
-		// 合并语句执行后在同一事务里回读明文重新推导（见 deriveCredentialColumnsAfterMerge）。
-		deriveAfterMerge = true
-		setClauses = append(setClauses,
-			"credentials_meta = '{}'::jsonb",
-			"credentials_hash = NULL",
-			"credentials_api_key_hash = NULL",
-		)
 	}
 
 	ollamaGroupIdentityChanges := make([]string, 0, 2)
@@ -3420,10 +3446,10 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if err != nil {
 		return 0, err
 	}
-	if deriveAfterMerge {
-		// 同一事务内回读合并后的明文并重算派生列。失败必须整体回滚——
-		// 留下"明文已合并、派生列是空的"行会让阶段四之后读不到凭据。
-		if err := deriveCredentialColumnsAfterMerge(ctx, exec, r.cryptorOrNil(), ids); err != nil {
+	if mergeCredentials {
+		// 同一事务内：读旧密文 → 解密 → 合并 → 重算并写回派生列。
+		// 失败必须整体回滚 —— 留下"只改了别的列、凭据没合并"的行比报错更难查。
+		if err := mergeAccountCredentialsInTx(ctx, exec, r.cryptorOrNil(), ids, updates.Credentials); err != nil {
 			return 0, err
 		}
 	}

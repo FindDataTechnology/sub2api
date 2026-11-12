@@ -99,12 +99,6 @@ func (_c *AccountCreate) SetType(v string) *AccountCreate {
 	return _c
 }
 
-// SetCredentials sets the "credentials" field.
-func (_c *AccountCreate) SetCredentials(v map[string]interface{}) *AccountCreate {
-	_c.mutation.SetCredentials(v)
-	return _c
-}
-
 // SetCredentialsMeta sets the "credentials_meta" field.
 func (_c *AccountCreate) SetCredentialsMeta(v map[string]interface{}) *AccountCreate {
 	_c.mutation.SetCredentialsMeta(v)
@@ -587,13 +581,6 @@ func (_c *AccountCreate) defaults() error {
 		v := account.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
-	if _, ok := _c.mutation.Credentials(); !ok {
-		if account.DefaultCredentials == nil {
-			return fmt.Errorf("ent: uninitialized account.DefaultCredentials (forgotten import ent/runtime?)")
-		}
-		v := account.DefaultCredentials()
-		_c.mutation.SetCredentials(v)
-	}
 	if _, ok := _c.mutation.CredentialsMeta(); !ok {
 		if account.DefaultCredentialsMeta == nil {
 			return fmt.Errorf("ent: uninitialized account.DefaultCredentialsMeta (forgotten import ent/runtime?)")
@@ -670,9 +657,6 @@ func (_c *AccountCreate) check() error {
 		if err := account.TypeValidator(v); err != nil {
 			return &ValidationError{Name: "type", err: fmt.Errorf(`ent: validator failed for field "Account.type": %w`, err)}
 		}
-	}
-	if _, ok := _c.mutation.Credentials(); !ok {
-		return &ValidationError{Name: "credentials", err: errors.New(`ent: missing required field "Account.credentials"`)}
 	}
 	if _, ok := _c.mutation.CredentialsMeta(); !ok {
 		return &ValidationError{Name: "credentials_meta", err: errors.New(`ent: missing required field "Account.credentials_meta"`)}
@@ -780,10 +764,6 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.GetType(); ok {
 		_spec.SetField(account.FieldType, field.TypeString, value)
 		_node.Type = value
-	}
-	if value, ok := _c.mutation.Credentials(); ok {
-		_spec.SetField(account.FieldCredentials, field.TypeJSON, value)
-		_node.Credentials = value
 	}
 	if value, ok := _c.mutation.CredentialsMeta(); ok {
 		_spec.SetField(account.FieldCredentialsMeta, field.TypeJSON, value)
@@ -1104,18 +1084,6 @@ func (u *AccountUpsert) SetType(v string) *AccountUpsert {
 // UpdateType sets the "type" field to the value that was provided on create.
 func (u *AccountUpsert) UpdateType() *AccountUpsert {
 	u.SetExcluded(account.FieldType)
-	return u
-}
-
-// SetCredentials sets the "credentials" field.
-func (u *AccountUpsert) SetCredentials(v map[string]interface{}) *AccountUpsert {
-	u.Set(account.FieldCredentials, v)
-	return u
-}
-
-// UpdateCredentials sets the "credentials" field to the value that was provided on create.
-func (u *AccountUpsert) UpdateCredentials() *AccountUpsert {
-	u.SetExcluded(account.FieldCredentials)
 	return u
 }
 
@@ -1721,20 +1689,6 @@ func (u *AccountUpsertOne) SetType(v string) *AccountUpsertOne {
 func (u *AccountUpsertOne) UpdateType() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateType()
-	})
-}
-
-// SetCredentials sets the "credentials" field.
-func (u *AccountUpsertOne) SetCredentials(v map[string]interface{}) *AccountUpsertOne {
-	return u.Update(func(s *AccountUpsert) {
-		s.SetCredentials(v)
-	})
-}
-
-// UpdateCredentials sets the "credentials" field to the value that was provided on create.
-func (u *AccountUpsertOne) UpdateCredentials() *AccountUpsertOne {
-	return u.Update(func(s *AccountUpsert) {
-		s.UpdateCredentials()
 	})
 }
 
@@ -2583,20 +2537,6 @@ func (u *AccountUpsertBulk) SetType(v string) *AccountUpsertBulk {
 func (u *AccountUpsertBulk) UpdateType() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateType()
-	})
-}
-
-// SetCredentials sets the "credentials" field.
-func (u *AccountUpsertBulk) SetCredentials(v map[string]interface{}) *AccountUpsertBulk {
-	return u.Update(func(s *AccountUpsert) {
-		s.SetCredentials(v)
-	})
-}
-
-// UpdateCredentials sets the "credentials" field to the value that was provided on create.
-func (u *AccountUpsertBulk) UpdateCredentials() *AccountUpsertBulk {
-	return u.Update(func(s *AccountUpsert) {
-		s.UpdateCredentials()
 	})
 }
 

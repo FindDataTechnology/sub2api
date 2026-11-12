@@ -71,14 +71,13 @@ func (Account) Fields() []ent.Field {
 			MaxLen(20).
 			NotEmpty(),
 
-		// credentials: 认证凭证，以 JSONB 格式存储
-		// 结构取决于 type 字段：
-		// - api_key: {"api_key": "sk-xxx"}
-		// - oauth: {"access_token": "...", "refresh_token": "...", "expires_at": "..."}
-		// - cookie: {"session_key": "..."}
-		field.JSON("credentials", map[string]any{}).
-			Default(func() map[string]any { return map[string]any{} }).
-			SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
+		// ⚠️ 明文列 `credentials` 已在阶段 5.2 删除（迁移 251_credential_drop_plaintext_columns）。
+		// 凭据只以下列派生列存在：credentials_encrypted（整份密文，权威副本）、
+		// credentials_meta（非密钥子键明文副本，供 SQL 筛选）、credentials_hash / api_key_hash（指纹）。
+		// 读路径必须解密 credentials_encrypted。删这个字段**必须先于** DDL：
+		// ent 的 SELECT 会列出 schema 的全部字段，列还在时删字段只是白删，列没了还留着
+		// 字段则**所有** ent 查询都会 `column "credentials" does not exist`
+		// （`TestStage4Ordering_...` 用真库钉住这个顺序）。
 
 		// credentials_meta: 凭据中"非密钥"子键的明文副本，供 SQL 侧筛选使用。
 		// 目前白名单只有 base_url 与 account_mode（生产 SQL 只提取这两个非密钥子键）。

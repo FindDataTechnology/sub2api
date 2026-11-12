@@ -33,6 +33,7 @@ func TestBackfillOnMigratedSchema_BatchLoopAndLimit(t *testing.T) {
 	_, err = db.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`)
 	require.NoError(t, err)
 	require.NoError(t, ApplyMigrations(ctx, db))
+	restoreLegacyPlaintextColumns(t, db) // 回填工具的输入是明文列：本用例验 drop 之前的形态
 
 	const total = 250
 	var userID int64

@@ -28,8 +28,6 @@ type APIKey struct {
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 	// UserID holds the value of the "user_id" field.
 	UserID int64 `json:"user_id,omitempty"`
-	// Key holds the value of the "key" field.
-	Key string `json:"key,omitempty"`
 	// KeyHash holds the value of the "key_hash" field.
 	KeyHash *string `json:"key_hash,omitempty"`
 	// KeyEncrypted holds the value of the "key_encrypted" field.
@@ -131,7 +129,7 @@ func (*APIKey) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case apikey.FieldID, apikey.FieldUserID, apikey.FieldGroupID:
 			values[i] = new(sql.NullInt64)
-		case apikey.FieldKey, apikey.FieldKeyHash, apikey.FieldKeyEncrypted, apikey.FieldName, apikey.FieldStatus:
+		case apikey.FieldKeyHash, apikey.FieldKeyEncrypted, apikey.FieldName, apikey.FieldStatus:
 			values[i] = new(sql.NullString)
 		case apikey.FieldCreatedAt, apikey.FieldUpdatedAt, apikey.FieldDeletedAt, apikey.FieldLastUsedAt, apikey.FieldExpiresAt, apikey.FieldWindow5hStart, apikey.FieldWindow1dStart, apikey.FieldWindow7dStart:
 			values[i] = new(sql.NullTime)
@@ -180,12 +178,6 @@ func (_m *APIKey) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field user_id", values[i])
 			} else if value.Valid {
 				_m.UserID = value.Int64
-			}
-		case apikey.FieldKey:
-			if value, ok := values[i].(*sql.NullString); !ok {
-				return fmt.Errorf("unexpected type %T for field key", values[i])
-			} else if value.Valid {
-				_m.Key = value.String
 			}
 		case apikey.FieldKeyHash:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -383,9 +375,6 @@ func (_m *APIKey) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("user_id=")
 	builder.WriteString(fmt.Sprintf("%v", _m.UserID))
-	builder.WriteString(", ")
-	builder.WriteString("key=")
-	builder.WriteString(_m.Key)
 	builder.WriteString(", ")
 	if v := _m.KeyHash; v != nil {
 		builder.WriteString("key_hash=")

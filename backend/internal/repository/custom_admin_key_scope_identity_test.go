@@ -40,6 +40,8 @@ func TestScopedCodexIdentityPredicates_FrozenShapeMatrix(t *testing.T) {
 	_, err = db.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`)
 	require.NoError(t, err)
 	require.NoError(t, client.Schema.Create(ctx), "用 ent 自己的 migrate 建表")
+	// 同 fixture 文件：这条金标比的是改造前的 SQL 谓词，必须有明文列才跑得起来。
+	restoreLegacyPlaintextColumns(t, db)
 
 	// 形状矩阵：覆盖字符串 / 数字 / 前后空白 / 缺字段 / 空串 / 大小写。
 	matrix := []struct {
@@ -63,8 +65,10 @@ func TestScopedCodexIdentityPredicates_FrozenShapeMatrix(t *testing.T) {
 			SetName("frozen-" + row.name).
 			SetPlatform(service.PlatformOpenAI).
 			SetType(service.AccountTypeOAuth).
-			SetCredentials(row.creds).
 			Save(ctx)
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `UPDATE accounts SET credentials = $2::jsonb WHERE id = $1`,
+			m.ID, mustJSON(t, row.creds))
 		require.NoError(t, err)
 		ids[row.name] = m.ID
 	}

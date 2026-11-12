@@ -45,7 +45,6 @@ func TestScopedAdminCodexCandidates_MatchesWithoutPlaintextColumn(t *testing.T) 
 			SetName(name).
 			SetPlatform(service.PlatformOpenAI).
 			SetType(service.AccountTypeOAuth).
-			SetCredentials(creds).
 			SetCredentialsMeta(cols.Meta).
 			SetCredentialsHash(*cols.Hash)
 		if cols.Encrypted != nil {
@@ -98,12 +97,12 @@ func TestScopedAdminCodexCandidates_MatchesWithoutPlaintextColumn(t *testing.T) 
 		"只回传四个身份字段：refresh_token 之类的其余凭据不能跟着出来")
 	require.NotContains(t, found[0].Credentials, "refresh_token")
 
-	// ── drop 模拟：明文列清空，只剩密文 ──
-	_, err = db.ExecContext(ctx, `UPDATE accounts SET credentials = '{}'::jsonb`)
-	require.NoError(t, err)
-
+	// 阶段 5.2 之后这条"drop 模拟"已经不需要了：建表用的是 ent schema，
+	// 明文列**根本不存在**（迁移 251 已 drop），所以下面这几次调用本身就是
+	// 在 drop 之后的真实形态上验。原实现靠 `UPDATE … SET credentials='{}'` 模拟，
+	// 那一步现在会直接 `column "credentials" does not exist`。
 	found, err = repo.ScopedAdminCodexCandidates(principalCtx, identity)
-	require.NoError(t, err, "明文列没了也必须能匹配 —— drop 之后就是这个状态")
+	require.NoError(t, err, "明文列不存在时也必须能匹配 —— 匹配只能来自密文解密")
 	require.Len(t, found, 1)
 	require.Equal(t, targetID, found[0].ID, "匹配必须来自密文解密，而不是明文列")
 	require.Equal(t, "tok-target", found[0].Credentials["access_token"])
@@ -156,7 +155,6 @@ func TestScopedAdminList_ModelMappingWithoutPlaintextColumn(t *testing.T) {
 		SetName("list-mapping").
 		SetPlatform(service.PlatformOpenAI).
 		SetType(service.AccountTypeAPIKey).
-		SetCredentials(creds).
 		SetCredentialsMeta(cols.Meta).
 		SetCredentialsHash(*cols.Hash).
 		SetCredentialsEncrypted(*cols.Encrypted).
@@ -183,12 +181,9 @@ func TestScopedAdminList_ModelMappingWithoutPlaintextColumn(t *testing.T) {
 	require.Equal(t, map[string]any{"model_mapping": map[string]string{"claude-3": "gpt-4o"}},
 		list[0].Credentials, "只保留字符串值，且只回传 model_mapping（api_key 不外带）")
 
-	// ── drop 模拟：明文列清空 ──
-	_, err = db.ExecContext(ctx, `UPDATE accounts SET credentials = '{}'::jsonb`)
-	require.NoError(t, err)
-
+	// 同上：表是按 ent schema 建的，明文列已不存在，无需再"清空"。
 	list, total, err = repo.ScopedAdminList(principalCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "")
-	require.NoError(t, err, "明文列没了也必须能列出 —— drop 之后就是这个状态")
+	require.NoError(t, err, "明文列不存在时也必须能列出 —— 映射只能来自密文解密")
 	require.Equal(t, int64(1), total)
 	require.Equal(t, map[string]any{"model_mapping": map[string]string{"claude-3": "gpt-4o"}},
 		list[0].Credentials, "映射必须来自密文解密")

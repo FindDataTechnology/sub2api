@@ -205,66 +205,13 @@ func TestLookupAPIKey_HashMissingIsNotFoundAfterStage34(t *testing.T) {
 	require.Zero(t, APIKeyPlaintextLookupFallbackCount(), "回落已删除，计数恒为 0")
 }
 
-// 权威源的顺序被翻转了：**密文 → 明文列**（drop 之后前者是唯一副本）。
-// 所以"明文列被人改成别的值"不再等于"key 被轮换"——指纹和密文都还指着原值。
-// 这条测试钉住这个顺序：用原 key 查必须通过，且不许退到明文回落。
-func TestAuth_StalePlaintextColumnDoesNotBlockTheRealKey(t *testing.T) {
-	cryptor := credentialTestEncryptor(t)
-	repo, db := apiKeyScratchRepo(t, cryptor)
-	ctx := context.Background()
-
-	key := &service.APIKey{UserID: 1, Key: "sk-victim", Name: "k", Status: service.StatusActive}
-	require.NoError(t, repo.Create(ctx, key))
-
-	// 只改明文列（模拟人工改库/旧写入漂移）。指纹与密文仍指向 sk-victim。
-	// 注意不能改成"两行共享同一指纹"——key_hash 上有唯一索引，那样根本写不进去。
-	_, err := db.Exec(`UPDATE api_keys SET key = 'sk-rotated-out-of-band' WHERE id = $1`, key.ID)
-	require.NoError(t, err)
-
-	resetAPIKeyPlaintextLookupFallbackCount()
-	resetAPIKeyCiphertextMissingLookupCount()
-	found, err := repo.GetByKeyForAuth(ctx, "sk-victim")
-	require.NoError(t, err, "指纹与密文都指向 sk-victim，明文列漂移不应阻断真实 key")
-	require.Equal(t, key.ID, found.ID)
-	require.Equal(t, "sk-victim", found.Key, "返回的明文应当来自密文，而不是那列脏值")
-	require.Zero(t, APIKeyPlaintextLookupFallbackCount(), "这条路径是命中指纹的，不该走明文回落")
-}
-
-// 把上一条反过来看：**用被写进明文列的那个值**去查，会发生什么。
-//
-// 指纹命中不了（哈希是原 key 的），于是落到"按明文列等值查"的回落分支 ——
-// 它会命中并放行。也就是说：只要回落分支还活着，一条被人工改过明文列的行
-// 就能让那个新值通过认证。
-//
-// 这不是复核分支的漏洞（复核只信任指纹+密文），而是**回落分支**的固有代价。
-// 它正是阶段 3.4（摘回落）与阶段 5（drop 明文列）要消掉的东西：
-// 明文列没了，回落分支就没有可查的列。所以这条测试是**特性化测试**：
-// 它记录现在的行为，并在回落被摘掉时翻转成"查不到"。
-func TestAuth_StalePlaintextColumnIsUnreachableAfterStage34(t *testing.T) {
-	const fallbackStillAlive = false // 阶段 3.4 已摘掉回落：明文列里的脏值不再能认证
-
-	cryptor := credentialTestEncryptor(t)
-	repo, db := apiKeyScratchRepo(t, cryptor)
-	ctx := context.Background()
-
-	key := &service.APIKey{UserID: 1, Key: "sk-victim", Name: "k", Status: service.StatusActive}
-	require.NoError(t, repo.Create(ctx, key))
-	_, err := db.Exec(`UPDATE api_keys SET key = 'sk-rotated-out-of-band' WHERE id = $1`, key.ID)
-	require.NoError(t, err)
-
-	resetAPIKeyPlaintextLookupFallbackCount()
-	found, err := repo.GetByKeyForAuth(ctx, "sk-rotated-out-of-band")
-
-	if fallbackStillAlive {
-		require.NoError(t, err, "回落分支还在：明文列里的值能命中（这是要摘掉它的理由）")
-		require.Equal(t, key.ID, found.ID)
-		require.Equal(t, int64(1), APIKeyPlaintextLookupFallbackCount(), "这类命中必须计数可见")
-	} else {
-		require.ErrorIs(t, err, service.ErrAPIKeyNotFound,
-			"回落已摘：只有指纹+密文能认证，明文列里的脏值查不到")
-		require.Nil(t, found)
-	}
-}
+// 注：原先这里还有两条"明文列被人改成别的值"的测试
+// （`TestAuth_StalePlaintextColumnDoesNotBlockTheRealKey` /
+//  `TestAuth_StalePlaintextColumnIsUnreachableAfterStage34`）。
+// 阶段 5.2 把明文列**物理删除**之后，"不新鲜的明文列"这个状态在数据上不再可表达，
+// 它们要断言的东西变成了结构事实：api_keys 表里没有 key 列（见
+// `TestStage4_SchemaCreatedTablesHaveNoPlaintextColumns`），
+// 因此这里删掉而不是改成永远为真的断言。
 
 // ── 阶段四前置：复核的明文必须来自密文，而不是明文列 ────────────────────────
 //
@@ -276,15 +223,11 @@ func TestAuth_StalePlaintextColumnIsUnreachableAfterStage34(t *testing.T) {
 
 func TestAuth_UsesCiphertextWhenPlaintextColumnIsGone(t *testing.T) {
 	cryptor := credentialTestEncryptor(t)
-	repo, db := apiKeyScratchRepo(t, cryptor)
+	repo, _ := apiKeyScratchRepo(t, cryptor)
 	ctx := context.Background()
 
 	key := &service.APIKey{UserID: 1, Key: "sk-post-drop", Name: "k", Status: service.StatusActive}
 	require.NoError(t, repo.Create(ctx, key))
-
-	// 模拟 drop：明文列清空，指纹与密文保持不动（drop 后就是这个状态）
-	_, err := db.Exec(`UPDATE api_keys SET key = '' WHERE id = $1`, key.ID)
-	require.NoError(t, err)
 
 	resetAPIKeyCiphertextMissingLookupCount()
 	found, err := repo.GetByKeyForAuth(ctx, "sk-post-drop")
@@ -314,7 +257,7 @@ func TestAuth_RejectsWhenCiphertextDisagreesWithInput(t *testing.T) {
 	other, err := cryptor.Encrypt("sk-someone-else")
 	require.NoError(t, err)
 	// 指纹仍指向 sk-original（所以定位能命中），但密文里装的是别的 key
-	_, err = db.Exec(`UPDATE api_keys SET key = '', key_encrypted = $1 WHERE id = $2`, other, key.ID)
+	_, err = db.Exec(`UPDATE api_keys SET key_encrypted = $1 WHERE id = $2`, other, key.ID)
 	require.NoError(t, err)
 
 	_, lookupErr := repo.GetByKeyForAuth(ctx, "sk-original")
@@ -356,10 +299,6 @@ func TestUsageLogLoadAPIKeys_ResolvesPlaintextFromCiphertext(t *testing.T) {
 	key := &service.APIKey{UserID: 1, Key: plaintext, Name: "k", Status: service.StatusActive}
 	require.NoError(t, keyRepo.Create(ctx, key))
 
-	// 模拟 drop：明文列清空，只留密文
-	_, err := db.Exec(`UPDATE api_keys SET key = '' WHERE id = $1`, key.ID)
-	require.NoError(t, err)
-
 	client := dbent.NewClient(dbent.Driver(entsql.OpenDB("postgres", db)))
 	t.Cleanup(func() { _ = client.Close() })
 	repo := newUsageLogRepositoryWithSQL(client, db)
@@ -378,16 +317,12 @@ func TestUsageLogLoadAPIKeys_ResolvesPlaintextFromCiphertext(t *testing.T) {
 // 密文解出来。把明文列清空＝模拟 drop，三条路径都要照常返回明文。
 func TestReadPaths_ReturnPlaintextWithoutPlaintextColumn(t *testing.T) {
 	cryptor := credentialTestEncryptor(t)
-	repo, db := apiKeyScratchRepo(t, cryptor)
+	repo, _ := apiKeyScratchRepo(t, cryptor)
 	ctx := context.Background()
 
 	key := &service.APIKey{UserID: 1, Key: "sk-readpath", Name: "k", Status: service.StatusActive, Quota: 5}
 	require.NoError(t, repo.Create(ctx, key))
 	require.NoError(t, repo.Update(ctx, key, service.APIKeyUpdateFields{Quota: true}))
-
-	// 模拟 drop：明文列清空
-	_, err := db.Exec(`UPDATE api_keys SET key = '' WHERE id = $1`, key.ID)
-	require.NoError(t, err)
 
 	got, err := repo.GetByID(ctx, key.ID)
 	require.NoError(t, err)
@@ -431,9 +366,8 @@ func TestExistsByKey_UsesHashOnly(t *testing.T) {
 	require.True(t, exists)
 	require.Zero(t, APIKeyPlaintextLookupFallbackCount(), "有指纹时不该回落")
 
-	// ② drop 模拟：明文列清空，结果不变（这正是改成比指纹的理由）
-	_, err = db.Exec(`UPDATE api_keys SET key = '' WHERE id = $1`, key.ID)
-	require.NoError(t, err)
+	// ② 阶段 5.2 之后明文列已物理删除，这一档不再需要"清空列模拟 drop"：
+	//    直接从密文/指纹判断存在性就是唯一实现。
 	resetAPIKeyPlaintextLookupFallbackCount()
 	exists, err = repo.ExistsByKey(ctx, "sk-exists-hash")
 	require.NoError(t, err)

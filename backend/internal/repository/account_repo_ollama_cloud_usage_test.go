@@ -246,7 +246,7 @@ func TestListDueOllamaCloudUsageAccountsFiltersOrdersAndLimits(t *testing.T) {
 func TestBulkUpdateOllamaIdentityCleanupIsValueConditional(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
 	exec.queryRows = emptyCredentialQueryRows(t)
-	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+	repo := newAccountRepositoryWithSQLCrypto(nil, exec, nil, credentialTestEncryptor(t))
 
 	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
 		Credentials: map[string]any{"base_url": "https://www.ollama.com:443/v1"},
@@ -274,13 +274,16 @@ func TestUpdateCredentialsIdentityChangeClearsAllOllamaManagedExtra(t *testing.T
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*credentials_api_key_hash IS DISTINCT FROM.*ollama_cloud_usage_session.*ollama_cloud_usage_auto_refresh.*ollama_cloud_usage_snapshot`).
-		WithArgs(`{"api_key":"new-key","base_url":"https://ollama.com"}`, int64(17), credentialAPIKeyHashHex("new-key"), credentialHashOfJSONString(`{"api_key":"new-key","base_url":"https://ollama.com"}`)).
+		WithArgs(`{"api_key":"new-key","base_url":"https://ollama.com"}`, int64(17), credentialAPIKeyHashHex("new-key"),
+			credentialHashOfJSONString(`{"api_key":"new-key","base_url":"https://ollama.com"}`),
+			`{"base_url":"https://ollama.com","has_refresh_token":false}`,
+			sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(17), nil, nil, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	repo := newAccountRepositoryWithSQL(client, nil, nil)
+	repo := newAccountRepositoryWithSQLCrypto(client, nil, nil, credentialTestEncryptor(t))
 
 	err := repo.UpdateCredentials(context.Background(), 17, map[string]any{
 		"api_key": "new-key", "base_url": "https://ollama.com",
@@ -313,13 +316,16 @@ func TestUpdateCredentialsCleanupBranchRequiresChangedCredentials(t *testing.T) 
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*CASE.*AND credentials_hash IS DISTINCT FROM \$4\s+AND \(\s+credentials_api_key_hash IS DISTINCT FROM`).
-		WithArgs(`{"api_key":"same-key","base_url":"https://relay.example.com/v1"}`, int64(17), credentialAPIKeyHashHex("same-key"), credentialHashOfJSONString(`{"api_key":"same-key","base_url":"https://relay.example.com/v1"}`)).
+		WithArgs(`{"api_key":"same-key","base_url":"https://relay.example.com/v1"}`, int64(17), credentialAPIKeyHashHex("same-key"),
+			credentialHashOfJSONString(`{"api_key":"same-key","base_url":"https://relay.example.com/v1"}`),
+			`{"base_url":"https://relay.example.com/v1","has_refresh_token":false}`,
+			sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(17), nil, nil, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	repo := newAccountRepositoryWithSQL(client, nil, nil)
+	repo := newAccountRepositoryWithSQLCrypto(client, nil, nil, credentialTestEncryptor(t))
 
 	err := repo.UpdateCredentials(context.Background(), 17, map[string]any{
 		"api_key": "same-key", "base_url": "https://relay.example.com/v1",
@@ -370,13 +376,16 @@ func TestUpdateCredentialsPlainCNAPIKeyAccountCleanupStaysSemanticallyEquivalent
 	t.Cleanup(func() { _ = client.Close() })
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*- 'upstream_billing_probe'.*- 'ollama_cloud_usage_session'.*- 'ollama_cloud_usage_auto_refresh'.*- 'ollama_cloud_usage_snapshot'`).
-		WithArgs(`{"api_key":"rotated-key","base_url":"https://api.moonshot.cn/v1"}`, int64(17), credentialAPIKeyHashHex("rotated-key"), credentialHashOfJSONString(`{"api_key":"rotated-key","base_url":"https://api.moonshot.cn/v1"}`)).
+		WithArgs(`{"api_key":"rotated-key","base_url":"https://api.moonshot.cn/v1"}`, int64(17), credentialAPIKeyHashHex("rotated-key"),
+			credentialHashOfJSONString(`{"api_key":"rotated-key","base_url":"https://api.moonshot.cn/v1"}`),
+			`{"base_url":"https://api.moonshot.cn/v1","has_refresh_token":false}`,
+			sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(17), nil, nil, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	repo := newAccountRepositoryWithSQL(client, db, nil)
+	repo := newAccountRepositoryWithSQLCrypto(client, db, nil, credentialTestEncryptor(t))
 
 	err = repo.UpdateCredentials(context.Background(), 17, map[string]any{
 		"api_key": "rotated-key", "base_url": "https://api.moonshot.cn/v1",

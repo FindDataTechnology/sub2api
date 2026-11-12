@@ -143,11 +143,17 @@ func TestCredentialSQLStructure_NoWholeDocumentComparisonsLeft(t *testing.T) {
 		"还有整文档等值比较没改比 credentials_hash：%v", offenders)
 }
 
-// TestCredentialSQLStructure_StillWritesPlaintextColumn 明文列在阶段四之前必须继续写。
+// TestCredentialSQLStructure_NoPlaintextColumnWrites 明文列的 SQL 写入必须为 **0**。
 //
-// 这条防守的是反方向：有人"顺手"把明文写入停掉，等于跳过阶段三直接进入不可逆状态，
-// 回滚路径当场消失。
-func TestCredentialSQLStructure_StillWritesPlaintextColumn(t *testing.T) {
+// 历史：阶段四（5.2）之前这条守的是反方向 —— "别顺手把明文写入停掉，否则回滚路径消失"，
+// 期望值是 3 处（UpdateCredentials 的 SET、UpdateGrokOAuthCredentials 的 SET、
+// BulkUpdate 的合并）。5.2 把两列物理删除之后，这 3 处都已经改成写派生列，
+// 于是同一条守卫翻面：**再出现任何一处写明文列，就是代码回退到了已删除的列上**，
+// 上线即 `column "credentials" does not exist`。
+//
+// 判据与实现解耦：只扫生产源码里的赋值形态（`SET credentials = $n` / `credentials = COALESCE(...)`），
+// 跳过注释行 —— 这条守卫自己就踩过"注释里引用了被禁字面量"的坑。
+func TestCredentialSQLStructure_NoPlaintextColumnWrites(t *testing.T) {
 	re := regexp.MustCompile(`^(?:SET\s+)?credentials\s*=\s*\$|["]credentials\s*=\s*COALESCE\(credentials`)
 
 	found := 0
@@ -162,9 +168,9 @@ func TestCredentialSQLStructure_StillWritesPlaintextColumn(t *testing.T) {
 			}
 		}
 	}
-	require.Equal(t, 3, found,
-		"明文列的 SQL 写入应为 3 处：UpdateCredentials 的 SET、UpdateGrokOAuthCredentials 的 SET、BulkUpdate 的合并。"+
-			"若这是有意的阶段四动作，必须先完成迁移并单独审批")
+	require.Zero(t, found,
+		"仍有 %d 处 SQL 在写明文列 credentials —— 阶段 5.2 已把它 drop 掉，"+
+			"这些语句上线即 `column \"credentials\" does not exist`", found)
 }
 
 // TestCredentialSQLStructure_QuotedIdentifierSubkeyRefsArePinned

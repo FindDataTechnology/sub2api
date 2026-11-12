@@ -75,11 +75,6 @@ func UserID(v int64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldUserID, v))
 }
 
-// Key applies equality check predicate on the "key" field. It's identical to KeyEQ.
-func Key(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldEQ(FieldKey, v))
-}
-
 // KeyHash applies equality check predicate on the "key_hash" field. It's identical to KeyHashEQ.
 func KeyHash(v string) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldKeyHash, v))
@@ -318,71 +313,6 @@ func UserIDIn(vs ...int64) predicate.APIKey {
 // UserIDNotIn applies the NotIn predicate on the "user_id" field.
 func UserIDNotIn(vs ...int64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldNotIn(FieldUserID, vs...))
-}
-
-// KeyEQ applies the EQ predicate on the "key" field.
-func KeyEQ(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldEQ(FieldKey, v))
-}
-
-// KeyNEQ applies the NEQ predicate on the "key" field.
-func KeyNEQ(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldNEQ(FieldKey, v))
-}
-
-// KeyIn applies the In predicate on the "key" field.
-func KeyIn(vs ...string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldIn(FieldKey, vs...))
-}
-
-// KeyNotIn applies the NotIn predicate on the "key" field.
-func KeyNotIn(vs ...string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldNotIn(FieldKey, vs...))
-}
-
-// KeyGT applies the GT predicate on the "key" field.
-func KeyGT(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldGT(FieldKey, v))
-}
-
-// KeyGTE applies the GTE predicate on the "key" field.
-func KeyGTE(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldGTE(FieldKey, v))
-}
-
-// KeyLT applies the LT predicate on the "key" field.
-func KeyLT(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldLT(FieldKey, v))
-}
-
-// KeyLTE applies the LTE predicate on the "key" field.
-func KeyLTE(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldLTE(FieldKey, v))
-}
-
-// KeyContains applies the Contains predicate on the "key" field.
-func KeyContains(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldContains(FieldKey, v))
-}
-
-// KeyHasPrefix applies the HasPrefix predicate on the "key" field.
-func KeyHasPrefix(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldHasPrefix(FieldKey, v))
-}
-
-// KeyHasSuffix applies the HasSuffix predicate on the "key" field.
-func KeyHasSuffix(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldHasSuffix(FieldKey, v))
-}
-
-// KeyEqualFold applies the EqualFold predicate on the "key" field.
-func KeyEqualFold(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldEqualFold(FieldKey, v))
-}
-
-// KeyContainsFold applies the ContainsFold predicate on the "key" field.
-func KeyContainsFold(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldContainsFold(FieldKey, v))
 }
 
 // KeyHashEQ applies the EQ predicate on the "key_hash" field.

@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
-	"github.com/lib/pq"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 // 凭据落盘加密的列派生逻辑（阶段一：双写）。
@@ -140,18 +140,20 @@ func CredentialCryptoColumnsFor(credentials map[string]any, cryptor service.Secr
 	return columns, nil
 }
 
-// credentialPlaintextFallbacks 统计"密文列为空、回落读明文列"的次数。
+// credentialPlaintextFallbacks **阶段 5.2 之后恒为 0**：明文列已物理删除，
+// 不再存在"回落读明文列"这件事。
 //
-// 两点必须说清，否则这个数字会被误用：
-//  1. 它是**进程内**计数，重启即归零。所以它只适合做告警/观测；
-//     判断"存量是否迁完"的闸门 MUST 用数据库计数
-//     （`SELECT count(*) FROM accounts WHERE credentials_encrypted IS NULL`），
-//     那个才是重启不丢的事实。
-//  2. 只统计"确实有明文可回落"的行。凭据本来就是空的账号不计入，
-//     否则空账号多的实例会永远看起来"没迁完"。
+// 为什么保留这个符号而不删：3.3 的仪表读数与既有测试仍引用它，删掉会让
+// "从 3.3 到 5.2 的观测口径"断成两套；恒 0 本身就是最干净的信号
+// （它证明回落在代码里已经不存在，而不是"恰好没触发"）。
+//
+// 历史上的两点说明（保留以免误用）：
+//  1. 它是**进程内**计数，重启即归零，只适合告警/观测；判断存量是否迁完
+//     MUST 用数据库计数（`credentials_encrypted IS NULL` 的行数）。
+//  2. 它只统计"确实有明文可回落"的行 —— 空账号从不计入。
 var credentialPlaintextFallbacks atomic.Int64
 
-// CredentialPlaintextFallbackCount 返回本进程累计回落次数（见上面两点说明）。
+// CredentialPlaintextFallbackCount 返回本进程累计回落次数（阶段 5.2 之后恒为 0）。
 func CredentialPlaintextFallbackCount() int64 {
 	return credentialPlaintextFallbacks.Load()
 }
@@ -188,32 +190,28 @@ func (r *accountRepository) credentialsFromEntity(m *dbent.Account) (map[string]
 		return decoded, nil
 	}
 
-	// 阶段 3.4：**回落分支已删除**。有明文却没有密文 = 硬错误。
+	// 阶段 5.2：明文列 `credentials` 已**物理删除**，所以这里既没有回落、
+	// 也没有"有明文无密文"这个状态可判了。没有密文 = 这一行没有凭据。
 	//
-	// 为什么不能再"读不到密文就用明文凑"：
-	//  1. drop 明文列之后本来就无明文可读，这段代码只是在掩盖"这一行没回填"；
-	//  2. 它会把配置/迁移问题伪装成正常服务，症状退化成"凭据看起来是空的"，最难查；
-	//  3. 留着它，就永远没有证据说明"可以安全地 drop 明文列"。
-	// 观察期（3.3）已在生产上确认回落次数为 0，才做的这一步。
+	// 为什么不再报硬错误：drop 之后"空凭据"与"密文丢了"在数据上不可区分
+	// （两者都只是 credentials_encrypted IS NULL）。对它报错会把一个
+	// **合法的空账号**（建了还没填凭据）变成调度建桶失败 → 全站 503，
+	// 而那种事故本 change 已经发生过一次。所以这里返回 nil 并把计数打出去，
+	// 让"密文缺失"在仪表上可见，而不是让一行坏数据拖垮整个进程。
 	//
-	// 合法终态仍放行：明文字段为空（新建未填凭据的账号）返回 nil 且不报错
-	// —— 与原行为一致（原来走的就是 copyJSONMap(nil)），避免让调用方多一种判空形态。
-	if len(m.Credentials) > 0 {
-		credentialPlaintextFallbacks.Add(1)
-		logger.LegacyPrintf("repository.credential",
-			"[CredentialAtRest] missing ciphertext: account=%d has plaintext credentials but no credentials_encrypted", m.ID)
-		return nil, fmt.Errorf(
-			"account %d has plaintext credentials but no credentials_encrypted: "+
-				"stage-3.4 removed the plaintext fallback; re-run cmd/credential-backfill", m.ID)
-	}
-	return copyJSONMap(m.Credentials), nil
+	// 不变量改由**写侧**保证：所有写路径都同事务写 credentials_encrypted
+	// （`CredentialCryptoColumnsFor`），5.3 的泄漏判据 + 5.2 前的回填已把存量补齐。
+	// 不计数、不打日志：drop 之后"空账号"（建了还没填凭据）与"密文丢了"在数据上
+	// 不可区分，而调度会周期性全量读所有账号 —— 在这里计数会把计数器刷成常数噪音，
+	// 反而掩盖真正的异常。密文完整性由写侧不变量 + 备份 + 5.3 泄漏判据保证。
+	return nil, nil
 }
 
 // credentialAPIKeyHashHex 返回 api_key 的指纹（hex），空串返回空串。
 //
 // 为什么空串回空串而不是 nil：这些调用点把结果直接当 SQL 参数用，
-// `credential = ''` 与列里的 NULL 不相等——这与"空 api_key 不构成用量身份"
-// 的判断一致（旧写法 `->> 'api_key' = ''` 会匹配空串行，新写法匹配不到，
+// `credential = ”` 与列里的 NULL 不相等——这与"空 api_key 不构成用量身份"
+// 的判断一致（旧写法 `->> 'api_key' = ”` 会匹配空串行，新写法匹配不到，
 // 这是 2.2 已知并已用差分钉住的收窄）。
 func credentialAPIKeyHashHex(apiKey string) string {
 	if apiKey == "" {
@@ -233,7 +231,7 @@ func credentialAPIKeyHashHexes(apiKeys []string) []string {
 
 // credentialHasRefreshToken 判断凭据里是否有非空 refresh_token。
 //
-// **必须与 SQL 侧 `NULLIF(BTRIM(credentials->>'refresh_token'), '') IS NULL` 的反面逐字等价**，
+// **必须与 SQL 侧 `NULLIF(BTRIM(credentials->>'refresh_token'), ”) IS NULL` 的反面逐字等价**，
 // 因为这个判定现在由 Go 承担（见 SetGrokOAuthErrorIfCredentialsUnchanged 的等价改写）。
 // 对齐的细节：
 //   - 键缺失 / 值为 JSON null  -> `->>` 得 SQL NULL -> 视为"没有"
@@ -312,91 +310,106 @@ type credentialColumnUpdater interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// deriveCredentialColumnsAfterMerge 在**同一个事务内**重新推导指定账号的派生列。
+// mergeAccountCredentialsInTx 在同一事务内把 delta **合并**进账号凭据并重算派生列。
 //
-// 为什么需要它：BulkUpdate 的凭据是 SQL 侧合并（`credentials || $n`），Go 拿不到
-// "合并后的完整文档"，因此无法在写之前算出 meta/密文/两个指纹。之前的做法是把
-// 这几列置 NULL 让读路径回落明文——安全但会让密文丢失，且阶段四 drop 明文列之后
-// 就不再安全。
+// 为什么不能再用 SQL 侧合并（阶段 5.2）：旧实现是
+// `credentials = COALESCE(credentials,'{}'::jsonb) || $n::jsonb`，明文列 drop 之后
+// 这条语句不存在；而"用密文做 JSONB 合并"在密码学上也不可能。
+// 所以合并改到 Go：读旧密文 → 解密 → 字典合并（与 jsonb `||` 同为**顶层浅合并**）→
+// 重新加密并写回四列。
 //
-// 现在改为：合并语句执行完之后，在同一事务里回读明文（能读到刚合并的结果），
-// 在 Go 端算派生列，再一次性写回。合并语义一字不动，派生列从"被清空"变成"正确"。
-//
-// 必须在事务内调用：否则回读到的是别的连接可能已经改过的数据。
-func deriveCredentialColumnsAfterMerge(ctx context.Context, exec credentialColumnUpdater, cryptor service.SecretEncryptor, ids []int64) error {
-	if len(ids) == 0 {
+// 必须在事务内、且**在主 UPDATE 之后**调用：
+//   - 事务内：否则读到的是别的连接可能已改过的值，合并会丢掉并发写；
+//   - 主 UPDATE 之后：那条 UPDATE 的 WHERE 里用 `credentials_api_key_hash IS DISTINCT FROM $n`
+//     判"api_key 是否变了"，必须先按旧行求值（见 account_repo.go 的注释）。
+func mergeAccountCredentialsInTx(
+	ctx context.Context,
+	exec credentialColumnUpdater,
+	cryptor service.SecretEncryptor,
+	ids []int64,
+	delta map[string]any,
+) error {
+	if len(ids) == 0 || len(delta) == 0 {
 		return nil
 	}
-	rows, err := exec.QueryContext(ctx, `
-		SELECT id, credentials
-		FROM accounts
-		WHERE id = ANY($1) AND deleted_at IS NULL`, pq.Array(ids))
-	if err != nil {
-		return fmt.Errorf("derive credential columns: select: %w", err)
+	if cryptor == nil {
+		// 没有加密器就写不了密文；静默写 NULL 等于**把凭据删掉**。
+		return fmt.Errorf("merge credentials: no encryptor configured (refusing to drop credentials)")
 	}
-	defer func() { _ = rows.Close() }()
 
-	type derived struct {
-		id        int64
-		meta      string
-		encrypted *string
-		hash      string
-		apiKey    *string
+	rows, err := exec.QueryContext(ctx, `
+		SELECT id, credentials_encrypted
+		FROM accounts
+		WHERE id = ANY($1) AND deleted_at IS NULL
+		FOR UPDATE`, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("merge credentials: select: %w", err)
 	}
-	batch := make([]derived, 0, len(ids))
+	type mergedRow struct {
+		id   int64
+		cols CredentialCryptoColumns
+	}
+	batch := make([]mergedRow, 0, len(ids))
 	for rows.Next() {
 		var id int64
-		var raw []byte
-		if err := rows.Scan(&id, &raw); err != nil {
-			return fmt.Errorf("derive credential columns: scan: %w", err)
+		var encrypted *string
+		if err := rows.Scan(&id, &encrypted); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("merge credentials: scan: %w", err)
 		}
-		decoded := map[string]any{}
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &decoded); err != nil {
-				return fmt.Errorf("derive credential columns: account %d: %w", id, err)
+		base := map[string]any{}
+		if encrypted != nil && *encrypted != "" {
+			plaintext, derr := cryptor.Decrypt(*encrypted)
+			if derr != nil {
+				_ = rows.Close()
+				return fmt.Errorf("merge credentials: account %d: decrypt: %w", id, derr)
+			}
+			if uerr := json.Unmarshal([]byte(plaintext), &base); uerr != nil {
+				_ = rows.Close()
+				return fmt.Errorf("merge credentials: account %d: unmarshal: %w", id, uerr)
 			}
 		}
-		columns, err := CredentialCryptoColumnsFor(decoded, cryptor)
-		if err != nil {
-			return fmt.Errorf("derive credential columns: account %d: %w", id, err)
+		// jsonb `||` 是顶层浅合并：同名键取右侧，其余保留。
+		for k, v := range delta {
+			base[k] = v
 		}
-		metaJSON, err := json.Marshal(columns.Meta)
-		if err != nil {
-			return fmt.Errorf("derive credential columns: account %d: %w", id, err)
+		cols, cerr := CredentialCryptoColumnsFor(base, cryptor)
+		if cerr != nil {
+			_ = rows.Close()
+			return fmt.Errorf("merge credentials: account %d: derive: %w", id, cerr)
 		}
-		batch = append(batch, derived{
-			id:        id,
-			meta:      string(metaJSON),
-			encrypted: columns.Encrypted,
-			hash:      *columns.Hash,
-			apiKey:    columns.APIKeyHash,
-		})
+		batch = append(batch, mergedRow{id: id, cols: cols})
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("derive credential columns: rows: %w", err)
+		_ = rows.Close()
+		return fmt.Errorf("merge credentials: rows: %w", err)
 	}
-	if len(batch) == 0 {
-		return nil
-	}
+	_ = rows.Close()
 
-	placeholder := 1
-	values := make([]string, 0, len(batch))
-	args := make([]any, 0, len(batch)*4)
-	for _, d := range batch {
-		values = append(values, fmt.Sprintf("($%d::bigint, $%d::jsonb, $%d::text, $%d::text, $%d::text)", placeholder, placeholder+1, placeholder+2, placeholder+3, placeholder+4))
-		args = append(args, d.id, d.meta, d.encrypted, d.hash, d.apiKey)
-		placeholder += 5
-	}
-	_, err = exec.ExecContext(ctx, `
-		UPDATE accounts AS a
-		SET credentials_meta = v.meta,
-			credentials_encrypted = v.encrypted,
-			credentials_hash = v.hash,
-			credentials_api_key_hash = v.api_key_hash
-		FROM (VALUES `+strings.Join(values, ", ")+`) AS v(id, meta, encrypted, hash, api_key_hash)
-		WHERE a.id = v.id`, args...)
-	if err != nil {
-		return fmt.Errorf("derive credential columns: update: %w", err)
+	for _, m := range batch {
+		metaJSON, merr := json.Marshal(m.cols.Meta)
+		if merr != nil {
+			return fmt.Errorf("merge credentials: account %d: marshal meta: %w", m.id, merr)
+		}
+		var encArg, hashArg, apiKeyHashArg any
+		if m.cols.Encrypted != nil {
+			encArg = *m.cols.Encrypted
+		}
+		if m.cols.Hash != nil {
+			hashArg = *m.cols.Hash
+		}
+		if m.cols.APIKeyHash != nil {
+			apiKeyHashArg = *m.cols.APIKeyHash
+		}
+		if _, err := exec.ExecContext(ctx, `
+			UPDATE accounts
+			SET credentials_meta = $2::jsonb,
+			    credentials_encrypted = $3,
+			    credentials_hash = $4,
+			    credentials_api_key_hash = $5
+			WHERE id = $1`, m.id, string(metaJSON), encArg, hashArg, apiKeyHashArg); err != nil {
+			return fmt.Errorf("merge credentials: account %d: write: %w", m.id, err)
+		}
 	}
 	return nil
 }

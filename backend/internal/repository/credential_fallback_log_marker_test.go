@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	dbent "github.com/Wei-Shaw/sub2api/ent"
 )
 
 // 阶段三 3.3 的生产判据是**对日志窗口 grep `plaintext fallback`**，窗口里为 0 才说明
@@ -84,21 +82,11 @@ func TestPlaintextFallbackLogMarker_EverySiteUsesTheMarker(t *testing.T) {
 		wantSites, checked, marker)
 }
 
-// 运行层：阶段 3.4 之后，"回落"这件事已不存在 —— 只有明文没有密文时**必须是硬错误**。
+// 源码层守的是"回落日志"这个词还存不存在：阶段 3.4 摘掉回落、5.2 drop 掉明文列之后，
+// 站点数应为 **0**。谁把一个回落日志加回来，上面那条就会红，逼他回答
+// "3.3 的 grep 判据要不要纳入这个新站点"。
 //
-// 原来这条靠"真触发一次回落"来证明日志里有标记词；回落删掉后那个载体没了。
-// 现在改为断言新契约：调用必须返回错误，且错误信息本身可 grep（不再依赖日志）。
-func TestPlaintextFallbackLogMarker_HardErrorAfterStage34(t *testing.T) {
-	repo := newAccountRepositoryWithSQL(nil, nil, nil)
-	resetCredentialPlaintextFallbackCount()
-	got, err := repo.credentialsFromEntity(&dbent.Account{
-		ID:          4242,
-		Credentials: map[string]any{"api_key": "sk-marker"},
-	})
-	require.Error(t, err, "阶段 3.4：只有明文没有密文必须硬失败")
-	require.Nil(t, got)
-	require.Contains(t, err.Error(), "no credentials_encrypted",
-		"错误信息必须点名缺失的列，运维才知道该重跑回填")
-	require.Equal(t, int64(1), CredentialPlaintextFallbackCount(),
-		"计数器仍保留：它是'本来会回落几次'的观测点")
-}
+// 与之配套的**行为层**断言已迁到 `account_credentials_boundary_test.go`：
+// 那里钉住"没有密文 = 没有凭据（合法终态，不报错、不计数）"，
+// 因为 5.2 之后"有明文无密文"这个状态在数据上不再可表达，
+// 继续在这里断言"硬错误"会与真实读路径相矛盾。

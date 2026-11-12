@@ -67,6 +67,15 @@ func BackfillCredentialColumns(
 		// 读路径永远回落明文，等于白做。这里直接拒绝，避免跑出一半状态。
 		return result, fmt.Errorf("backfill: encryptor is required (otherwise credentials_encrypted stays NULL)")
 	}
+	// 阶段 5.2（迁移 251）之后明文列已 drop，回填的**输入**不复存在：
+	// 这个工具只对 drop 之前的库有意义。先探一次 schema，把"这句 SQL 会报
+	// column does not exist"变成一个说得清的结论，避免在不可逆操作窗口里
+	// 让人对着一条数据库报错猜。
+	if ok, probeErr := plaintextCredentialColumnsExist(ctx, db); probeErr != nil {
+		return result, fmt.Errorf("backfill: probe plaintext columns: %w", probeErr)
+	} else if !ok {
+		return result, fmt.Errorf("backfill: 明文列已 drop（迁移 251），没有可回填的输入：本工具只在 drop 之前的库上有意义")
+	}
 	batchSize := opts.BatchSize
 	if batchSize <= 0 {
 		batchSize = defaultCredentialBackfillBatchSize
@@ -85,8 +94,23 @@ func BackfillCredentialColumns(
 	return result, nil
 }
 
-// credentialNeedsBackfillSQL 是"这一行还缺派生列"的唯一判据。
+// plaintextCredentialColumnsExist 报告 drop 之前的两列是否还在（迁移 251 会删掉它们）。
 //
+// 回填工具的输入就是这两列，所以在跑任何 `SELECT ... credentials` 之前先问一次
+// schema —— 让"工具在 drop 之后的库上跑"变成一个明确结论，而不是数据库报错。
+func plaintextCredentialColumnsExist(ctx context.Context, db *sql.DB) (bool, error) {
+	var n int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*) FROM information_schema.columns
+		WHERE table_schema = current_schema()
+			AND ((table_name = 'accounts' AND column_name = 'credentials')
+			  OR (table_name = 'api_keys' AND column_name = 'key'))`).Scan(&n); err != nil {
+		return false, err
+	}
+	return n == 2, nil
+}
+
+// credentialNeedsBackfillSQL 是"这一行还缺派生列"的唯一判据。
 // 注意 meta 不参与判据：白名单子键本来就可能为空，`credentials_meta = '{}'`
 // 是合法终态，拿它当"没迁完"会让回填永远跑不完。
 const credentialNeedsBackfillSQL = `(credentials_encrypted IS NULL OR credentials_hash IS NULL)`

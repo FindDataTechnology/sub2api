@@ -43,6 +43,7 @@ func TestStatusScript_OnMigratedSchema_ThreeStates(t *testing.T) {
 	_, err = db.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`)
 	require.NoError(t, err)
 	require.NoError(t, ApplyMigrations(ctx, db), "真实迁移链（含 249 派生列 / 250 meta 事实）")
+	restoreLegacyPlaintextColumns(t, db) // 状态脚本的 pre 分支要求这两列存在
 
 	run := func() (string, int) {
 		cmd := exec.Command(script, dsn)
