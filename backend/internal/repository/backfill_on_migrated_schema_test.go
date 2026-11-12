@@ -15,10 +15,29 @@ import (
 // 之前的回填测试用的是手搓的两张表：列对得上，但**索引/非空/默认值/约束**都对不上。
 // 回填工具恰恰是靠 `key <> ''`、`NOT NULL DEFAULT '{}'` 这类真实约束工作的，
 // 所以只在玩具表上绿，不能说明它在生产库上会绿。
-// 这里用 ApplyMigrations 把 302 个迁移全跑一遍，再插"迁移前形态"的行。
+// 这里用 ApplyMigrations 把整条迁移链（303 个）全跑一遍，再插"迁移前形态"的行。
 //
 // 判据与 `scripts/credential-migration-status.sh` 的 A/B/C/D 四项完全一致
 // —— 那个脚本的阈值就是这几条 SQL，两条路径必须给出同一个结论。
+// restoreLegacyPlaintextColumns 在迁移链建出的 schema 上把 5.2 之前的两列**加回来**。
+//
+// 这几条用例验的是 **drop 之前**的形态，而不是 drop 之后：
+//   - 回填工具（backfill）的输入就是明文列，它只在这个形态上有意义；
+//   - 恢复演练的备份来自 drop 之前；
+//   - 状态脚本的 pre 分支要求能读到这两列。
+//
+// 迁移 251 之后真实迁移链不再建这两列，所以在这里显式补回来 —— 而不是让用例
+// 去"假装"它们还在（假装的话 SQL 会直接 `column "credentials" does not exist`）。
+// 只补列、不补唯一索引：唯一性已经由 key_hash 上的部分唯一索引承担，
+// 这几条用例也不依赖明文 key 的唯一约束。
+func restoreLegacyPlaintextColumns(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.ExecContext(context.Background(), `
+		ALTER TABLE accounts ADD COLUMN IF NOT EXISTS credentials jsonb NOT NULL DEFAULT '{}'::jsonb;
+		ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key varchar(128) NOT NULL DEFAULT '';`)
+	require.NoError(t, err, "把 drop 之前的明文列加回来（本组用例验的是 drop 之前的形态）")
+}
+
 func TestBackfillOnMigratedSchema_DrivesStatusGatesToZero(t *testing.T) {
 	dsn := os.Getenv("SUB2API_CREDENTIAL_DIFF_DSN")
 	if dsn == "" {
@@ -33,6 +52,7 @@ func TestBackfillOnMigratedSchema_DrivesStatusGatesToZero(t *testing.T) {
 	_, err = db.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`)
 	require.NoError(t, err)
 	require.NoError(t, ApplyMigrations(ctx, db), "把真实迁移链跑完（含 249 派生列 / 250 meta 事实）")
+	restoreLegacyPlaintextColumns(t, db) // 本用例验的是 drop 之前的形态
 
 	// 造"迁移前形态"：明文在、派生列全空、meta 缺 has_refresh_token
 	// 真实 schema 上 api_keys.user_id 有外键，先造一个最小用户（其余 NOT NULL 列都有默认值）。

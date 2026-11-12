@@ -13,7 +13,7 @@ import (
 // 这是一个**给手工演练用的建库入口**，不是一个断言型测试。
 //
 // 目的：让 `scripts/credential-restore-drill.sh` 能在一个由**真实迁移链**
-// （302 个迁移、真外键/索引/约束）建出来的库上跑一遍。
+// （303 个迁移、真外键/索引/约束）建出来的库上跑一遍。
 // 演练脚本此前只在手搓的两三张表上验过 —— 而它是 drop 之后**唯一退路**的证据来源，
 // 在一个 300 表的真库上能不能完整 dump/restore，是玩具库回答不了的问题。
 //
@@ -39,7 +39,8 @@ func TestDrillSeed_RealSchema(t *testing.T) {
 
 	_, err = db.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`)
 	require.NoError(t, err)
-	require.NoError(t, ApplyMigrations(ctx, db), "真实迁移链（302 个迁移）")
+	require.NoError(t, ApplyMigrations(ctx, db), "真实迁移链（303 个迁移）")
+	restoreLegacyPlaintextColumns(t, db) // 演练的备份来自 drop 之前：需要明文列才能造出那个形态
 
 	var userID int64
 	require.NoError(t, db.QueryRowContext(ctx, `

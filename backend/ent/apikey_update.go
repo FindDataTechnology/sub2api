@@ -72,20 +72,6 @@ func (_u *APIKeyUpdate) SetNillableUserID(v *int64) *APIKeyUpdate {
 	return _u
 }
 
-// SetKey sets the "key" field.
-func (_u *APIKeyUpdate) SetKey(v string) *APIKeyUpdate {
-	_u.mutation.SetKey(v)
-	return _u
-}
-
-// SetNillableKey sets the "key" field if the given value is not nil.
-func (_u *APIKeyUpdate) SetNillableKey(v *string) *APIKeyUpdate {
-	if v != nil {
-		_u.SetKey(*v)
-	}
-	return _u
-}
-
 // SetKeyHash sets the "key_hash" field.
 func (_u *APIKeyUpdate) SetKeyHash(v string) *APIKeyUpdate {
 	_u.mutation.SetKeyHash(v)
@@ -585,11 +571,6 @@ func (_u *APIKeyUpdate) defaults() error {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *APIKeyUpdate) check() error {
-	if v, ok := _u.mutation.Key(); ok {
-		if err := apikey.KeyValidator(v); err != nil {
-			return &ValidationError{Name: "key", err: fmt.Errorf(`ent: validator failed for field "APIKey.key": %w`, err)}
-		}
-	}
 	if v, ok := _u.mutation.KeyHash(); ok {
 		if err := apikey.KeyHashValidator(v); err != nil {
 			return &ValidationError{Name: "key_hash", err: fmt.Errorf(`ent: validator failed for field "APIKey.key_hash": %w`, err)}
@@ -631,9 +612,6 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.DeletedAtCleared() {
 		_spec.ClearField(apikey.FieldDeletedAt, field.TypeTime)
-	}
-	if value, ok := _u.mutation.Key(); ok {
-		_spec.SetField(apikey.FieldKey, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.KeyHash(); ok {
 		_spec.SetField(apikey.FieldKeyHash, field.TypeString, value)
@@ -912,20 +890,6 @@ func (_u *APIKeyUpdateOne) SetUserID(v int64) *APIKeyUpdateOne {
 func (_u *APIKeyUpdateOne) SetNillableUserID(v *int64) *APIKeyUpdateOne {
 	if v != nil {
 		_u.SetUserID(*v)
-	}
-	return _u
-}
-
-// SetKey sets the "key" field.
-func (_u *APIKeyUpdateOne) SetKey(v string) *APIKeyUpdateOne {
-	_u.mutation.SetKey(v)
-	return _u
-}
-
-// SetNillableKey sets the "key" field if the given value is not nil.
-func (_u *APIKeyUpdateOne) SetNillableKey(v *string) *APIKeyUpdateOne {
-	if v != nil {
-		_u.SetKey(*v)
 	}
 	return _u
 }
@@ -1442,11 +1406,6 @@ func (_u *APIKeyUpdateOne) defaults() error {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *APIKeyUpdateOne) check() error {
-	if v, ok := _u.mutation.Key(); ok {
-		if err := apikey.KeyValidator(v); err != nil {
-			return &ValidationError{Name: "key", err: fmt.Errorf(`ent: validator failed for field "APIKey.key": %w`, err)}
-		}
-	}
 	if v, ok := _u.mutation.KeyHash(); ok {
 		if err := apikey.KeyHashValidator(v); err != nil {
 			return &ValidationError{Name: "key_hash", err: fmt.Errorf(`ent: validator failed for field "APIKey.key_hash": %w`, err)}
@@ -1505,9 +1464,6 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if _u.mutation.DeletedAtCleared() {
 		_spec.ClearField(apikey.FieldDeletedAt, field.TypeTime)
-	}
-	if value, ok := _u.mutation.Key(); ok {
-		_spec.SetField(apikey.FieldKey, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.KeyHash(); ok {
 		_spec.SetField(apikey.FieldKeyHash, field.TypeString, value)

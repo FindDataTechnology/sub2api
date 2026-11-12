@@ -48,10 +48,11 @@ func TestProductionAccountRepository_DecryptsBackfilledAccount(t *testing.T) {
 	// 造一条"已回填"的账号：密文非空。
 	cols, err := CredentialCryptoColumnsFor(map[string]any{"api_key": "sk-prod-wire"}, cryptor)
 	require.NoError(t, err)
+	// 阶段 5.2：明文列已 drop，这里只写派生列（这正是"已回填"账号的真实形态）。
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO accounts (name, platform, type, credentials, credentials_meta,
+		INSERT INTO accounts (name, platform, type, credentials_meta,
 			credentials_hash, credentials_encrypted, credentials_api_key_hash)
-		VALUES ('wire-check', 'openai', 'apikey', '{"api_key":"sk-prod-wire"}'::jsonb,
+		VALUES ('wire-check', 'openai', 'apikey',
 			$1::jsonb, $2, $3, $4)`,
 		mustJSON(t, cols.Meta), *cols.Hash, *cols.Encrypted, cols.APIKeyHash)
 	require.NoError(t, err)
@@ -88,9 +89,9 @@ func TestInternalAccountRepository_NilCryptorRefusesCiphertext(t *testing.T) {
 	cols, err := CredentialCryptoColumnsFor(map[string]any{"api_key": "sk-nil"}, cryptor)
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO accounts (name, platform, type, credentials, credentials_meta,
+		INSERT INTO accounts (name, platform, type, credentials_meta,
 			credentials_hash, credentials_encrypted, credentials_api_key_hash)
-		VALUES ('nil-check', 'openai', 'apikey', '{"api_key":"sk-nil"}'::jsonb,
+		VALUES ('nil-check', 'openai', 'apikey',
 			$1::jsonb, $2, $3, $4)`,
 		mustJSON(t, cols.Meta), *cols.Hash, *cols.Encrypted, cols.APIKeyHash)
 	require.NoError(t, err)

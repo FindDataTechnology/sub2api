@@ -119,12 +119,6 @@ func (_u *AccountUpdate) SetNillableType(v *string) *AccountUpdate {
 	return _u
 }
 
-// SetCredentials sets the "credentials" field.
-func (_u *AccountUpdate) SetCredentials(v map[string]interface{}) *AccountUpdate {
-	_u.mutation.SetCredentials(v)
-	return _u
-}
-
 // SetCredentialsMeta sets the "credentials_meta" field.
 func (_u *AccountUpdate) SetCredentialsMeta(v map[string]interface{}) *AccountUpdate {
 	_u.mutation.SetCredentialsMeta(v)
@@ -902,9 +896,6 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.GetType(); ok {
 		_spec.SetField(account.FieldType, field.TypeString, value)
 	}
-	if value, ok := _u.mutation.Credentials(); ok {
-		_spec.SetField(account.FieldCredentials, field.TypeJSON, value)
-	}
 	if value, ok := _u.mutation.CredentialsMeta(); ok {
 		_spec.SetField(account.FieldCredentialsMeta, field.TypeJSON, value)
 	}
@@ -1353,12 +1344,6 @@ func (_u *AccountUpdateOne) SetNillableType(v *string) *AccountUpdateOne {
 	if v != nil {
 		_u.SetType(*v)
 	}
-	return _u
-}
-
-// SetCredentials sets the "credentials" field.
-func (_u *AccountUpdateOne) SetCredentials(v map[string]interface{}) *AccountUpdateOne {
-	_u.mutation.SetCredentials(v)
 	return _u
 }
 
@@ -2168,9 +2153,6 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if value, ok := _u.mutation.GetType(); ok {
 		_spec.SetField(account.FieldType, field.TypeString, value)
-	}
-	if value, ok := _u.mutation.Credentials(); ok {
-		_spec.SetField(account.FieldCredentials, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.CredentialsMeta(); ok {
 		_spec.SetField(account.FieldCredentialsMeta, field.TypeJSON, value)

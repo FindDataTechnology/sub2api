@@ -544,7 +544,9 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 				dbuser.EmailContainsFold(filters.Search),
 				dbuser.UsernameContainsFold(filters.Search),
 				dbuser.NotesContainsFold(filters.Search),
-				dbuser.HasAPIKeysWith(apikey.KeyContainsFold(filters.Search)),
+				// 阶段 5.2：明文 key 列已删除，只能按**完整 key 的指纹**命中
+				// （原先是子串匹配，drop 之后在数据上不可能；子串搜索会误伤同前缀的 key）
+				dbuser.HasAPIKeysWith(apikey.KeyHashEQ(sha256Hex([]byte(filters.Search)))),
 			),
 		)
 	}

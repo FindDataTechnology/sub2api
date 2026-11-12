@@ -239,15 +239,19 @@ func TestAccountRepository_SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnch
 
 func TestAccountRepository_UpdateGrokOAuthCredentialsIfUnchanged_UsesExactAttemptStateAndAtomicOutbox(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
-	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+	encryptor := credentialTestEncryptor(t)
+	repo := newAccountRepositoryWithSQLCrypto(nil, exec, nil, encryptor)
 	proxyID := int64(29)
+
+	expected := map[string]any{"refresh_token": "attempted", "_token_version": int64(9)}
+	rotated := map[string]any{"refresh_token": "rotated", "_token_version": int64(10)}
 
 	applied, err := repo.UpdateGrokOAuthCredentialsIfUnchanged(
 		context.Background(),
 		42,
-		map[string]any{"refresh_token": "attempted", "_token_version": int64(9)},
+		expected,
 		&proxyID,
-		map[string]any{"refresh_token": "rotated", "_token_version": int64(10)},
+		rotated,
 	)
 
 	require.NoError(t, err)
@@ -255,28 +259,66 @@ func TestAccountRepository_UpdateGrokOAuthCredentialsIfUnchanged_UsesExactAttemp
 	require.Len(t, exec.execQueries, 1)
 	normalized := normalizeSQLWhitespace(exec.execQueries[0])
 	require.Contains(t, normalized, "WITH updated AS")
-	require.Contains(t, normalized, "credentials = $1::jsonb")
+	// 阶段 5.2：明文列已删，SET 里只写四个派生列。
+	require.NotContains(t, normalized, "credentials = $1::jsonb")
 	require.NotContains(t, normalized, "AND a.credentials = $5::jsonb")
-	require.Contains(t, normalized, "proxy_id IS NOT DISTINCT FROM $6")
+	require.Contains(t, normalized, "credentials_meta = $5::jsonb")
+	require.Contains(t, normalized, "credentials_encrypted = $6")
+	require.Contains(t, normalized, "credentials_hash = $7")
+	require.Contains(t, normalized, "credentials_api_key_hash = $8")
+	require.Contains(t, normalized, "proxy_id IS NOT DISTINCT FROM $9")
 	require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
-	// 双写派生列（阶段一）：整份替换能算准派生值，所以这里必须真写而非置空。
-	require.Contains(t, normalized, "credentials_hash = $12")
-	require.Contains(t, normalized, "credentials_api_key_hash = $11")
-	require.Len(t, exec.execArgs[0], 11)
-	require.Equal(t, &proxyID, exec.execArgs[0][5])
 
-	// $9 是密文列：repo 用 newAccountRepositoryWithSQL 构造（cryptor=nil），
-	// 所以必须为 nil —— 不是空串。"nil 就写 NULL" 是刻意的：让读路径回落明文，
-	// 而不是把空串当密文去解密。
-	require.Nil(t, exec.execArgs[0][8])
+	// 参数个数必须等于**最大占位符编号**（$10）。这条断言钉的就是那个历史 bug：
+	// 旧 SQL 引用 $12 却只传 11 个参数，Postgres 在 bind 阶段直接报
+	// "bind message supplies 11 parameters, but prepared statement requires 12"，
+	// 也就是 Grok OAuth 换凭据这条路一调用就失败。以后谁再改编号，这里先红。
+	require.Len(t, exec.execArgs[0], 10)
 
-	// $10 是 sha256(规范化明文)，$11 是 sha256(api_key)。
-	// 这份凭据没有 api_key，所以 $11 必须是 nil 而不是空串的 sha256。
-	hash, ok := exec.execArgs[0][9].(*string)
-	require.True(t, ok, "credentials_hash 必须是指针，nil 才表示列写 NULL")
+	// CAS 必须比**预期快照**的哈希（不是新凭据的）：否则并发重授权会被覆盖。
+	require.Equal(t, credentialHashHex(expected), exec.execArgs[0][3])
+	require.NotEqual(t, credentialHashHex(rotated), exec.execArgs[0][3])
+
+	// $5 是 meta（只放非密钥子键 + 派生事实），$6 是密文，$7 是哈希，$8 是指纹。
+	// 这份凭据没有 api_key，所以 $8 必须是 nil 而不是空串的 sha256。
+	require.Equal(t, []byte(`{"has_refresh_token":true}`), exec.execArgs[0][4])
+
+	ciphertext, ok := exec.execArgs[0][5].(*string)
+	require.True(t, ok, "credentials_encrypted 必须是指针（nil 才写 NULL）")
+	require.NotNil(t, ciphertext, "有加密器时必须真的写密文")
+	decrypted, decErr := encryptor.Decrypt(*ciphertext)
+	require.NoError(t, decErr)
+	require.JSONEq(t, `{"refresh_token":"rotated","_token_version":10}`, decrypted,
+		"密文必须就是新凭据本身（整份替换）")
+
+	hash, ok := exec.execArgs[0][6].(*string)
+	require.True(t, ok, "credentials_hash 必须是指针")
 	require.NotNil(t, hash)
 	require.Len(t, *hash, 64)
-	require.Nil(t, exec.execArgs[0][10], "无 api_key 时指纹必须是 NULL")
+	require.Equal(t, credentialHashHex(rotated), *hash)
+	require.Nil(t, exec.execArgs[0][7], "无 api_key 时指纹必须是 NULL")
+	require.Equal(t, &proxyID, exec.execArgs[0][8])
+	require.Equal(t, service.SchedulerOutboxEventAccountChanged, exec.execArgs[0][9])
+}
+
+// 阶段 5.2 的写侧守卫：整份替换却没有加密器时必须报错，不能写 NULL 密文
+// （那会让行上出现"哈希是新的、凭据没了"的形态，等于静默删凭据）。
+func TestAccountRepository_UpdateGrokOAuthCredentialsIfUnchanged_RefusesWithoutEncryptor(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	repo := newAccountRepositoryWithSQL(nil, exec, nil) // cryptor = nil
+
+	applied, err := repo.UpdateGrokOAuthCredentialsIfUnchanged(
+		context.Background(),
+		42,
+		map[string]any{"refresh_token": "attempted"},
+		nil,
+		map[string]any{"refresh_token": "rotated"},
+	)
+
+	require.Error(t, err)
+	require.False(t, applied)
+	require.Contains(t, err.Error(), "no encryptor configured")
+	require.Empty(t, exec.execQueries, "拒绝必须发生在任何 SQL 之前")
 }
 
 func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T) {

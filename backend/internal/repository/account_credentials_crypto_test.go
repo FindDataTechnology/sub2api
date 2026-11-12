@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -305,4 +306,37 @@ func emptyQueryRowsMatching(t *testing.T, pattern string) func(ctx context.Conte
 	return func(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 		return db.QueryContext(ctx, query, args...)
 	}
+}
+
+// UpdateCredentials 的写侧守卫（阶段 5.2）：没有加密器时**拒绝**写凭据。
+//
+// 为什么必须是硬错误而不是"降级写 NULL"：drop 掉明文列之后，
+// credentials_encrypted = NULL 就是"这个账号没有凭据"，没有任何回退来源能救。
+// 静默写 NULL 会把一次配置失误变成一次**凭据删除**，而症状要等到上游 401 才显形。
+func TestUpdateCredentials_RefusesWithoutEncryptor(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	repo := newAccountRepositoryWithSQL(nil, exec, nil) // cryptor = nil
+
+	err := repo.UpdateCredentials(context.Background(), 17, map[string]any{"api_key": "sk-rotated"})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no encryptor configured")
+	require.Empty(t, exec.execQueries, "拒绝必须发生在任何 SQL 之前")
+}
+
+// 反向：空凭据（显式清空）不需要加密器——没有东西可加密，也不该被误拦。
+func TestUpdateCredentials_AllowsEmptyCredentialsWithoutEncryptor(t *testing.T) {
+	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?s)UPDATE accounts.*credentials_encrypted = \$6.*WHERE id = \$2`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	repo := newAccountRepositoryWithSQL(client, nil, nil) // cryptor = nil
+
+	err := repo.UpdateCredentials(context.Background(), 17, map[string]any{})
+
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
 }

@@ -347,13 +347,16 @@ func TestUpdateCredentialsAtomicallyClearsProbeForOpenAIAPIKeyIdentityChange(t *
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*credentials_hash IS DISTINCT FROM \$4.*- 'upstream_billing_probe'`).
-		WithArgs(`{"api_key":"sk-new"}`, int64(27), credentialAPIKeyHashHex("sk-new"), credentialHashOfJSONString(`{"api_key":"sk-new"}`)).
+		WithArgs(`{"api_key":"sk-new"}`, int64(27), credentialAPIKeyHashHex("sk-new"),
+			credentialHashOfJSONString(`{"api_key":"sk-new"}`),
+			`{"has_refresh_token":false}`,
+			sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(27), nil, nil, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	repo := newAccountRepositoryWithSQL(client, db, nil)
+	repo := newAccountRepositoryWithSQLCrypto(client, db, nil, credentialTestEncryptor(t))
 
 	err = repo.UpdateCredentials(context.Background(), 27, map[string]any{"api_key": "sk-new"})
 
@@ -437,12 +440,15 @@ func TestUpdateCredentialsRollsBackWhenOutboxFails(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*credentials_hash IS DISTINCT FROM \$4.*- 'upstream_billing_probe'`).
-		WithArgs(`{"api_key":"sk-new"}`, int64(27), credentialAPIKeyHashHex("sk-new"), credentialHashOfJSONString(`{"api_key":"sk-new"}`)).
+		WithArgs(`{"api_key":"sk-new"}`, int64(27), credentialAPIKeyHashHex("sk-new"),
+			credentialHashOfJSONString(`{"api_key":"sk-new"}`),
+			`{"has_refresh_token":false}`,
+			sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).WillReturnError(errors.New("outbox failed"))
 	mock.ExpectRollback()
 
-	repo := newAccountRepositoryWithSQL(client, db, nil)
+	repo := newAccountRepositoryWithSQLCrypto(client, db, nil, credentialTestEncryptor(t))
 	err = repo.UpdateCredentials(context.Background(), 27, map[string]any{"api_key": "sk-new"})
 
 	require.EqualError(t, err, "outbox failed")
@@ -494,13 +500,14 @@ func updatedAccountRowsEncrypted(t *testing.T, id int64, extra string, cryptor s
 
 func updatedAccountRowsRow(id int64, extra string, meta []byte, encrypted, hash, apiKeyHash *string) *sqlmock.Rows {
 	now := time.Now()
-	// 列序必须与 ent 生成的 dbaccount.Columns 一致：credentials 之后紧跟
-	// credentials_meta / credentials_encrypted / credentials_hash / credentials_api_key_hash，
-	// 然后才是 extra。新增凭据列时这里要同步，否则 sqlmock 会报
+	// 列序必须与 ent 生成的 dbaccount.Columns 一致：明文 credentials 已在阶段 5.2 删除，
+	// 所以凭据段现在从 credentials_meta 开始（meta / encrypted / hash / api_key_hash），
+	// 其后是 extra。增删凭据列时这里要同步，否则 sqlmock 会报
 	// "Expected number of values to match number of columns"。
 	return sqlmock.NewRows(dbaccount.Columns).AddRow(
 		id, now, now, nil, "test", nil, service.PlatformOpenAI, service.AccountTypeAPIKey,
-		[]byte(`{"api_key":"sk-test"}`), meta, nullable(encrypted), nullable(hash), nullable(apiKeyHash),
+		// 阶段 5.2：明文列已删（dbaccount.Columns 少一列），行值同步少一个
+		meta, nullable(encrypted), nullable(hash), nullable(apiKeyHash),
 		[]byte(extra), nil, nil, 1, nil, 1, 1.0,
 		service.StatusActive, nil, nil, nil, false, true, nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, service.QuotaDimensionGlobal,

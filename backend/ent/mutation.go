@@ -114,7 +114,6 @@ type APIKeyMutation struct {
 	created_at         *time.Time
 	updated_at         *time.Time
 	deleted_at         *time.Time
-	key                *string
 	key_hash           *string
 	key_encrypted      *string
 	name               *string
@@ -410,42 +409,6 @@ func (m *APIKeyMutation) OldUserID(ctx context.Context) (v int64, err error) {
 // ResetUserID resets all changes to the "user_id" field.
 func (m *APIKeyMutation) ResetUserID() {
 	m.user = nil
-}
-
-// SetKey sets the "key" field.
-func (m *APIKeyMutation) SetKey(s string) {
-	m.key = &s
-}
-
-// Key returns the value of the "key" field in the mutation.
-func (m *APIKeyMutation) Key() (r string, exists bool) {
-	v := m.key
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldKey returns the old "key" field's value of the APIKey entity.
-// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *APIKeyMutation) OldKey(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldKey is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldKey requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldKey: %w", err)
-	}
-	return oldValue.Key, nil
-}
-
-// ResetKey resets all changes to the "key" field.
-func (m *APIKeyMutation) ResetKey() {
-	m.key = nil
 }
 
 // SetKeyHash sets the "key_hash" field.
@@ -1632,7 +1595,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 25)
+	fields := make([]string, 0, 24)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1644,9 +1607,6 @@ func (m *APIKeyMutation) Fields() []string {
 	}
 	if m.user != nil {
 		fields = append(fields, apikey.FieldUserID)
-	}
-	if m.key != nil {
-		fields = append(fields, apikey.FieldKey)
 	}
 	if m.key_hash != nil {
 		fields = append(fields, apikey.FieldKeyHash)
@@ -1724,8 +1684,6 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.DeletedAt()
 	case apikey.FieldUserID:
 		return m.UserID()
-	case apikey.FieldKey:
-		return m.Key()
 	case apikey.FieldKeyHash:
 		return m.KeyHash()
 	case apikey.FieldKeyEncrypted:
@@ -1783,8 +1741,6 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldDeletedAt(ctx)
 	case apikey.FieldUserID:
 		return m.OldUserID(ctx)
-	case apikey.FieldKey:
-		return m.OldKey(ctx)
 	case apikey.FieldKeyHash:
 		return m.OldKeyHash(ctx)
 	case apikey.FieldKeyEncrypted:
@@ -1861,13 +1817,6 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetUserID(v)
-		return nil
-	case apikey.FieldKey:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetKey(v)
 		return nil
 	case apikey.FieldKeyHash:
 		v, ok := value.(string)
@@ -2238,9 +2187,6 @@ func (m *APIKeyMutation) ResetField(name string) error {
 	case apikey.FieldUserID:
 		m.ResetUserID()
 		return nil
-	case apikey.FieldKey:
-		m.ResetKey()
-		return nil
 	case apikey.FieldKeyHash:
 		m.ResetKeyHash()
 		return nil
@@ -2438,7 +2384,6 @@ type AccountMutation struct {
 	notes                       *string
 	platform                    *string
 	_type                       *string
-	credentials                 *map[string]interface{}
 	credentials_meta            *map[string]interface{}
 	credentials_encrypted       *string
 	credentials_hash            *string
@@ -2862,42 +2807,6 @@ func (m *AccountMutation) OldType(ctx context.Context) (v string, err error) {
 // ResetType resets all changes to the "type" field.
 func (m *AccountMutation) ResetType() {
 	m._type = nil
-}
-
-// SetCredentials sets the "credentials" field.
-func (m *AccountMutation) SetCredentials(value map[string]interface{}) {
-	m.credentials = &value
-}
-
-// Credentials returns the value of the "credentials" field in the mutation.
-func (m *AccountMutation) Credentials() (r map[string]interface{}, exists bool) {
-	v := m.credentials
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldCredentials returns the old "credentials" field's value of the Account entity.
-// If the Account object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *AccountMutation) OldCredentials(ctx context.Context) (v map[string]interface{}, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldCredentials is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldCredentials requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldCredentials: %w", err)
-	}
-	return oldValue.Credentials, nil
-}
-
-// ResetCredentials resets all changes to the "credentials" field.
-func (m *AccountMutation) ResetCredentials() {
-	m.credentials = nil
 }
 
 // SetCredentialsMeta sets the "credentials_meta" field.
@@ -4471,7 +4380,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 35)
+	fields := make([]string, 0, 34)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -4492,9 +4401,6 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m._type != nil {
 		fields = append(fields, account.FieldType)
-	}
-	if m.credentials != nil {
-		fields = append(fields, account.FieldCredentials)
 	}
 	if m.credentials_meta != nil {
 		fields = append(fields, account.FieldCredentialsMeta)
@@ -4599,8 +4505,6 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.Platform()
 	case account.FieldType:
 		return m.GetType()
-	case account.FieldCredentials:
-		return m.Credentials()
 	case account.FieldCredentialsMeta:
 		return m.CredentialsMeta()
 	case account.FieldCredentialsEncrypted:
@@ -4678,8 +4582,6 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldPlatform(ctx)
 	case account.FieldType:
 		return m.OldType(ctx)
-	case account.FieldCredentials:
-		return m.OldCredentials(ctx)
 	case account.FieldCredentialsMeta:
 		return m.OldCredentialsMeta(ctx)
 	case account.FieldCredentialsEncrypted:
@@ -4791,13 +4693,6 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetType(v)
-		return nil
-	case account.FieldCredentials:
-		v, ok := value.(map[string]interface{})
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetCredentials(v)
 		return nil
 	case account.FieldCredentialsMeta:
 		v, ok := value.(map[string]interface{})
@@ -5243,9 +5138,6 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldType:
 		m.ResetType()
-		return nil
-	case account.FieldCredentials:
-		m.ResetCredentials()
 		return nil
 	case account.FieldCredentialsMeta:
 		m.ResetCredentialsMeta()

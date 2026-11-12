@@ -32,8 +32,8 @@ func TestAccountsToService_LargeActiveAccountSetDoesNotExceedPostgresParameterLi
 			Name:        "large-active",
 			Platform:    service.PlatformOpenAI,
 			Type:        service.AccountTypeOAuth,
-			Credentials: map[string]any{},
-			Extra:       map[string]any{},
+			// 阶段 5.2：ent.Account 已无明文 Credentials 字段（列已删）
+			Extra: map[string]any{},
 			Status:      service.StatusActive,
 			Schedulable: true,
 		})

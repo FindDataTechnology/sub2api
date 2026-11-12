@@ -133,13 +133,13 @@ func (r *apiKeyRepository) apiKeyAuthoritativePlaintext(m *dbent.APIKey) (string
 	if !errors.Is(err, errNoAPIKeyCiphertext) {
 		return "", err
 	}
-	if m.Key == "" {
-		return "", nil
-	}
+	// 阶段 5.2：明文列 `key` 已**物理删除**。没有密文 = 这一行没有可用 key，
+	// 返回空串让调用方判"查不到"（与原来"空 key 行"的语义一致）。
+	//
+	// 不再报硬错误：drop 之后"空 key（tombstone/空壳行）"与"密文丢了"在数据上
+	// 不可区分，对它报错会让鉴权路径从 401 变成 500 —— 而 401 才是正确语义。
 	apiKeyCiphertextMissingLookups.Add(1)
 	logger.LegacyPrintf("repository.apikey",
-		"[CredentialAtRest] missing ciphertext: api key %d has a plaintext key but no key_encrypted", m.ID)
-	return "", fmt.Errorf(
-		"api key %d has a plaintext key but no key_encrypted: "+
-			"stage-3.4 removed the plaintext fallback; re-run cmd/credential-backfill", m.ID)
+		"[CredentialAtRest] no ciphertext: api key %d has no key_encrypted (treated as unusable)", m.ID)
+	return "", nil
 }

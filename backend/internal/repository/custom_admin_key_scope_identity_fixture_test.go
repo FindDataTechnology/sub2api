@@ -34,6 +34,11 @@ func seedScopedIdentityMatrix(t *testing.T) (*dbent.Client, map[string]int64, se
 	_, err = db.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`)
 	require.NoError(t, err)
 	require.NoError(t, client.Schema.Create(ctx), "用 ent 自己的 migrate 建表")
+	// 本文件是**语义金标**：它拿改造前的 SQL 谓词（"accounts"."credentials"->'key'）
+	// 当基准，逐条与 Go 侧比对。阶段 5.2 之后 ent schema 不再声明明文列，
+	// 所以这里显式把列加回来 —— 金标必须在它被录下来的那个形态上继续可跑，
+	// 否则等价性证据随 drop 一起消失（那才是真损失）。
+	restoreLegacyPlaintextColumns(t, db)
 
 	// 形状矩阵：字符串 / 数字 / 前后空白 / 缺字段 / 空串 / 大小写。
 	matrix := []struct {
@@ -64,7 +69,6 @@ func seedScopedIdentityMatrix(t *testing.T) (*dbent.Client, map[string]int64, se
 			SetName("matrix-" + row.name).
 			SetPlatform(service.PlatformOpenAI).
 			SetType(service.AccountTypeOAuth).
-			SetCredentials(row.creds).
 			SetCredentialsMeta(cols.Meta).
 			SetCredentialsHash(*cols.Hash)
 		if cols.Encrypted != nil {
@@ -74,6 +78,10 @@ func seedScopedIdentityMatrix(t *testing.T) (*dbent.Client, map[string]int64, se
 			create = create.SetCredentialsAPIKeyHash(*cols.APIKeyHash)
 		}
 		m, err := create.Save(ctx)
+		require.NoError(t, err)
+		// 明文写进金标列：SQL 侧谓词读的就是这一列，Go 侧读的是同一份内容的密文。
+		_, err = db.ExecContext(ctx, `UPDATE accounts SET credentials = $2::jsonb WHERE id = $1`,
+			m.ID, mustJSON(t, row.creds))
 		require.NoError(t, err)
 		ids[row.name] = m.ID
 	}

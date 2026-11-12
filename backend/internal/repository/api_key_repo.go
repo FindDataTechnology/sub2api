@@ -60,7 +60,6 @@ func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
 func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) error {
 	builder := r.client.APIKey.Create().
 		SetUserID(key.UserID).
-		SetKey(key.Key).
 		SetName(key.Name).
 		SetStatus(key.Status).
 		SetNillableGroupID(key.GroupID).
@@ -125,7 +124,7 @@ func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIK
 func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (string, int64, error) {
 	m, err := r.activeQuery().
 		Where(apikey.IDEQ(id)).
-		Select(apikey.FieldKey, apikey.FieldKeyEncrypted, apikey.FieldUserID).
+		Select(apikey.FieldKeyEncrypted, apikey.FieldUserID).
 		Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
@@ -151,11 +150,8 @@ func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.A
 			}).
 			WithGroup()
 	}
-	m, err := r.lookupAPIKeyByHashThenPlaintext(ctx, key, apply)
-	if err != nil {
-		return nil, err
-	}
-	return apiKeyEntityToService(m), nil
+	// lookup 已返回 service 对象（明文来自解密，实体上已无 Key 字段）
+	return r.lookupAPIKeyByHashThenPlaintext(ctx, key, apply)
 }
 
 // lookupAPIKeyByHashThenPlaintext 是鉴权路径的唯一查找实现（阶段三 3.5b）。
@@ -165,13 +161,15 @@ func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.A
 //  2. 命中后 MUST 再拿明文做一次常量时间比对。指纹只是索引，不是凭据：
 //     指纹与明文脱节（旧数据算错、写路径漏带、人工改库）时必须判"查不到"，
 //     绝不能因为指纹撞上就放行。这是"选可验证更严的一侧"。
-//  3. 指纹没命中 → 回落明文查找（该行尚未回填指纹），并计数。
-//     回填完成、且所有写路径都带指纹之后，这个分支可以删掉。
+//  3. 指纹没命中 = 查不到（阶段 3.4 删掉了"按明文列查"的回落）。
+//
+// 阶段 5.2 起明文列 `key` 已物理删除，所以本函数**直接返回 service 层对象**，
+// 由它携带解密出来的明文：实体上已经没有 `Key` 字段可塞了。
 func (r *apiKeyRepository) lookupAPIKeyByHashThenPlaintext(
 	ctx context.Context,
 	key string,
 	apply func(*dbent.APIKeyQuery) *dbent.APIKeyQuery,
-) (*dbent.APIKey, error) {
+) (*service.APIKey, error) {
 	if key == "" {
 		return nil, service.ErrAPIKeyNotFound
 	}
@@ -180,8 +178,8 @@ func (r *apiKeyRepository) lookupAPIKeyByHashThenPlaintext(
 	byHash, err := apply(r.activeQuery().Where(apikey.KeyHashEQ(hash))).Only(ctx)
 	switch {
 	case err == nil:
-		// 复核要用的明文来自**密文**（drop 明文列之后那是唯一副本）；
-		// 这里比对的是"权威明文 vs 入参"，不是"明文列 vs 入参"。
+		// 复核要用的明文来自**密文**（明文列 drop 之后那是唯一副本）；
+		// 这里比对的是"权威明文 vs 入参"。
 		plaintext, perr := r.apiKeyAuthoritativePlaintext(byHash)
 		if perr != nil {
 			logger.LegacyPrintf("repository.apikey",
@@ -189,16 +187,13 @@ func (r *apiKeyRepository) lookupAPIKeyByHashThenPlaintext(
 			return nil, service.ErrAPIKeyNotFound
 		}
 		if plaintext == "" || !constantTimeEqualAPIKey(plaintext, key) {
-			// 指纹命中但明文不等：拒绝，而不是回落明文给它第二次机会。
-			// 回落会让"指纹算错的坏行"变成可认证，那正是要防的方向。
+			// 指纹命中但明文不等：拒绝，而不是给坏行第二次机会。
 			logger.LegacyPrintf("repository.apikey",
 				"[APIKeyLookup] key_hash matched but plaintext differs (id=%d); rejecting", byHash.ID)
 			return nil, service.ErrAPIKeyNotFound
 		}
-		// 把权威明文放回实体：调用方（掩码/日志/缓存键）拿到的必须是明文，
-		// drop 之后它只能来自解密。
-		byHash.Key = plaintext
-		return byHash, nil
+		// 明文只存在于解密结果里；调用方（掩码/日志/缓存键）拿到的必须是它。
+		return apiKeyEntityToServiceWithKey(byHash, plaintext), nil
 	case !dbent.IsNotFound(err):
 		return nil, err
 	}
@@ -227,9 +222,8 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 		return q.Select(
 			apikey.FieldID,
 			// 复核需要明文：指纹只用于定位，命中后必须再比对一次（见 lookup 的注释）。
-			// 明文**优先取自密文**，所以这里必须一起选出 key_encrypted——
-			// 漏选会让权威明文退化成明文列，drop 之后就没人可退了。
-			apikey.FieldKey,
+			// 明文列已物理删除（5.2），明文只能来自 key_encrypted——
+			// 这里漏选它，整条鉴权路径会拿不到明文而全判"查不到"。
 			apikey.FieldKeyEncrypted,
 			apikey.FieldUserID,
 			apikey.FieldGroupID,
@@ -334,11 +328,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				)
 			})
 	}
-	m, err := r.lookupAPIKeyByHashThenPlaintext(ctx, key, apply)
-	if err != nil {
-		return nil, err
-	}
-	return apiKeyEntityToService(m), nil
+	return r.lookupAPIKeyByHashThenPlaintext(ctx, key, apply)
 }
 
 func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey, fields service.APIKeyUpdateFields) error {
@@ -444,18 +434,23 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey, fiel
 }
 
 func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
-	// 存在唯一键约束 生成tombstone key 用来释放原key，长度远小于 128，满足 schema 限制
-	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
+	return r.applyAPIKeyTombstone(ctx, r.client, id, apiKeyTombstoneKey(id))
+}
+
+// applyAPIKeyTombstone 是墓碑写法的**唯一实现**（Delete 与 DeleteWithAudit 共用）。
+//
+// 阶段 5.2：明文列 `api_keys.key` 已物理删除，墓碑不再体现为"改写明文 key"，
+// 而是把**指纹与密文一起改写成墓碑值**：
+//   - 指纹必须覆盖，否则已删除的 key 仍能被 key_hash 命中（唯一索引也释放不掉）；
+//   - 密文必须覆盖成墓碑值（无加密器时显式清空），不能留着旧凭据。
+func (r *apiKeyRepository) applyAPIKeyTombstone(ctx context.Context, client *dbent.Client, id int64, tombstoneKey string) error {
 	// 显式软删除：避免依赖 Hook 行为，确保 deleted_at 一定被设置。
-	// tombstone 会改写明文 key，所以派生列 MUST 一起改：
-	// 留着旧指纹等于"已删除的 key 仍能被 key_hash 命中"。
 	tombstoneHash, tombstoneEncrypted, cryptoErr := apiKeyDerivedColumns(tombstoneKey, r.cryptor)
 	if cryptoErr != nil {
 		return cryptoErr
 	}
-	update := r.client.APIKey.Update().
+	update := client.APIKey.Update().
 		Where(apikey.IDEQ(id), apikey.DeletedAtIsNil()).
-		SetKey(tombstoneKey).
 		SetDeletedAt(time.Now())
 	if tombstoneHash != "" {
 		update = update.SetKeyHash(tombstoneHash)
@@ -474,7 +469,7 @@ func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 		return err
 	}
 	if affected == 0 {
-		exists, err := r.client.APIKey.Query().
+		exists, err := client.APIKey.Query().
 			Where(apikey.IDEQ(id)).
 			Exist(mixins.SkipSoftDelete(ctx))
 		if err != nil {
@@ -488,14 +483,19 @@ func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+// apiKeyTombstoneKey 生成释放唯一键用的墓碑值（长度远小于 128，满足 schema 限制）。
+func apiKeyTombstoneKey(id int64) string {
+	return fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
+}
+
 // DeleteWithAudit keeps the legacy method name for rolling-upgrade compatibility.
 // It atomically tombstones and soft-deletes the key without retaining credential
 // material. Tombstoning releases the unique key value for safe reuse.
 func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error {
-	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
+	tombstoneKey := apiKeyTombstoneKey(id)
 
 	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
-		return r.deleteWithTombstone(ctx, existingTx.Client(), id, tombstoneKey)
+		return r.applyAPIKeyTombstone(ctx, existingTx.Client(), id, tombstoneKey)
 	}
 
 	tx, err := r.client.Tx(ctx)
@@ -508,7 +508,7 @@ func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error 
 		exec = tx.Client()
 	}
 
-	if err := r.deleteWithTombstone(ctx, exec, id, tombstoneKey); err != nil {
+	if err := r.applyAPIKeyTombstone(ctx, exec, id, tombstoneKey); err != nil {
 		return err
 	}
 
@@ -518,41 +518,17 @@ func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error 
 	return nil
 }
 
-func (r *apiKeyRepository) deleteWithTombstone(ctx context.Context, exec *dbent.Client, id int64, tombstoneKey string) error {
-	res, err := exec.ExecContext(ctx, `
-		UPDATE api_keys
-		SET key = $1, deleted_at = NOW(), updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL`, tombstoneKey, id)
-	if err != nil {
-		return err
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		// 并发/重复删除:记录已存在(已软删)则幂等返回 nil(defer 回滚空事务),否则 NotFound。
-		exists, existErr := r.client.APIKey.Query().
-			Where(apikey.IDEQ(id)).
-			Exist(mixins.SkipSoftDelete(ctx))
-		if existErr != nil {
-			return existErr
-		}
-		if exists {
-			return nil
-		}
-		return service.ErrAPIKeyNotFound
-	}
-	return nil
-}
-
 func (r *apiKeyRepository) apiKeyListByUserIDQuery(userID int64, filters service.APIKeyListFilters) *dbent.APIKeyQuery {
 	q := r.activeQuery().Where(apikey.UserIDEQ(userID))
 
 	if filters.Search != "" {
+		// 阶段 5.2：明文列已物理删除，**按 key 子串搜索在数据上不可能了**。
+		// 现在的语义：名字子串匹配，或搜索词恰好是一把完整 key（按指纹精确命中）。
+		// 为什么不做"解密后模糊匹配"：那要先取全量再在内存过滤，
+		// 分页/计数会变成"先分页后过滤"——总数与页内容对不上，比少一个搜索能力更糟。
 		q = q.Where(apikey.Or(
 			apikey.NameContainsFold(filters.Search),
-			apikey.KeyContainsFold(filters.Search),
+			apikey.KeyHashEQ(sha256Hex([]byte(filters.Search))),
 		))
 	}
 	if filters.Status != "" {
@@ -870,26 +846,36 @@ func (r *apiKeyRepository) CountByGroupID(ctx context.Context, groupID int64) (i
 	return int64(count), err
 }
 
-func (r *apiKeyRepository) ListKeysByUserID(ctx context.Context, userID int64) ([]string, error) {
-	keys, err := r.activeQuery().
-		Where(apikey.UserIDEQ(userID)).
-		Select(apikey.FieldKey).
-		Strings(ctx)
+// ListKeysByUserID / ListKeysByGroupID 返回**明文** key 列表（调用方要做掩码/统计）。
+//
+// 阶段 5.2 起明文列已物理删除，所以只能逐行解密 `key_encrypted`：
+//   - Select 里必须带 ID 与 KeyEncrypted（只 Select 解密列拿不到行标识，报错时无法归因）；
+//   - 解不开的行**跳过并打日志**，不返回空串——空串会被当成"一把空 key"混进列表，
+//     在掩码/统计里与真实行同形。
+func (r *apiKeyRepository) listPlaintextKeys(ctx context.Context, q *dbent.APIKeyQuery) ([]string, error) {
+	rows, err := q.Select(apikey.FieldID, apikey.FieldKeyEncrypted).All(ctx)
 	if err != nil {
 		return nil, err
+	}
+	keys := make([]string, 0, len(rows))
+	for _, m := range rows {
+		plaintext, perr := r.apiKeyAuthoritativePlaintext(m)
+		if perr != nil || plaintext == "" {
+			logger.LegacyPrintf("repository.apikey",
+				"[APIKeyList] skip id=%d: cannot resolve plaintext (%v)", m.ID, perr)
+			continue
+		}
+		keys = append(keys, plaintext)
 	}
 	return keys, nil
 }
 
+func (r *apiKeyRepository) ListKeysByUserID(ctx context.Context, userID int64) ([]string, error) {
+	return r.listPlaintextKeys(ctx, r.activeQuery().Where(apikey.UserIDEQ(userID)))
+}
+
 func (r *apiKeyRepository) ListKeysByGroupID(ctx context.Context, groupID int64) ([]string, error) {
-	keys, err := r.activeQuery().
-		Where(apikey.GroupIDEQ(groupID)).
-		Select(apikey.FieldKey).
-		Strings(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return keys, nil
+	return r.listPlaintextKeys(ctx, r.activeQuery().Where(apikey.GroupIDEQ(groupID)))
 }
 
 // IncrementQuotaUsed 使用 Ent 原子递增 quota_used 字段并返回新值
@@ -1024,13 +1010,6 @@ func (r *apiKeyRepository) GetRateLimitData(ctx context.Context, id int64) (resu
 // 现在只剩两处调用，都在 `lookupAPIKeyByHashThenPlaintext` 之后 —— 那里已经把 Key
 // 归一成权威明文（密文优先），所以取实体上的值就是对的。
 // 任何**新**的读路径请用 apiKeyEntityToServiceResolvingKey / apiKeyEntityToServiceWithKey。
-func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
-	if m == nil {
-		return nil
-	}
-	return apiKeyEntityToServiceWithKey(m, m.Key)
-}
-
 // apiKeyEntityToServiceResolvingKey 把 Key 解析成**权威明文（密文优先）**再映射。
 //
 // 为什么展示路径也要解密：`service.APIKey.Key` 会被掩码/日志/缓存键使用，

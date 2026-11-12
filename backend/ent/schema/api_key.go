@@ -34,10 +34,10 @@ func (APIKey) Mixin() []ent.Mixin {
 func (APIKey) Fields() []ent.Field {
 	return []ent.Field{
 		field.Int64("user_id"),
-		field.String("key").
-			MaxLen(128).
-			NotEmpty().
-			Unique(),
+		// ⚠️ 明文列 `key` 已在阶段 5.2 删除（迁移 251_credential_drop_plaintext_columns）。
+		// 明文只存在于 key_encrypted（权威副本，解密后使用），定位走 key_hash。
+		// 删字段必须先于 DDL：ent 的 SELECT 列出 schema 全部字段，列没了还留字段
+		// 会让所有 ent 查询 `column "key" does not exist`。
 		// key_hash: sha256(key) 的 hex，用于"拿 key 找行"而不必解密任何东西。
 		// 可空：迁移完成前为 NULL（Postgres 的唯一索引允许多个 NULL），
 		// 迁移完成后由应用层保证写入。
