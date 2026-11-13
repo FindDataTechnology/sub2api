@@ -1,0 +1,51 @@
+{
+  "_why": "按线归因的唯一真源。改这里，然后跑 node tools/gen-line-aliases.mjs 重新生成两个报表里的别名 CTE。不要在 .sql 里手改——那是被生成出来的区域，--check 会红。",
+  "_rules": [
+    "seg = api_keys.name 的第一个连字符之前那一段（split_part(name,'-',1)）。",
+    "line = 报表里显示的名字；同一条线可以有多个 seg（同一实体的不同写法）。",
+    "why = 为什么这个 seg 属于这条线。不写理由的归并等同于猜，闸会拒。",
+    "不确定的键不要加进来——它们会落进 unknown 桶单列，那比编一个归属诚实。"
+  ],
+  "aliases": [
+    {
+      "seg": "lex",
+      "line": "识律 lex",
+      "why": "主键名"
+    },
+    {
+      "seg": "lexkg",
+      "line": "识律 lex",
+      "why": "同一产品的知识图谱键，2026-11-10 归并"
+    },
+    {
+      "seg": "wanxing",
+      "line": "萬星 wanxing",
+      "why": "主键名"
+    },
+    {
+      "seg": "wx",
+      "line": "萬星 wanxing",
+      "why": "萬星简写，2026-11-10 归并"
+    },
+    {
+      "seg": "law",
+      "line": "law-bench",
+      "why": "law-bench 早期短名"
+    },
+    {
+      "seg": "lawbench",
+      "line": "law-bench",
+      "why": "law-bench 无连字符写法"
+    },
+    {
+      "seg": "yizuo",
+      "line": "壹座 yizuo",
+      "why": "平台自身承载的调用"
+    },
+    {
+      "seg": "platform",
+      "line": "壹座 platform",
+      "why": "平台内部/演示 key"
+    }
+  ]
+}

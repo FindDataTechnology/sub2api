@@ -44,17 +44,19 @@ WITH usage AS (
     FROM usage_logs u
     WHERE u.created_at >= now() - make_interval(days => :days)
 ),
+-- >>> generated:line-aliases（真源 tools/line-aliases.json；改它，别改这里）
 aliases(seg, line, why) AS (
     VALUES
-        ('lex',      '识律 lex',       '主键名'),
-        ('lexkg',    '识律 lex',       '同一产品的知识图谱键，2026-11-10 归并'),
-        ('wanxing',  '萬星 wanxing',   '主键名'),
-        ('wx',       '萬星 wanxing',   '萬星简写，2026-11-10 归并'),
-        ('law',      'law-bench',      'law-bench 早期短名'),
-        ('lawbench', 'law-bench',      'law-bench 无连字符写法'),
-        ('yizuo',    '壹座 yizuo',     '平台自身承载的调用'),
-        ('platform', '壹座 platform',  '平台内部/演示 key')
+        ('lex',      '识律 lex',      '主键名'),
+        ('lexkg',    '识律 lex',      '同一产品的知识图谱键，2026-11-10 归并'),
+        ('wanxing',  '萬星 wanxing',  '主键名'),
+        ('wx',       '萬星 wanxing',  '萬星简写，2026-11-10 归并'),
+        ('law',      'law-bench',     'law-bench 早期短名'),
+        ('lawbench', 'law-bench',     'law-bench 无连字符写法'),
+        ('yizuo',    '壹座 yizuo',    '平台自身承载的调用'),
+        ('platform', '壹座 platform', '平台内部/演示 key')
 ),
+-- <<< generated:line-aliases
 attributed AS (
     SELECT COALESCE(a.line, 'unknown') AS line,
            CASE WHEN a.line IS NULL THEN split_part(COALESCE(k.name, '(deleted key)'), '-', 1) END AS raw_seg,
@@ -82,13 +84,19 @@ WITH errs AS (
     WHERE e.created_at >= now() - make_interval(days => :err_days)
       AND k.name <> 'wx-wizard-verify'          -- 噪声键：见文件头，统计排除而非删数据
 ),
-aliases(seg, line) AS (
+-- >>> generated:line-aliases（真源 tools/line-aliases.json；改它，别改这里）
+aliases(seg, line, why) AS (
     VALUES
-        ('lex','识律 lex'), ('lexkg','识律 lex'),
-        ('wanxing','萬星 wanxing'), ('wx','萬星 wanxing'),
-        ('law','law-bench'), ('lawbench','law-bench'),
-        ('yizuo','壹座 yizuo'), ('platform','壹座 platform')
+        ('lex',      '识律 lex',      '主键名'),
+        ('lexkg',    '识律 lex',      '同一产品的知识图谱键，2026-11-10 归并'),
+        ('wanxing',  '萬星 wanxing',  '主键名'),
+        ('wx',       '萬星 wanxing',  '萬星简写，2026-11-10 归并'),
+        ('law',      'law-bench',     'law-bench 早期短名'),
+        ('lawbench', 'law-bench',     'law-bench 无连字符写法'),
+        ('yizuo',    '壹座 yizuo',    '平台自身承载的调用'),
+        ('platform', '壹座 platform', '平台内部/演示 key')
 ),
+-- <<< generated:line-aliases
 tagged AS (
     SELECT COALESCE(a.line, 'unknown') AS line,
            CASE WHEN a.line IS NULL THEN split_part(COALESCE(k.name,'(deleted key)'), '-', 1) END AS raw_seg,
@@ -115,13 +123,19 @@ WITH usage AS (
     WHERE u.created_at >= now() - make_interval(days => :days)
       AND u.duration_ms IS NOT NULL
 ),
-aliases(seg, line) AS (
+-- >>> generated:line-aliases（真源 tools/line-aliases.json；改它，别改这里）
+aliases(seg, line, why) AS (
     VALUES
-        ('lex','识律 lex'), ('lexkg','识律 lex'),
-        ('wanxing','萬星 wanxing'), ('wx','萬星 wanxing'),
-        ('law','law-bench'), ('lawbench','law-bench'),
-        ('yizuo','壹座 yizuo'), ('platform','壹座 platform')
+        ('lex',      '识律 lex',      '主键名'),
+        ('lexkg',    '识律 lex',      '同一产品的知识图谱键，2026-11-10 归并'),
+        ('wanxing',  '萬星 wanxing',  '主键名'),
+        ('wx',       '萬星 wanxing',  '萬星简写，2026-11-10 归并'),
+        ('law',      'law-bench',     'law-bench 早期短名'),
+        ('lawbench', 'law-bench',     'law-bench 无连字符写法'),
+        ('yizuo',    '壹座 yizuo',    '平台自身承载的调用'),
+        ('platform', '壹座 platform', '平台内部/演示 key')
 ),
+-- <<< generated:line-aliases
 tagged AS (
     SELECT COALESCE(a.line, 'unknown') AS line, us.model_lower, us.duration_ms, us.actual_cost
     FROM usage us
