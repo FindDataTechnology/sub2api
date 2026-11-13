@@ -60,15 +60,14 @@ func TestAccountRepository_GrokCredentialConditionalMutationsAreEligibleAndAtomi
 		require.Contains(t, normalized, "a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW()")
 		require.Contains(t, normalized, "a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW()")
 		require.Contains(t, normalized, "a.overload_until IS NULL OR a.overload_until <= NOW()")
-		require.Contains(t, normalized, "a.credentials_hash = $11")
-		require.Contains(t, normalized, "a.proxy_id IS NOT DISTINCT FROM $8")
+		require.Contains(t, normalized, "a.credentials_hash = $10")
+		require.Contains(t, normalized, "a.proxy_id IS NOT DISTINCT FROM $7")
 		require.Contains(t, normalized, "NOT EXISTS ( SELECT 1 FROM proxies p")
 		require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
-		require.Len(t, exec.execArgs[0], 11)
-		require.Equal(t, snapshot.CredentialsJSON, exec.execArgs[0][6])
-		require.Equal(t, &proxyID, exec.execArgs[0][7])
-		require.Equal(t, string(service.GrokCredentialReasonProxyInvalid), exec.execArgs[0][8])
-		require.Equal(t, service.SchedulerOutboxEventAccountChanged, exec.execArgs[0][9])
+		require.Len(t, exec.execArgs[0], 10)
+		require.Equal(t, &proxyID, exec.execArgs[0][6])
+		require.Equal(t, string(service.GrokCredentialReasonProxyInvalid), exec.execArgs[0][7])
+		require.Equal(t, service.SchedulerOutboxEventAccountChanged, exec.execArgs[0][8])
 	})
 
 	t.Run("transient", func(t *testing.T) {
@@ -88,13 +87,12 @@ func TestAccountRepository_GrokCredentialConditionalMutationsAreEligibleAndAtomi
 		require.Contains(t, normalized, "a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW()")
 		require.Contains(t, normalized, "a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW()")
 		require.Contains(t, normalized, "a.overload_until IS NULL OR a.overload_until <= NOW()")
-		require.Contains(t, normalized, "a.credentials_hash = $10")
-		require.Contains(t, normalized, "a.proxy_id IS NOT DISTINCT FROM $8")
+		require.Contains(t, normalized, "a.credentials_hash = $9")
+		require.Contains(t, normalized, "a.proxy_id IS NOT DISTINCT FROM $7")
 		require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
-		require.Len(t, exec.execArgs[0], 10)
-		require.Equal(t, snapshot.CredentialsJSON, exec.execArgs[0][6])
-		require.Equal(t, &proxyID, exec.execArgs[0][7])
-		require.Equal(t, service.SchedulerOutboxEventAccountChanged, exec.execArgs[0][8])
+		require.Len(t, exec.execArgs[0], 9)
+		require.Equal(t, &proxyID, exec.execArgs[0][6])
+		require.Equal(t, service.SchedulerOutboxEventAccountChanged, exec.execArgs[0][7])
 	})
 }
 
@@ -156,13 +154,15 @@ func TestAccountRepository_SetGrokOAuthErrorIfCredentialsUnchanged_RequiresActiv
 	require.Contains(t, normalized, "platform = $4")
 	require.Contains(t, normalized, "type = $5")
 	require.Contains(t, normalized, "status = $6")
-	require.Contains(t, normalized, "credentials_hash = $9")
+	require.Contains(t, normalized, "credentials_hash = $8")
 	// 该谓词已搬到 Go（先返回 false,nil），SQL 里 MUST 不再依赖明文列——
 	// 这是阶段四 drop 明文列的前提之一。
 	require.NotContains(t, normalized, "refresh_token")
 	require.Len(t, exec.execArgs, 1)
 	require.Equal(t, service.StatusActive, exec.execArgs[0][5])
-	require.Contains(t, exec.execArgs[0][6], `"_token_version":7`)
+	// 凭据文档不再作为独立参数传入（那是 §阶段四重构残留的无人引用参数），
+	// 但仍必须通过哈希进到语句里——否则 CAS 会匹配到任意一行。
+	require.Equal(t, credentialHashOfJSONString(`{"access_token":"observed","_token_version":7}`), exec.execArgs[0][7])
 }
 
 func TestAccountRepository_SetGrokOAuthErrorIfCredentialsUnchanged_AppliedWritesOutbox(t *testing.T) {
@@ -182,7 +182,7 @@ func TestAccountRepository_SetGrokOAuthErrorIfCredentialsUnchanged_AppliedWrites
 	normalized := normalizeSQLWhitespace(exec.execQueries[0])
 	require.Contains(t, normalized, "WITH updated AS")
 	require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
-	require.Contains(t, normalized, "SELECT $8, updated.id, NULL, NULL FROM updated")
+	require.Contains(t, normalized, "SELECT $7, updated.id, NULL, NULL FROM updated")
 }
 
 func TestAccountRepository_SetGrokOAuthRefreshErrorIfCredentialsUnchanged_UsesAttemptCredentialsAndProxy(t *testing.T) {
@@ -202,13 +202,13 @@ func TestAccountRepository_SetGrokOAuthRefreshErrorIfCredentialsUnchanged_UsesAt
 	require.False(t, applied)
 	require.Len(t, exec.execQueries, 1)
 	normalized := normalizeSQLWhitespace(exec.execQueries[0])
-	require.Contains(t, normalized, "credentials_hash = $10")
-	require.Contains(t, normalized, "proxy_id IS NOT DISTINCT FROM $8")
+	require.Contains(t, normalized, "credentials_hash = $9")
+	require.Contains(t, normalized, "proxy_id IS NOT DISTINCT FROM $7")
 	require.NotContains(t, normalized, "credentials->>'refresh_token'",
 		"background invalid_grant CAS must accept the attempted refresh token; only reconciliation requires it missing")
-	require.Equal(t, &proxyID, exec.execArgs[0][7])
+	require.Equal(t, &proxyID, exec.execArgs[0][6])
 	require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
-	require.Len(t, exec.execArgs[0], 10)
+	require.Len(t, exec.execArgs[0], 9)
 }
 
 func TestAccountRepository_SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnchanged_UsesAttemptCredentialsAndProxy(t *testing.T) {
@@ -229,11 +229,11 @@ func TestAccountRepository_SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnch
 	require.False(t, applied)
 	require.Len(t, exec.execQueries, 1)
 	normalized := normalizeSQLWhitespace(exec.execQueries[0])
-	require.Contains(t, normalized, "credentials_hash = $10")
-	require.Contains(t, normalized, "proxy_id IS NOT DISTINCT FROM $8")
+	require.Contains(t, normalized, "credentials_hash = $9")
+	require.Contains(t, normalized, "proxy_id IS NOT DISTINCT FROM $7")
 	require.Contains(t, normalized, "a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until < $1")
-	require.Len(t, exec.execArgs[0], 10)
-	require.Equal(t, &proxyID, exec.execArgs[0][7])
+	require.Len(t, exec.execArgs[0], 9)
+	require.Equal(t, &proxyID, exec.execArgs[0][6])
 	require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
 }
 

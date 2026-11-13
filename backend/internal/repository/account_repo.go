@@ -1615,9 +1615,9 @@ func (r *accountRepository) SetGrokCredentialErrorIfMatch(
 			AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW())
 			AND (a.overload_until IS NULL OR a.overload_until <= NOW())
 			AND (a.auto_pause_on_expired IS NOT TRUE OR a.expires_at IS NULL OR a.expires_at > NOW())
-			AND a.credentials_hash = $11
-			AND a.proxy_id IS NOT DISTINCT FROM $8
-			AND ($2 <> $9 OR (
+			AND a.credentials_hash = $10
+			AND a.proxy_id IS NOT DISTINCT FROM $7
+			AND ($2 <> $8 OR (
 				a.proxy_id IS NOT NULL AND NOT EXISTS (
 					SELECT 1 FROM proxies p WHERE p.id = a.proxy_id AND p.deleted_at IS NULL
 				)
@@ -1625,9 +1625,9 @@ func (r *accountRepository) SetGrokCredentialErrorIfMatch(
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
-		SELECT $10, updated.id, NULL, NULL FROM updated
+		SELECT $9, updated.id, NULL, NULL FROM updated
 	`, service.StatusError, errorMsg, id, service.StatusActive, service.PlatformGrok, service.AccountTypeOAuth,
-		snapshot.CredentialsJSON, snapshot.ProxyID, string(service.GrokCredentialReasonProxyInvalid),
+		snapshot.ProxyID, string(service.GrokCredentialReasonProxyInvalid),
 		service.SchedulerOutboxEventAccountChanged, credentialHashOfRawJSON(snapshot.CredentialsJSON))
 	if err != nil {
 		return false, err
@@ -1680,11 +1680,11 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 			AND a.platform = $4
 			AND a.type = $5
 			AND a.status = $6
-			AND a.credentials_hash = $9
+			AND a.credentials_hash = $8
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
-		SELECT $8, updated.id, NULL, NULL FROM updated
+		SELECT $7, updated.id, NULL, NULL FROM updated
 	`,
 		service.StatusError,
 		errorMsg,
@@ -1692,7 +1692,6 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 		service.PlatformGrok,
 		service.AccountTypeOAuth,
 		service.StatusActive,
-		string(expectedJSON),
 		service.SchedulerOutboxEventAccountChanged,
 		credentialHashOfRawJSON(string(expectedJSON)),
 	)
@@ -1819,12 +1818,12 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 			AND a.platform = $4
 			AND a.type = $5
 			AND a.status = $6
-			AND a.credentials_hash = $10
-			AND a.proxy_id IS NOT DISTINCT FROM $8
+			AND a.credentials_hash = $9
+			AND a.proxy_id IS NOT DISTINCT FROM $7
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
-		SELECT $9, updated.id, NULL, NULL FROM updated
+		SELECT $8, updated.id, NULL, NULL FROM updated
 	`,
 		service.StatusError,
 		errorMsg,
@@ -1832,7 +1831,6 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 		service.PlatformGrok,
 		service.AccountTypeOAuth,
 		service.StatusActive,
-		string(expectedJSON),
 		expectedProxyID,
 		service.SchedulerOutboxEventAccountChanged,
 		credentialHashOfRawJSON(string(expectedJSON)),
@@ -1880,13 +1878,13 @@ func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnc
 			AND a.platform = $4
 			AND a.type = $5
 			AND a.status = $6
-			AND a.credentials_hash = $10
-			AND a.proxy_id IS NOT DISTINCT FROM $8
+			AND a.credentials_hash = $9
+			AND a.proxy_id IS NOT DISTINCT FROM $7
 			AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until < $1)
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
-		SELECT $9, updated.id, NULL, NULL FROM updated
+		SELECT $8, updated.id, NULL, NULL FROM updated
 	`,
 		until,
 		reason,
@@ -1894,7 +1892,6 @@ func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnc
 		service.PlatformGrok,
 		service.AccountTypeOAuth,
 		service.StatusActive,
-		string(expectedJSON),
 		expectedProxyID,
 		service.SchedulerOutboxEventAccountChanged,
 		credentialHashOfRawJSON(string(expectedJSON)),
@@ -2686,14 +2683,14 @@ func (r *accountRepository) SetGrokCredentialTempUnschedulableIfMatch(
 			AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW())
 			AND (a.overload_until IS NULL OR a.overload_until <= NOW())
 			AND (a.auto_pause_on_expired IS NOT TRUE OR a.expires_at IS NULL OR a.expires_at > NOW())
-			AND a.credentials_hash = $10
-			AND a.proxy_id IS NOT DISTINCT FROM $8
+			AND a.credentials_hash = $9
+			AND a.proxy_id IS NOT DISTINCT FROM $7
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
-		SELECT $9, updated.id, NULL, NULL FROM updated
+		SELECT $8, updated.id, NULL, NULL FROM updated
 	`, until, reason, id, service.StatusActive, service.PlatformGrok, service.AccountTypeOAuth,
-		snapshot.CredentialsJSON, snapshot.ProxyID, service.SchedulerOutboxEventAccountChanged, credentialHashOfRawJSON(snapshot.CredentialsJSON))
+		snapshot.ProxyID, service.SchedulerOutboxEventAccountChanged, credentialHashOfRawJSON(snapshot.CredentialsJSON))
 	if err != nil {
 		return false, err
 	}
@@ -3073,23 +3070,23 @@ func (r *accountRepository) updateUpstreamBillingProbeSnapshotInTx(
 		SET
 			extra = COALESCE(extra, '{}'::jsonb) || $1::jsonb,
 			rate_multiplier = CASE
-				WHEN $10::numeric IS NOT NULL
+				WHEN $9::numeric IS NOT NULL
 					AND extra @> '{"upstream_billing_probe_enabled": true}'::jsonb
 					AND extra @> '{"upstream_billing_rate_sync_enabled": true}'::jsonb
-				THEN $10::numeric
+				THEN $9::numeric
 				ELSE rate_multiplier
 			END,
 			updated_at = NOW()
 		WHERE id = $2
 			AND platform = $3
 			AND type = $4
-			AND credentials_hash = $11
-			AND proxy_id IS NOT DISTINCT FROM $6
-			AND COALESCE(extra -> 'upstream_billing_probe', 'null'::jsonb) = $7::jsonb
-			AND COALESCE(extra -> 'upstream_billing_probe_enabled', 'null'::jsonb) = $8::jsonb
-			AND COALESCE(extra -> 'upstream_billing_rate_sync_enabled', 'null'::jsonb) = $9::jsonb
+			AND credentials_hash = $10
+			AND proxy_id IS NOT DISTINCT FROM $5
+			AND COALESCE(extra -> 'upstream_billing_probe', 'null'::jsonb) = $6::jsonb
+			AND COALESCE(extra -> 'upstream_billing_probe_enabled', 'null'::jsonb) = $7::jsonb
+			AND COALESCE(extra -> 'upstream_billing_rate_sync_enabled', 'null'::jsonb) = $8::jsonb
 			AND deleted_at IS NULL
-	`, string(payload), account.ID, account.Platform, account.Type, string(credentials), proxyID, string(expectedSnapshotJSON), string(expectedEnabledJSON), string(expectedRateSyncEnabledJSON), rateMultiplier, credentialHashOfRawJSON(string(credentials)))
+	`, string(payload), account.ID, account.Platform, account.Type, proxyID, string(expectedSnapshotJSON), string(expectedEnabledJSON), string(expectedRateSyncEnabledJSON), rateMultiplier, credentialHashOfRawJSON(string(credentials)))
 	if err != nil {
 		return err
 	}
