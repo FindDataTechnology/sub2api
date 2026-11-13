@@ -35,17 +35,19 @@ WITH usage AS (
     WHERE u.created_at >= now() - make_interval(days => :days)
 ),
 -- ── 别名映射（唯一的归一化真相；新增线在这里加一行，并写清「为什么是同一实体」）──
+-- >>> generated:line-aliases（真源 tools/line-aliases.json；改它，别改这里）
 aliases(seg, line, why) AS (
     VALUES
-        ('lex',      '识律 lex',        '主键名'),
-        ('lexkg',    '识律 lex',        '同一产品的知识图谱键，2026-11-10 归并'),
-        ('wanxing',  '萬星 wanxing',    '主键名'),
-        ('wx',       '萬星 wanxing',    '萬星简写，2026-11-10 归并'),
-        ('law',      'law-bench',       'law-bench 早期短名'),
-        ('lawbench', 'law-bench',       'law-bench 无连字符写法'),
-        ('yizuo',    '壹座 yizuo',      '平台自身承载的调用'),
-        ('platform', '壹座 platform',   '平台内部/演示 key')
+        ('lex',      '识律 lex',      '主键名'),
+        ('lexkg',    '识律 lex',      '同一产品的知识图谱键，2026-11-10 归并'),
+        ('wanxing',  '萬星 wanxing',  '主键名'),
+        ('wx',       '萬星 wanxing',  '萬星简写，2026-11-10 归并'),
+        ('law',      'law-bench',     'law-bench 早期短名'),
+        ('lawbench', 'law-bench',     'law-bench 无连字符写法'),
+        ('yizuo',    '壹座 yizuo',    '平台自身承载的调用'),
+        ('platform', '壹座 platform', '平台内部/演示 key')
 ),
+-- <<< generated:line-aliases
 attributed AS (
     SELECT COALESCE(a.line, 'unknown') AS line,
            CASE WHEN a.line IS NULL THEN split_part(COALESCE(k.name, '(deleted key)'), '-', 1) END AS raw_seg,
