@@ -311,8 +311,8 @@ func lockOpenCodeGoUsageGroup(
 			id = $2
 				AND platform = $3
 				AND type = $4
-				AND credentials_hash = $7
-				AND proxy_id IS NOT DISTINCT FROM $6,
+				AND credentials_hash = $6
+				AND proxy_id IS NOT DISTINCT FROM $5,
 			COALESCE((extra -> 'opencode_go_usage_auto_refresh')::text, 'null'),
 			COALESCE((extra -> 'opencode_go_usage_snapshot')::text, 'null')
 		FROM accounts
@@ -321,7 +321,7 @@ func lockOpenCodeGoUsageGroup(
 			AND credentials_api_key_hash = $1
 		ORDER BY id
 		FOR NO KEY UPDATE
-	`, credentialAPIKeyHashHex(apiKey), account.ID, account.Platform, account.Type, string(credentials), proxyID, credentialHashOfRawJSON(string(credentials)))
+	`, credentialAPIKeyHashHex(apiKey), account.ID, account.Platform, account.Type, proxyID, credentialHashOfRawJSON(string(credentials)))
 	if err != nil {
 		return nil, err
 	}

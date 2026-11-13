@@ -70,18 +70,48 @@ func TestSQLPlaceholdersMatchArgumentCount(t *testing.T) {
 		t.Fatalf("read repository package dir: %v", err)
 	}
 
+	// Snippet constants are routinely declared in a sibling file of the same
+	// package (e.g. ollamaCloudUsageEligibleSQL lives next to, not inside, the
+	// query that concatenates it). Collect them package-wide first, otherwise
+	// those queries look "partially assembled" and escape the strict check.
+	packageConsts := make(map[string]string)
+	parsed := make(map[string]*ast.File)
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-
 		fset := token.NewFileSet()
 		file, err := parser.ParseFile(fset, name, nil, 0)
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
 		}
-		fileConsts := packageStringConsts(file)
+		parsed[name] = file
+	}
+	// Iterate to a fixed point: snippets are built from other snippets.
+	for pass := 0; pass < 5; pass++ {
+		grew := false
+		for _, file := range parsed {
+			for constName, value := range packageStringConsts(file, packageConsts) {
+				if _, seen := packageConsts[constName]; !seen {
+					packageConsts[constName] = value
+					grew = true
+				}
+			}
+		}
+		if !grew {
+			break
+		}
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		file, ok := parsed[name]
+		if !ok {
+			continue
+		}
+
+		fset := token.NewFileSet()
 
 		ast.Inspect(file, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
@@ -106,7 +136,7 @@ func TestSQLPlaceholdersMatchArgumentCount(t *testing.T) {
 				return true
 			}
 
-			text := resolveSQLText(call.Args[queryIdx], fileConsts)
+			text := resolveSQLText(call.Args[queryIdx], packageConsts)
 			query := strings.Join(text.parts, "")
 			matches := sqlPlaceholderPattern.FindAllStringSubmatch(query, -1)
 			if len(matches) == 0 {
@@ -225,9 +255,11 @@ func resolveSQLText(expr ast.Expr, consts map[string]string) sqlText {
 	}
 }
 
-// packageStringConsts collects single-line package-level `const x = "..."` values
-// so that queries stitched from shared snippets stay fully provable.
-func packageStringConsts(file *ast.File) map[string]string {
+// packageStringConsts collects package-level const values that are fully
+// resolvable given the consts learned so far, so that queries stitched from
+// shared snippets stay provable. Snippets are routinely built from other
+// snippets, hence the caller iterates this to a fixed point.
+func packageStringConsts(file *ast.File, known map[string]string) map[string]string {
 	consts := make(map[string]string)
 	for _, decl := range file.Decls {
 		gen, ok := decl.(*ast.GenDecl)
@@ -240,7 +272,7 @@ func packageStringConsts(file *ast.File) map[string]string {
 				continue
 			}
 			for i, name := range value.Names {
-				text := resolveSQLText(value.Values[i], nil)
+				text := resolveSQLText(value.Values[i], known)
 				if text.complete && len(text.parts) > 0 {
 					consts[name.Name] = strings.Join(text.parts, "")
 				}
