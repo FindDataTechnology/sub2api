@@ -14,10 +14,11 @@
 --   3. 额度为 NULL 时**原样给 null**，并由 `limits_unset` 显式标真——
 --      「没配上限」与「上限是 0」是两件事，评估器必须能分清（0 会读成"已经用满"）。
 
-\if :{?days}
-\else
-  \set days 7
-\endif
+-- `:days` 没有默认值，必须由调用方给：psql 用 `-v days=7`，告警评估器由 load_sql() 替换。
+-- **别在这里加 `\if`/`\set` 默认块**（2026-11-14 加过又撤回）：元命令只有 psql 认，
+-- 而评估器用 psycopg 把整段当一条语句发给 Postgres，会直接 `syntax error at or near "\"`
+-- ——症状出现在接产后的第一次真查，而静态形状测试全绿。红线由
+-- `tools/gen-line-aliases.mjs --check` 强制（它把本文件标成 psycopg 消费方并 lint 反斜杠行）。
 
 WITH usage AS (
     SELECT u.api_key_id,

@@ -24,7 +24,10 @@ const SOURCE = join(HERE, "line-aliases.json");
 const TARGETS = [
   { file: join(HERE, "attribution-by-line.sql"), regions: 1 },
   { file: join(HERE, "line-metrics.sql"), regions: 3 },
-  { file: join(HERE, "line-quota.sql"), regions: 1 },
+  // line-quota.sql 是**唯一有第二个消费方**的报表：告警评估器用 psycopg 执行它
+  // （其它两份只给人用 psql 看，`\echo` 分隔块与 `-v` 默认值是它们的正常形态）。
+  // 所以元命令红线只钉这一个——哪天另一份也有了程序化消费方，就在这里补 `psycopg: true`。
+  { file: join(HERE, "line-quota.sql"), regions: 1, psycopg: true },
 ];
 
 // Go 侧也要认同一份别名（词元控制台的「按线」视图在 Go 里做归并）。
@@ -97,6 +100,26 @@ ${body}
 ${END}`;
 }
 
+// ── 纯 SQL 红线：禁 psql 元命令 ──────────────────────────────────────────────
+//
+// `\if` / `\set` / `\echo` 这类元命令只有 psql 客户端认。告警评估器
+// （`fd-industry-data/scripts/ciyuan_line_alerts.py`）用 psycopg 把整段 SQL 当**一条语句**
+// 发给 Postgres，遇到 `\` 会直接 `syntax error at or near "\"`——而且是在接产后的
+// 第一次真查时才炸，静态形状测试全绿。
+//
+// 2026-11-14 实测教训：为了让 `psql -f` 不带 `-v days=7` 也能跑，在 line-quota.sql 头部
+// 加了 `\if :{?days}` 默认块；而评估器的 load_sql() 文档正写着「刻意不用 \if/\set 默认块，
+// 默认值改由调用方给」。两边各自都有理由、各自都是绿的，契约却在中间断了。
+// 纯 SQL 两个消费方都能用（psql 用 `-v days=N` 替换 `:days`），所以把元命令钉成红线，
+// 别再为了「不带参数也能跑」这一点方便去换一次真实故障。
+function lintPsqlMeta(file) {
+  const bad = [];
+  readFileSync(file, "utf8").split("\n").forEach((line, i) => {
+    if (line.trimStart().startsWith("\\")) bad.push(i + 1);
+  });
+  return bad;
+}
+
 // 一份文件里可能有多处生成区域（line-metrics.sql 有三处：花费 / 错误 / 延迟）。
 // 首版只替换第一处，剩下两处留成空壳——所以这里必须**遍历全部**，并核对数量。
 function replaceRegions(text, generated, file, expected) {
@@ -154,6 +177,23 @@ function main() {
   const rows = loadAliases();
   const generated = render(rows);
   let drift = 0;
+
+  // 元命令检查先跑：它不看别名内容，坏了就是「psycopg 一定跑不起来」，
+  // 与是否存在漂移无关，所以两种模式下都直接判死。只查 psycopg 消费的文件。
+  let meta = 0;
+  for (const { file, psycopg } of TARGETS) {
+    if (!psycopg) continue;
+    const bad = lintPsqlMeta(file);
+    if (bad.length === 0) continue;
+    meta += bad.length;
+    console.error(
+      `× ${file}:${bad.join(",")} 出现 psql 元命令（反斜杠开头）。\n` +
+        `  这些文件要同时被 psql 和评估器的 psycopg 执行；元命令只有 psql 认，` +
+        `psycopg 会报 syntax error at or near "\\"。\n` +
+        `  默认值改由调用方给：人跑用 psql -v days=N，评估器由 load_sql() 替换 :days。`,
+    );
+  }
+  if (meta > 0) process.exit(1);
 
   for (const { file, regions } of TARGETS) {
     const before = readFileSync(file, "utf8");
