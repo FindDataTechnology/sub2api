@@ -24,6 +24,7 @@ const SOURCE = join(HERE, "line-aliases.json");
 const TARGETS = [
   { file: join(HERE, "attribution-by-line.sql"), regions: 1 },
   { file: join(HERE, "line-metrics.sql"), regions: 3 },
+  { file: join(HERE, "line-quota.sql"), regions: 1 },
 ];
 
 const BEGIN = "-- >>> generated:line-aliases（真源 tools/line-aliases.json；改它，别改这里）";
