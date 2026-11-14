@@ -29,12 +29,20 @@
 - [x] 1.1 能力快照加 `pricing` 段（`peak` / `multiplier` / `next_offpeak_start` / `next_offpeak_end` / `timezone`），
   数据源只用 `PeakMultiplierAt` 与 `deepseekPeakMultiplierAt`——验证：高峰时段实调返回
   `multiplier=2.0`，低谷返回 `1.0`；不新增任何配置项
-- [x] 1.2 能力快照加 `capacity` 段：按 `(platform, model)` 类给 `sustainable_rps`（观测值）与
+- [x] 1.2 能力快照加 `capacity` 段：给 `sustainable_rps`（观测值）与
   `confidence`（样本量档）；不可得时 `null`——**不暴露账号数、槽位数或 `Concurrency`**
   ——验证：单测覆盖「观测不足 → null」与「充足 → 数值」两态；**不得**用 0 冒充；字段名避免
   暗示与账号数量绑定
-- [ ] 1.3 契约文档同步（paas 侧 `add-ciyuan-capability-contract` 补一条口径：
-  `headroom` 是 advisory，不承诺发起时仍成立）——验证：paas `validate --strict` 通过
+  （**实测形态订正 2026-11-14**：原写「按 `(platform, model)` 类给」，实际只给**一个**模型——
+  `primaryModelFor()` 取该 key 近 7 天用得最多的那个，响应里带 `capacity.model`、**没有** platform
+  维度。所以它不是「各平台容量映射」，消费方按映射读会读成空。已同步进 producer spec 与 paas 消费契约。）
+- [x] 1.3 契约文档同步（两侧，2026-11-14）——原写「paas 侧补一条 `headroom` 是 advisory」，但
+  `headroom` 在实现里已改判为 `capacity`（见 1.2 与 design 迁移计划），按旧名同步等于把废弃形状写进契约。
+  实际同步两处：① 本仓 `specs/ciyuan-capacity-pricing-visibility/spec.md` 由 `headroom`（按平台给
+  `available_slots` / `in_use_slots`）改为已实现的 `capacity` 口径，并把 `multiplier` 明确为**复合**值
+  （原场景写死 2.0，分组峰率 > 1 时实测会更高，按 2.0 校准阈值的人会把正常值当异常）；
+  ② paas `add-ciyuan-capability-contract` 的消费方字段表补 `pricing.*` / `capacity.*` 两行与
+  advisory 口径。验证：两侧 `openspec validate <change> --strict` 通过
 
 ## S2 任务车道骨架（`mode=now` 直通）
 
