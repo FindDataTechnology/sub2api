@@ -8,24 +8,28 @@ package usagestats
 // lineAliases 把 key 名首段（split_part(name,'-',1)）归并到线名。
 // 没有命中的段一律落 unknown，**不许猜**——推测的归属比缺失更坏。
 var lineAliases = map[string]string{
-	"lex":      "识律 lex",
-	"lexkg":    "识律 lex",
-	"wanxing":  "萬星 wanxing",
-	"wx":       "萬星 wanxing",
-	"law":      "law-bench",
-	"lawbench": "law-bench",
-	"yizuo":    "壹座 yizuo",
-	"platform": "壹座 platform",
+	"lex":        "识律 lex",
+	"lexkg":      "识律 lex",
+	"wanxing":    "萬星 wanxing",
+	"wx":         "萬星 wanxing",
+	"law":        "law-bench",
+	"lawbench":   "law-bench",
+	"yizuo":      "壹座 yizuo",
+	"platform":   "壹座 platform",
+	"特价":         "自有平台",
+	"openrouter": "自有平台",
 }
 
 // LineAliasReason 是归并理由，给读面解释「为什么 wx 算萬星」时用。
 var LineAliasReason = map[string]string{
-	"lex":      "主键名",
-	"lexkg":    "同一产品的知识图谱键，2026-11-10 归并",
-	"wanxing":  "主键名",
-	"wx":       "萬星简写，2026-11-10 归并",
-	"law":      "law-bench 早期短名",
-	"lawbench": "law-bench 无连字符写法",
-	"yizuo":    "平台自身承载的调用",
-	"platform": "平台内部/演示 key",
+	"lex":        "主键名",
+	"lexkg":      "同一产品的知识图谱键，2026-11-10 归并",
+	"wanxing":    "主键名",
+	"wx":         "萬星简写，2026-11-10 归并",
+	"law":        "law-bench 早期短名",
+	"lawbench":   "law-bench 无连字符写法",
+	"yizuo":      "平台自身承载的调用",
+	"platform":   "平台内部/演示 key",
+	"特价":         "路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）",
+	"openrouter": "同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段",
 }
