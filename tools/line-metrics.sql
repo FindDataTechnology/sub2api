@@ -47,14 +47,16 @@ WITH usage AS (
 -- >>> generated:line-aliases（真源 tools/line-aliases.json；改它，别改这里）
 aliases(seg, line, why) AS (
     VALUES
-        ('lex',      '识律 lex',      '主键名'),
-        ('lexkg',    '识律 lex',      '同一产品的知识图谱键，2026-11-10 归并'),
-        ('wanxing',  '萬星 wanxing',  '主键名'),
-        ('wx',       '萬星 wanxing',  '萬星简写，2026-11-10 归并'),
-        ('law',      'law-bench',     'law-bench 早期短名'),
-        ('lawbench', 'law-bench',     'law-bench 无连字符写法'),
-        ('yizuo',    '壹座 yizuo',    '平台自身承载的调用'),
-        ('platform', '壹座 platform', '平台内部/演示 key')
+        ('lex',        '识律 lex',      '主键名'),
+        ('lexkg',      '识律 lex',      '同一产品的知识图谱键，2026-11-10 归并'),
+        ('wanxing',    '萬星 wanxing',  '主键名'),
+        ('wx',         '萬星 wanxing',  '萬星简写，2026-11-10 归并'),
+        ('law',        'law-bench',     'law-bench 早期短名'),
+        ('lawbench',   'law-bench',     'law-bench 无连字符写法'),
+        ('yizuo',      '壹座 yizuo',    '平台自身承载的调用'),
+        ('platform',   '壹座 platform', '平台内部/演示 key'),
+        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）'),
+        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段')
 ),
 -- <<< generated:line-aliases
 attributed AS (
@@ -87,14 +89,16 @@ WITH errs AS (
 -- >>> generated:line-aliases（真源 tools/line-aliases.json；改它，别改这里）
 aliases(seg, line, why) AS (
     VALUES
-        ('lex',      '识律 lex',      '主键名'),
-        ('lexkg',    '识律 lex',      '同一产品的知识图谱键，2026-11-10 归并'),
-        ('wanxing',  '萬星 wanxing',  '主键名'),
-        ('wx',       '萬星 wanxing',  '萬星简写，2026-11-10 归并'),
-        ('law',      'law-bench',     'law-bench 早期短名'),
-        ('lawbench', 'law-bench',     'law-bench 无连字符写法'),
-        ('yizuo',    '壹座 yizuo',    '平台自身承载的调用'),
-        ('platform', '壹座 platform', '平台内部/演示 key')
+        ('lex',        '识律 lex',      '主键名'),
+        ('lexkg',      '识律 lex',      '同一产品的知识图谱键，2026-11-10 归并'),
+        ('wanxing',    '萬星 wanxing',  '主键名'),
+        ('wx',         '萬星 wanxing',  '萬星简写，2026-11-10 归并'),
+        ('law',        'law-bench',     'law-bench 早期短名'),
+        ('lawbench',   'law-bench',     'law-bench 无连字符写法'),
+        ('yizuo',      '壹座 yizuo',    '平台自身承载的调用'),
+        ('platform',   '壹座 platform', '平台内部/演示 key'),
+        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）'),
+        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段')
 ),
 -- <<< generated:line-aliases
 tagged AS (
@@ -126,14 +130,16 @@ WITH usage AS (
 -- >>> generated:line-aliases（真源 tools/line-aliases.json；改它，别改这里）
 aliases(seg, line, why) AS (
     VALUES
-        ('lex',      '识律 lex',      '主键名'),
-        ('lexkg',    '识律 lex',      '同一产品的知识图谱键，2026-11-10 归并'),
-        ('wanxing',  '萬星 wanxing',  '主键名'),
-        ('wx',       '萬星 wanxing',  '萬星简写，2026-11-10 归并'),
-        ('law',      'law-bench',     'law-bench 早期短名'),
-        ('lawbench', 'law-bench',     'law-bench 无连字符写法'),
-        ('yizuo',    '壹座 yizuo',    '平台自身承载的调用'),
-        ('platform', '壹座 platform', '平台内部/演示 key')
+        ('lex',        '识律 lex',      '主键名'),
+        ('lexkg',      '识律 lex',      '同一产品的知识图谱键，2026-11-10 归并'),
+        ('wanxing',    '萬星 wanxing',  '主键名'),
+        ('wx',         '萬星 wanxing',  '萬星简写，2026-11-10 归并'),
+        ('law',        'law-bench',     'law-bench 早期短名'),
+        ('lawbench',   'law-bench',     'law-bench 无连字符写法'),
+        ('yizuo',      '壹座 yizuo',    '平台自身承载的调用'),
+        ('platform',   '壹座 platform', '平台内部/演示 key'),
+        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）'),
+        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段')
 ),
 -- <<< generated:line-aliases
 tagged AS (

@@ -46,6 +46,16 @@
       "seg": "platform",
       "line": "壹座 platform",
       "why": "平台内部/演示 key"
+    },
+    {
+      "seg": "特价",
+      "line": "自有平台",
+      "why": "路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）"
+    },
+    {
+      "seg": "openrouter",
+      "line": "自有平台",
+      "why": "同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段"
     }
   ]
 }
