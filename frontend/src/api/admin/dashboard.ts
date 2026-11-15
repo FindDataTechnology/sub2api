@@ -199,6 +199,58 @@ export async function getUserBreakdown(params: UserBreakdownParams): Promise<Use
 }
 
 /**
+ * 按线花费（词元控制台）。
+ *
+ * 三个数必须一起读：`lines` 里含路由键的那一行（当前是「自有平台」）看上去是最大的产品线，
+ * 而 `route_keys` 说明那些花费的键名编码的是上游折扣路由、不含线信息；
+ * `product_readable_share` 才是真正能逐线判读的份额（已扣掉未归因与路由键）。
+ * 它可能是 `null`：窗口内没有花费时**不是** 100% 可判读。
+ */
+export interface LineStatItem {
+  line: string
+  requests: number
+  actual_cost: number
+  list_cost: number
+  share_pct: number
+  segs?: string[]
+  prefixes?: string[]
+  unknown_segs?: string[]
+  /** 这条线里被声明为路由键的段（非空即表示这一行不是产品用量） */
+  route_keys?: string[]
+}
+
+export interface RouteKeyItem {
+  seg: string
+  requests: number
+  actual_cost: number
+  list_cost: number
+  share_pct: number
+}
+
+export interface LineStatsParams {
+  start_date?: string
+  end_date?: string
+}
+
+export interface LineStatsResponse {
+  lines: LineStatItem[]
+  route_keys: RouteKeyItem[]
+  route_key_usd: number
+  route_key_share: number
+  product_readable_share: number | null
+  total_usd: number
+  start_date: string
+  end_date: string
+  dimension: string
+  note: string
+}
+
+export async function getLineStats(params?: LineStatsParams): Promise<LineStatsResponse> {
+  const { data } = await apiClient.get<LineStatsResponse>('/admin/dashboard/lines', { params })
+  return data
+}
+
+/**
  * Get dashboard snapshot v2 (aggregated response for heavy admin pages).
  */
 export async function getSnapshotV2(params?: DashboardSnapshotV2Params): Promise<DashboardSnapshotV2Response> {
@@ -338,6 +390,7 @@ export const dashboardAPI = {
   getUsageTrend,
   getModelStats,
   getGroupStats,
+  getLineStats,
   getSnapshotV2,
   getApiKeyUsageTrend,
   getUserUsageTrend,

@@ -39,11 +39,12 @@
 ### New Capabilities
 - `ciyuan-task-lane`：任务提交/查询的对外契约、紧急度与截止时间语义、入队与出队的判据、
   幂等键、以及"估价 ≠ 账单"的诚实口径。
-- `ciyuan-capacity-pricing-visibility`：能力快照上的价格窗口与渠道余量字段（只读、advisory）。
+- `ciyuan-capacity-pricing-visibility`：能力快照上的价格窗口与吞吐观测字段（只读、advisory）。
 
 ### Modified Capabilities
-- `ciyuan-capability-endpoint`：新增 `pricing` 与 `headroom` 两段（**只增不改**既有字段；
-  不加认证快照字段，故不触发 `apiKeyAuthSnapshotVersion`）。
+- `ciyuan-capability-endpoint`：新增 `pricing` 与 `capacity` 两段（**只增不改**既有字段；
+  不加认证快照字段，故不触发 `apiKeyAuthSnapshotVersion`）。原提案写的是 `headroom`
+  （按平台给可用/占用槽位），实施时按「不暴露槽位与账号数」改判为观测口径 `capacity`。
 
 ## Impact
 
