@@ -601,9 +601,11 @@ func shouldRecordGrokMediaUsage(endpoint service.GrokMediaEndpoint, requestModel
 	return result.ImageCount > 0
 }
 
-// prepareGrokVideoCompletionBilling claims one-shot billing for official done+video.url
-// observations (status poll or content download). Duration/model prefer status body;
+// prepareGrokVideoCompletionBilling claims one-shot billing for a successful terminal
+// video finish (status poll or content download). Duration/model prefer status body;
 // resolution uses create-time request (status response does not document resolution).
+// The delivered-vs-requested resolution mismatch is recorded in the service extractor,
+// the only place that holds both the status body and the create-time snapshot.
 func prepareGrokVideoCompletionBilling(
 	ctx context.Context,
 	h *OpenAIGatewayHandler,
@@ -658,16 +660,20 @@ func prepareGrokVideoCompletionBilling(
 	// Re-merge with pending: resolution is request-only; model/duration fill gaps.
 	merged := *statusResult
 	if pending != nil {
-		if strings.TrimSpace(merged.Model) == "" {
-			merged.Model = firstNonEmptyString(pending.BillingModel, pending.Model, pending.OriginalModel)
-		}
-		if strings.TrimSpace(merged.BillingModel) == "" {
-			merged.BillingModel = firstNonEmptyString(pending.BillingModel, pending.Model, merged.Model)
+		// Billing identity MUST follow the create-time request, not the status body:
+		// the relay reports the *serving* model (observed "kling-video-v3" for a
+		// "grok-imagine-video" order) and pricing is keyed on what the customer bought.
+		// The serving model stays visible through UpstreamModel.
+		if bm := firstNonEmptyString(pending.BillingModel, pending.Model, pending.OriginalModel); bm != "" {
+			merged.BillingModel = bm
+			merged.Model = bm
 		}
 		if strings.TrimSpace(merged.UpstreamModel) == "" {
 			merged.UpstreamModel = pending.UpstreamModel
 		}
-		// Official status omits resolution — always prefer create request.
+		// Official status omits resolution — always prefer create request. Delivery may
+		// differ (2026-11-14 probe: asked 480p, got 720P); billing stays on the requested
+		// tier and the mismatch is recorded by the service extractor, never repriced here.
 		if strings.TrimSpace(pending.VideoResolution) != "" {
 			merged.VideoResolution = pending.VideoResolution
 		}
