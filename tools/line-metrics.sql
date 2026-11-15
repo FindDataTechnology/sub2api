@@ -55,8 +55,8 @@ aliases(seg, line, why) AS (
         ('lawbench',   'law-bench',     'law-bench 无连字符写法'),
         ('yizuo',      '壹座 yizuo',    '平台自身承载的调用'),
         ('platform',   '壹座 platform', '平台内部/演示 key'),
-        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）'),
-        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段')
+        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性'),
+        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性')
 ),
 prefix_aliases(prefix, line, why) AS (
     VALUES
@@ -83,6 +83,11 @@ resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
         LIMIT 1
     ) p ON true
     LEFT JOIN aliases a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)
+),
+route_segs(seg) AS (
+    VALUES
+        ('特价'      ),
+        ('openrouter')
 ),
 -- <<< generated:line-aliases
 -- 归属走生成的 `resolved`（首段 / 声明前缀 / 未归因都在那一处算），本文件不再自己 split_part。
@@ -127,8 +132,8 @@ aliases(seg, line, why) AS (
         ('lawbench',   'law-bench',     'law-bench 无连字符写法'),
         ('yizuo',      '壹座 yizuo',    '平台自身承载的调用'),
         ('platform',   '壹座 platform', '平台内部/演示 key'),
-        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）'),
-        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段')
+        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性'),
+        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性')
 ),
 prefix_aliases(prefix, line, why) AS (
     VALUES
@@ -155,6 +160,11 @@ resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
         LIMIT 1
     ) p ON true
     LEFT JOIN aliases a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)
+),
+route_segs(seg) AS (
+    VALUES
+        ('特价'      ),
+        ('openrouter')
 ),
 -- <<< generated:line-aliases
 tagged AS (
@@ -197,8 +207,8 @@ aliases(seg, line, why) AS (
         ('lawbench',   'law-bench',     'law-bench 无连字符写法'),
         ('yizuo',      '壹座 yizuo',    '平台自身承载的调用'),
         ('platform',   '壹座 platform', '平台内部/演示 key'),
-        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）'),
-        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段')
+        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性'),
+        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性')
 ),
 prefix_aliases(prefix, line, why) AS (
     VALUES
@@ -225,6 +235,11 @@ resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
         LIMIT 1
     ) p ON true
     LEFT JOIN aliases a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)
+),
+route_segs(seg) AS (
+    VALUES
+        ('特价'      ),
+        ('openrouter')
 ),
 -- <<< generated:line-aliases
 tagged AS (

@@ -55,6 +55,16 @@ function loadAliases() {
     if (seen.has(row.seg)) {
       throw new Error(`seg 重复：${row.seg}（既有 ${seen.get(row.seg)}，又来 ${row.line}）`);
     }
+    // ── route：声明「这个 seg 是路由键」（declare-route-keys-in-report）──────────
+    // 路由键 = 键名编码上游路由（折扣渠道）而非产品线的共享键。它必须**显式声明**：
+    // 靠键名猜（含"折"/"channel"之类）会把真正的产品线误伤进不可归因桶——
+    // 「不可归因」是一个强断言，宁可漏报也不许误报，所以只认显式 true。
+    if (row.route !== undefined && typeof row.route !== "boolean") {
+      throw new Error(`route 必须是布尔值：${JSON.stringify(row)}`);
+    }
+    if (row.route === true && (typeof row.why !== "string" || row.why.trim() === "")) {
+      throw new Error(`route:true 的行必须带 why（声明不可归因却不给理由，等于拍脑袋）：${row.seg}`);
+    }
     seen.set(row.seg, row.line);
   }
 
@@ -99,7 +109,8 @@ function loadAliases() {
   // 最长优先由**生成顺序**保证（SQL 的 LATERAL 与 Go 的循环都按这个顺序取第一条命中），
   // 所以排序放在这里——两个消费方自然同序，不必各自再排一次。
   prefixes.sort((a, b) => [...b.prefix].length - [...a.prefix].length || (a.prefix < b.prefix ? -1 : 1));
-  return { rows, prefixes };
+  const routeSegs = rows.filter((r) => r.route === true).map((r) => r.seg);
+  return { rows, prefixes, routeSegs };
 }
 
 // 统一的 CTE 形状：三列都保留。`why` 在某些报表里不被 SELECT，但留着零成本，
@@ -123,7 +134,7 @@ function displayWidth(s) {
   return w;
 }
 
-function render(rows, prefixes) {
+function render(rows, prefixes, routeSegs) {
   const pad = (s, target) => s + " ".repeat(Math.max(0, target - displayWidth(s)));
   const wSeg = Math.max(...rows.map((r) => displayWidth(`'${r.seg}',`)));
   const wLine = Math.max(...rows.map((r) => displayWidth(`'${r.line}',`)));
@@ -149,6 +160,27 @@ function render(rows, prefixes) {
       .map((p) => `        (${pad(`'${p.prefix}',`, wPref)} ${pad(`'${p.line}',`, wPLine)} '${p.why}')`)
       .join(",\n");
     prefixCte = `prefix_aliases(prefix, line, why) AS (\n    VALUES\n${prefixRows}\n)`;
+  }
+
+  // ── route_segs：路由键清单（declare-route-keys-in-report）────────────────────
+  // 与 prefix_aliases 同一条先例：空表必须能跑，用 `SELECT … WHERE false`，
+  // 不许把 `VALUES` 写死在模板里（2026-11-15 空前缀臂就是这么红的）。
+  // 三份 SQL 的生成区**同构注入**（line-metrics 正文不引用它，CTE 未被引用时零开销）——
+  // 避免造出「哪份有哪份没有」的第二处漂移面。
+  let routeCte;
+  if (routeSegs.length === 0) {
+    routeCte =
+      "route_segs(seg) AS (\n" +
+      "    SELECT NULL::text WHERE false\n" +
+      ")";
+  } else {
+    // 单列 VALUES 的行是 `('seg')`——首版照抄两列形状写了 `('seg',  )`，
+    // 行内尾逗号是语法错误（真库 14:39Z 抓到；形状测试看不出来，必须真跑）。
+    const wRoute = Math.max(...routeSegs.map((s) => displayWidth(`'${s}'`)));
+    const routeRows = routeSegs
+      .map((s) => `        (${pad(`'${s}'`, wRoute)})`)
+      .join(",\n");
+    routeCte = `route_segs(seg) AS (\n    VALUES\n${routeRows}\n)`;
   }
 
   // 结尾的 `),` 属于生成区域：这四个落点全是 WITH 列表里的 CTE 项，逗号是分隔符。
@@ -183,6 +215,7 @@ resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
     ) p ON true
     LEFT JOIN aliases a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)
 ),
+${routeCte},
 ${END}`;
 }
 
@@ -273,8 +306,8 @@ var linePrefixAliases = []LinePrefixAlias{${pBody === "" ? "" : "\n" + pBody + "
 
 function main() {
   const check = process.argv.includes("--check");
-  const { rows, prefixes } = loadAliases();
-  const generated = render(rows, prefixes);
+  const { rows, prefixes, routeSegs } = loadAliases();
+  const generated = render(rows, prefixes, routeSegs);
   let drift = 0;
 
   // 元命令检查先跑：它不看别名内容，坏了就是「psycopg 一定跑不起来」，
@@ -324,7 +357,7 @@ function main() {
       console.error(`\n✗ ${drift} 处漂移。跑 node tools/gen-line-aliases.mjs 重新生成，别手改生成件。`);
       process.exit(1);
     }
-    console.log(`✓ 别名口径一致：${rows.length} 条别名 + ${prefixes.length} 条前缀修正，${TARGETS.length} 个报表 + Go 侧`);
+    console.log(`✓ 别名口径一致：${rows.length} 条别名 + ${prefixes.length} 条前缀修正 + ${routeSegs.length} 条路由键（${routeSegs.join(" / ") || "无"}），${TARGETS.length} 个报表 + Go 侧`);
   }
 }
 

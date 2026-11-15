@@ -30,8 +30,8 @@ var LineAliasReason = map[string]string{
 	"lawbench":   "law-bench 无连字符写法",
 	"yizuo":      "平台自身承载的调用",
 	"platform":   "平台内部/演示 key",
-	"特价":         "路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）",
-	"openrouter": "同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段",
+	"特价":         "路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性",
+	"openrouter": "同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性",
 }
 
 // linePrefixAliases 是「首段撒谎」的修正表：key 名首段属于 A 线、实际用量由 B 线受益时，

@@ -39,8 +39,8 @@ aliases(seg, line, why) AS (
         ('lawbench',   'law-bench',     'law-bench 无连字符写法'),
         ('yizuo',      '壹座 yizuo',    '平台自身承载的调用'),
         ('platform',   '壹座 platform', '平台内部/演示 key'),
-        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）'),
-        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段')
+        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性'),
+        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性')
 ),
 prefix_aliases(prefix, line, why) AS (
     VALUES
@@ -67,6 +67,11 @@ resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
         LIMIT 1
     ) p ON true
     LEFT JOIN aliases a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)
+),
+route_segs(seg) AS (
+    VALUES
+        ('特价'      ),
+        ('openrouter')
 ),
 -- <<< generated:line-aliases
 -- 归属走生成出来的 `resolved`：首段 / 声明前缀 / 未归因三档都在那一处算，报表不再自己 split_part。
@@ -118,6 +123,19 @@ declared_lines AS (
     SELECT line FROM aliases
     UNION
     SELECT line FROM prefix_aliases
+),
+-- 路由键（route_segs 由生成器注入）在本窗口的逐键花费。
+-- 取法走 resolved.rule（seg 命中时 rule=seg 本身）而不是 attributed.raw_seg——
+-- 后者只对 unknown 行非空，路由键经 seg 命中后 raw_seg 是 NULL（2026-11-15 首版踩过）。
+route_key_spend AS (
+    SELECT r.rule                       AS seg,
+           count(*)                     AS requests,
+           round(sum(us.actual_usd), 4) AS usd
+    FROM usage us
+    JOIN resolved r ON r.key_id = us.api_key_id
+    WHERE r.by_rule = 'seg'
+      AND r.rule IN (SELECT seg FROM route_segs)
+    GROUP BY 1
 ),
 group_limits AS (
     SELECT g.name                                    AS group_name,
@@ -192,6 +210,30 @@ SELECT json_build_object(
             SELECT json_agg(d.line ORDER BY d.line)
             FROM declared_lines d
             WHERE NOT EXISTS (SELECT 1 FROM by_rule_all b WHERE b.line = d.line)
-        ), '[]'::json)
+        ), '[]'::json),
+        -- 路由键读数（declare-route-keys-in-report）：别名表声明 route:true 的 seg，
+        -- 其键名编码上游路由（折扣渠道）而非产品线，流量结构上不可按线拆分。
+        -- 这笔钱归「自有平台」只因为键名归属登记——把它当杂项或当产品线都是误读，
+        -- 所以它必须作为一等读数出现在报表里，而不是只活在别名表的注释里。
+        -- 无声明时 keys 为空集、note 缺省，绝不伪造逐键条目；share 分母为 0 时 NULL
+        -- （「没有花费」与「算不出份额」不同）。
+        'route_keys', json_build_object(
+            'keys', COALESCE((
+                SELECT json_agg(json_build_object(
+                           'seg', rk.seg,
+                           'requests', rk.requests,
+                           'usd', rk.usd)
+                       ORDER BY rk.usd DESC)
+                FROM route_key_spend rk
+            ), '[]'::json),
+            'total_usd', COALESCE((SELECT round(sum(usd), 4) FROM route_key_spend), 0),
+            'requests', COALESCE((SELECT sum(requests) FROM route_key_spend), 0),
+            'share_of_window',
+                (SELECT round(sum(usd), 4) FROM route_key_spend)
+                / NULLIF((SELECT round(sum(actual_usd), 4) FROM usage), 0),
+            'note', CASE WHEN EXISTS (SELECT 1 FROM route_segs) THEN
+                '键名编码的是上游路由（折扣渠道），不是产品线；流量结构上无法按线拆分，归入其声明的线仅因键名归属登记'
+            END
+        )
     )
 )::text;
