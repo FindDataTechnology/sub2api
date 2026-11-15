@@ -331,3 +331,32 @@ func TestGrokVideoUsageMetaCarriesDeliveredResolution(t *testing.T) {
 	require.Equal(t, "kling-video-v3", meta.VideoServingModel)
 	require.Equal(t, 3, meta.VideoDurationSeconds)
 }
+
+// TestGrokImageUsageMetaCarriesServingModel 钉住图片侧的「账面名 ≠ 实际承做方」。
+//
+// 请求写 `grok-imagine-image`，上游实测自报 `hunyuan-image-alpha`（2026-11-15 实调）。
+// 定价按请求侧那一档不变，但上游 credit 按实际承做方结算 ⇒ 台账只记 grok 就少一环
+// 可追溯性。照片响应体里的 `model` 必须在元数据里活着出去，否则事后再也补不回来。
+//
+// 同族返工点：这几个结构体之间是**逐字段显式拷贝**，加字段不会自动流过去——
+// 视频那次就是只看「编译过」没 grep 赋值点，线上打出空值。
+func TestGrokImageUsageMetaCarriesServingModel(t *testing.T) {
+	t.Parallel()
+	info := GrokMediaRequestInfo{Model: "grok-imagine-image", Size: "1024x1024", SizeTier: "1K"}
+	body := []byte(`{"created":1794734993,"model":"hunyuan-image-alpha","data":[{"url":"https://cos.example/a.png"}]}`)
+	meta := grokMediaUsageFromResponse(GrokMediaEndpointImagesGenerations, info, body)
+	require.Equal(t, "hunyuan-image-alpha", meta.ImageServingModel,
+		"上游自报的承做模型必须原样带出（不改写、不归一化）")
+	require.Equal(t, 1, meta.ImageCount)
+	require.Equal(t, "1K", meta.ImageSize)
+
+	// 缺字段的老形状不许制造值：空就是「不知道」，不是「同一个模型」。
+	old := []byte(`{"created":1,"data":[{"url":"https://cos.example/b.png"}]}`)
+	meta = grokMediaUsageFromResponse(GrokMediaEndpointImagesGenerations, info, old)
+	require.Equal(t, "", meta.ImageServingModel)
+	require.Equal(t, 1, meta.ImageCount)
+
+	// 非 JSON 也不许崩（上游偶发回 HTML 网关页）。
+	meta = grokMediaUsageFromResponse(GrokMediaEndpointImagesGenerations, info, []byte("<html>502</html>"))
+	require.Equal(t, "", meta.ImageServingModel)
+}

@@ -528,6 +528,18 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, billResult, billResult.Model, body, taskID)
 			}
 		} else if shouldRecordGrokMediaUsage(endpoint, requestModel, result) {
+			// 图片这半的「账面名 vs 实际承做方」：请求写 grok-imagine-image，上游实测自报
+			// hunyuan-image-alpha。定价不动（按客户买的那一档），但上游 credit 是按实际承做方
+			// 结算的，不记下来对账时这一环无从追溯。视频侧同款见 grok_media.video_billing_terms。
+			if result.ImageCount > 0 && strings.TrimSpace(result.ImageServingModel) != "" {
+				reqLog.Info("grok_media.image_billing_terms",
+					zap.String("billed_model", firstNonEmptyString(result.BillingModel, result.Model)),
+					zap.String("upstream_model", result.UpstreamModel),
+					zap.String("serving_model", result.ImageServingModel),
+					zap.Int("image_count", result.ImageCount),
+					zap.String("billed_size", result.ImageSize),
+				)
+			}
 			recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, result, requestModel, body, requestID)
 		}
 		reqLog.Debug("grok_media.request_completed",
