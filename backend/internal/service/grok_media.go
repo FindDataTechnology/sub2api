@@ -760,6 +760,7 @@ func ExtractGrokVideoBillingFromStatusBody(statusBody []byte, pending *GrokVideo
 		VideoCount:               1,
 		VideoResolution:          resolution,
 		VideoResolutionDelivered: deliveredResolution,
+		VideoServingModel:        statusModel,
 		VideoDurationSeconds:     durationSeconds,
 	}
 }
@@ -898,23 +899,25 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		}
 	}
 	return &OpenAIForwardResult{
-		RequestID:            requestIDHeader,
-		UpstreamHeaders:      resp.Header,
-		ResponseID:           usage.ResponseID,
-		Usage:                usage.Usage,
-		Model:                resultModel,
-		BillingModel:         resultBillingModel,
-		UpstreamModel:        upstreamModel,
-		ResponseHeaders:      resp.Header.Clone(),
-		Duration:             time.Since(startTime),
-		ImageEndpoint:        usage.ImageCount > 0,
-		ImageCount:           usage.ImageCount,
-		ImageSize:            usage.ImageSize,
-		ImageInputSize:       usage.ImageInputSize,
-		ImageOutputSizes:     usage.ImageOutputSizes,
-		VideoCount:           usage.VideoCount,
-		VideoResolution:      usage.VideoResolution,
-		VideoDurationSeconds: usage.VideoDurationSeconds,
+		RequestID:                requestIDHeader,
+		UpstreamHeaders:          resp.Header,
+		ResponseID:               usage.ResponseID,
+		Usage:                    usage.Usage,
+		Model:                    resultModel,
+		BillingModel:             resultBillingModel,
+		UpstreamModel:            upstreamModel,
+		ResponseHeaders:          resp.Header.Clone(),
+		Duration:                 time.Since(startTime),
+		ImageEndpoint:            usage.ImageCount > 0,
+		ImageCount:               usage.ImageCount,
+		ImageSize:                usage.ImageSize,
+		ImageInputSize:           usage.ImageInputSize,
+		ImageOutputSizes:         usage.ImageOutputSizes,
+		VideoCount:               usage.VideoCount,
+		VideoResolution:          usage.VideoResolution,
+		VideoResolutionDelivered: usage.VideoResolutionDelivered,
+		VideoServingModel:        usage.VideoServingModel,
+		VideoDurationSeconds:     usage.VideoDurationSeconds,
 	}, nil
 }
 
@@ -1046,6 +1049,8 @@ func (s *OpenAIGatewayService) forwardGrokMediaVideoContent(
 		result.UpstreamModel = billed.UpstreamModel
 		result.VideoCount = billed.VideoCount
 		result.VideoResolution = billed.VideoResolution
+		result.VideoResolutionDelivered = billed.VideoResolutionDelivered
+		result.VideoServingModel = billed.VideoServingModel
 		result.VideoDurationSeconds = billed.VideoDurationSeconds
 	}
 	return result, nil
@@ -1316,17 +1321,19 @@ func NormalizeGrokMediaModelForEndpoint(endpoint GrokMediaEndpoint, model string
 }
 
 type grokMediaUsageMetadata struct {
-	ResponseID           string
-	Usage                OpenAIUsage
-	Model                string
-	BillingModel         string
-	ImageCount           int
-	ImageSize            string
-	ImageInputSize       string
-	ImageOutputSizes     []string
-	VideoCount           int
-	VideoResolution      string
-	VideoDurationSeconds int
+	ResponseID               string
+	Usage                    OpenAIUsage
+	Model                    string
+	BillingModel             string
+	ImageCount               int
+	ImageSize                string
+	ImageInputSize           string
+	ImageOutputSizes         []string
+	VideoCount               int
+	VideoResolution          string
+	VideoResolutionDelivered string
+	VideoServingModel        string
+	VideoDurationSeconds     int
 }
 
 func grokMediaUsageFromResponse(endpoint GrokMediaEndpoint, requestInfo GrokMediaRequestInfo, responseBody []byte) grokMediaUsageMetadata {
@@ -1354,6 +1361,8 @@ func grokMediaUsageFromResponse(endpoint GrokMediaEndpoint, requestInfo GrokMedi
 				meta.BillingModel = billed.BillingModel
 				meta.VideoCount = billed.VideoCount
 				meta.VideoResolution = billed.VideoResolution
+				meta.VideoResolutionDelivered = billed.VideoResolutionDelivered
+				meta.VideoServingModel = billed.VideoServingModel
 				meta.VideoDurationSeconds = billed.VideoDurationSeconds
 			}
 		}

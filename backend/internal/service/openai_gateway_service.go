@@ -287,13 +287,17 @@ type OpenAIForwardResult struct {
 	ImageOutputSizes   []string
 	ImageSizeSource    string
 	ImageSizeBreakdown map[string]int
-	VideoCount      int
-	VideoResolution string
+	VideoCount         int
+	VideoResolution    string
 	// VideoResolutionDelivered 是上游终态自报的实际交付分辨率（原样，不归一化；常见
 	// `"resolution":"720P"`）。空表示这一种状态体没有这个字段（官方 xAI 终态就没有）。
 	// 计费永远按请求侧（客户买的那一档），这个值只用来留痕：实测上游会无视 480p 一律
 	// 交 720P，不记下来就等于「按 480p 收、交 720p」这件事无人可见。
 	VideoResolutionDelivered string
+	// VideoServingModel 是状态体自报的承做模型（实测 "kling-video-v3"）。与 UpstreamModel
+	// 是两回事：UpstreamModel 是「请求映射后发给上游的模型名」（客户买的那个），这个是
+	// 上游自己说它实际用什么做的。只用来留痕与排障，不参与定价。
+	VideoServingModel string
 	// VideoDurationSeconds 是提交时请求的生成时长（xAI 按输出秒数计费），已归一化到 1-15 秒。
 	VideoDurationSeconds int
 	// WebSearchCalls 是 Codex alpha/search 网页搜索调用次数（每次成功请求为 1）。
