@@ -913,6 +913,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		ImageSize:                usage.ImageSize,
 		ImageInputSize:           usage.ImageInputSize,
 		ImageOutputSizes:         usage.ImageOutputSizes,
+		ImageServingModel:        usage.ImageServingModel,
 		VideoCount:               usage.VideoCount,
 		VideoResolution:          usage.VideoResolution,
 		VideoResolutionDelivered: usage.VideoResolutionDelivered,
@@ -1329,6 +1330,7 @@ type grokMediaUsageMetadata struct {
 	ImageSize                string
 	ImageInputSize           string
 	ImageOutputSizes         []string
+	ImageServingModel        string
 	VideoCount               int
 	VideoResolution          string
 	VideoResolutionDelivered string
@@ -1345,6 +1347,12 @@ func grokMediaUsageFromResponse(endpoint GrokMediaEndpoint, requestInfo GrokMedi
 		meta.ImageSize = requestInfo.SizeTier
 		meta.ImageInputSize = requestInfo.Size
 		meta.ImageOutputSizes = collectOpenAIResponseImageOutputSizesFromJSONBytes(responseBody)
+		// 承做方：上游响应体自报的模型（实测请求 grok-imagine-image → "hunyuan-image-alpha"）。
+		// 不参与定价（价格按请求侧那一档），但上游 credit 是按实际承做方结算的，台账
+		// 只记 grok 会让对账少一环。
+		if gjson.ValidBytes(responseBody) {
+			meta.ImageServingModel = strings.TrimSpace(gjson.GetBytes(responseBody, "model").String())
+		}
 	case GrokMediaEndpointVideosGenerations, GrokMediaEndpointVideosEdits, GrokMediaEndpointVideosExtensions:
 		// Async video: capture request_id + create-time pricing params only.
 		// Billable VideoCount is set later when status polling observes video.url.

@@ -287,8 +287,13 @@ type OpenAIForwardResult struct {
 	ImageOutputSizes   []string
 	ImageSizeSource    string
 	ImageSizeBreakdown map[string]int
-	VideoCount         int
-	VideoResolution    string
+	// ImageServingModel 是图片响应体自报的承做模型（实测请求 grok-imagine-image、
+	// 响应 `"model":"hunyuan-image-alpha"`）。与 UpstreamModel 的区别同 VideoServingModel：
+	// 前者是发出去的名字（参与定价），这个是上游说它实际用什么做的，只留痕与对账——
+	// 上游 credit 按实际承做方结算，台账若只记 grok，对账时这一环无从追溯。
+	ImageServingModel string
+	VideoCount        int
+	VideoResolution   string
 	// VideoResolutionDelivered 是上游终态自报的实际交付分辨率（原样，不归一化；常见
 	// `"resolution":"720P"`）。空表示这一种状态体没有这个字段（官方 xAI 终态就没有）。
 	// 计费永远按请求侧（客户买的那一档），这个值只用来留痕：实测上游会无视 480p 一律
