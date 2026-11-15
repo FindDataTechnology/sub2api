@@ -264,10 +264,16 @@ function replaceRegions(text, generated, file, expected) {
   return out;
 }
 
-function renderGo(rows, prefixes) {
+function renderGo(rows, prefixes, routeSegs) {
   const pad = (s, n) => s + " ".repeat(Math.max(0, n - [...s].length));
   const keys = rows.map((r) => r.seg);
   const w = Math.max(...keys.map((k) => [...`"${k}":`].length));
+  // 路由键清单也要进 Go：控制台读面与三份报表必须用**同一份**声明。两处各写一张表，
+  // 分叉时不是「两张表不一致」，是「同一件事有两个答案」，而读的人分不出哪个对。
+  // 键宽按最长项补齐：生成件必须本身是 gofmt 干净的，否则 `gofmt -w` 与
+  // `--check` 会互相打架（改一个就红另一个）。
+  const rw = Math.max(0, ...routeSegs.map((s) => [...`"${s}":`].length));
+  const rBody = routeSegs.map((s) => `\t${pad(`"${s}":`, rw)} {},`).join("\n");
   const body = rows
     .map((r) => `\t${pad(`"${r.seg}":`, w)} ${JSON.stringify(r.line)},`.replace(/"/g, '"'))
     .join("\n");
@@ -301,6 +307,12 @@ ${rows.map((r) => `\t${pad(`"${r.seg}":`, w)} ${JSON.stringify(r.why)},`).join("
 // 按**整名前缀**改写归属。顺序即优先级（最长前缀在前），与 tools/line-quota.sql 里
 // resolved CTE 的 LATERAL 取法一致；两边一旦分叉，--check 会红。
 var linePrefixAliases = []LinePrefixAlias{${pBody === "" ? "" : "\n" + pBody + "\n"}}
+
+// lineRouteSegs 是声明为**路由键**（tools/line-aliases.json 里 "route": true）的段：
+// 键名编码的是上游折扣路由，不是产品线，因此其花费在结构上拆不到任何一条线。
+// 报表把它们的聚合摆成 route_keys 一等读数；控制台读面靠这张表把「含路由键的那一行」
+// 标出来，免得「自有平台」被读成一条产品线。**这张表也必须只有一处真源。**
+var lineRouteSegs = map[string]struct{}{${rBody === "" ? "" : "\n" + rBody + "\n"}}
 `;
 }
 
@@ -341,7 +353,7 @@ function main() {
   }
 
   const goBefore = readFileSync(GO_TARGET, "utf8");
-  const goAfter = renderGo(rows, prefixes);
+  const goAfter = renderGo(rows, prefixes, routeSegs);
   if (goBefore !== goAfter) {
     if (check) {
       drift += 1;
