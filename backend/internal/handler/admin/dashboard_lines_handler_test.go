@@ -33,9 +33,9 @@ func TestGetLineStatsReturnsMergedLinesAndDimensionNote(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	repo := &lineStatsRepo{rows: []usagestats.LineStatRow{
-		{Seg: "wanxing", Requests: 100, ActualCost: 30, ListCost: 30},
-		{Seg: "wx", Requests: 50, ActualCost: 10, ListCost: 10},
-		{Seg: "特价", Requests: 20, ActualCost: 60, ListCost: 60},
+		{KeyName: "wanxing-a", Requests: 100, ActualCost: 30, ListCost: 30},
+		{KeyName: "wx-a", Requests: 50, ActualCost: 10, ListCost: 10},
+		{KeyName: "413621549-chat", Requests: 20, ActualCost: 60, ListCost: 60},
 	}}
 	handler := NewDashboardHandler(service.NewDashboardService(repo, nil, nil, nil), nil)
 
@@ -57,11 +57,11 @@ func TestGetLineStatsReturnsMergedLinesAndDimensionNote(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 
 	lines := body.Data.Lines
-	require.Len(t, lines, 2, "wanxing+wx 应归并成一条，特价 落 unknown：共 2 条")
+	require.Len(t, lines, 2, "wanxing+wx 应归并成一条，413621549 落 unknown：共 2 条")
 
 	// 实扣最高的应是 unknown（60 > 40）
 	require.Equal(t, usagestats.UnknownLine, lines[0].Line)
-	require.Equal(t, []string{"特价"}, lines[0].UnknownSegs,
+	require.Equal(t, []string{"413621549"}, lines[0].UnknownSegs,
 		"无法归因的键必须带着原始段名可见，否则读者无法判断是没人归并还是键名脏")
 	require.Equal(t, "萬星 wanxing", lines[1].Line)
 	require.Equal(t, int64(150), lines[1].Requests)

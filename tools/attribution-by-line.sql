@@ -49,21 +49,52 @@ aliases(seg, line, why) AS (
         ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）'),
         ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段')
 ),
+prefix_aliases(prefix, line, why) AS (
+    VALUES
+        ('wanxing-probe-', '非产品流量', '键名自称 probe，实测是从单一内网主机 172.16.0.123 连续跑了 168/168 小时的 harness 工作负载（7 日 7,674 次、只打 deepseek-v4.1-flash、均值 9,672 tok / 26.7 s、缓存读 17.3k）⇒ 可以确定不是萬星的产品用量；但它替谁跑，数据里看不出来，故单列而不并入任何产品线'),
+        ('wanxing-lex-',   '识律 lex',   '识律控制台副驾：key 挂在萬星账号名下（首段 wanxing），实际调用方是识律控制台——2026-11-15 实测 UA 为 deepseek-harness、来源 pod 10.42.8.0，7 日 2,346 次 / $7.81，而识律自己的 lex 键同期只有 1 次请求 ⇒ 受益方是识律。不改名，因为改名只活在单个数据库、换环境即失效')
+),
+resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
+    SELECT k.id,
+           COALESCE(p.line, a.line, 'unknown'),
+           COALESCE(p.why, a.why, ''),
+           CASE WHEN p.line IS NOT NULL THEN 'prefix'
+                WHEN a.line IS NOT NULL THEN 'seg'
+                ELSE 'none' END,
+           COALESCE(p.prefix, a.seg),
+           CASE WHEN p.line IS NULL AND a.line IS NULL
+                THEN NULLIF(split_part(COALESCE(k.name, ''), '-', 1), '')
+           END
+    FROM api_keys k
+    LEFT JOIN LATERAL (
+        SELECT pa.prefix, pa.line, pa.why
+        FROM prefix_aliases pa
+        WHERE starts_with(COALESCE(k.name, ''), pa.prefix)
+        ORDER BY length(pa.prefix) DESC
+        LIMIT 1
+    ) p ON true
+    LEFT JOIN aliases a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)
+),
 -- <<< generated:line-aliases
+-- 归属走生成的 `resolved`（首段 / 声明前缀 / 未归因都在那一处算）。
+-- `by_rule` 与 `rule` 一起带出来：读者要能分清「这条线是按首段算的」还是「按声明前缀改写的」。
 attributed AS (
-    SELECT COALESCE(a.line, 'unknown') AS line,
-           CASE WHEN a.line IS NULL THEN split_part(COALESCE(k.name, '(deleted key)'), '-', 1) END AS raw_seg,
+    SELECT COALESCE(r.line, 'unknown') AS line,
+           COALESCE(r.by_rule, 'none') AS by_rule,
+           COALESCE(r.rule, '')        AS rule,
+           CASE WHEN r.line IS NULL OR r.line = 'unknown'
+                THEN COALESCE(r.raw_seg, '(deleted key)') END AS raw_seg,
            us.actual_usd, us.list_usd
     FROM usage us
-    LEFT JOIN api_keys k ON k.id = us.api_key_id
-    LEFT JOIN aliases  a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)
+    LEFT JOIN resolved r ON r.key_id = us.api_key_id
 )
 SELECT line,
-       COALESCE(raw_seg, '')                                    AS raw_prefix_if_unknown,
+       by_rule,
+       COALESCE(raw_seg, rule)                                  AS attributed_by,
        count(*)                                                 AS requests,
        round(sum(actual_usd), 2)                                AS actual_usd,
        round(sum(list_usd), 2)                                  AS list_usd,
        round(100 * sum(actual_usd) / NULLIF((SELECT sum(actual_usd) FROM attributed), 0), 1) AS pct
 FROM attributed
-GROUP BY line, raw_seg
+GROUP BY line, by_rule, COALESCE(raw_seg, rule)
 ORDER BY actual_usd DESC;

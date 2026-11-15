@@ -57,7 +57,49 @@ function loadAliases() {
     }
     seen.set(row.seg, row.line);
   }
-  return rows;
+
+  // ── name_prefixes：首段撒谎时的修正 ────────────────────────────────────────
+  // 三条校验各自拦一种「静默改写」：
+  //  ① 不以 '-' 结尾 ⇒ 它其实是个 seg（`wanxing-lex` 会把 `wanxing-lexfoo-1` 也吃进来）；
+  //  ② 不在本条 seg 之下 ⇒ 打错一个字就能把无关的键族整片换归属，而报表看不出来；
+  //  ③ 全局重复 ⇒ 两条规则都命中时归属取决于生成顺序，那是「看运气」不是口径。
+  const prefixes = [];
+  const seenPrefix = new Map();
+  for (const row of rows) {
+    const list = row.name_prefixes;
+    if (list === undefined) continue;
+    if (!Array.isArray(list) || list.length === 0) {
+      throw new Error(`name_prefixes 必须是非空数组（要么不写这个键）：${JSON.stringify(row)}`);
+    }
+    for (const p of list) {
+      for (const key of ["prefix", "line", "why"]) {
+        if (typeof p[key] !== "string" || p[key].trim() === "") {
+          throw new Error(`name_prefixes 缺 ${key}：${JSON.stringify(p)}（挂在 seg=${row.seg} 下）`);
+        }
+      }
+      if (!p.prefix.endsWith("-")) {
+        throw new Error(
+          `name_prefixes 的 prefix 必须以 '-' 结尾：${p.prefix}` +
+            `\n  否则它就是个 seg（会连 '${p.prefix}foo-1' 一起吃），请改成 '${p.prefix}-' 或挪进 aliases。`,
+        );
+      }
+      if (!p.prefix.startsWith(`${row.seg}-`)) {
+        throw new Error(
+          `name_prefixes 的 prefix 必须落在本条 seg 之下：'${p.prefix}' 不以 '${row.seg}-' 开头` +
+            `\n  前缀规则只能细化一个已登记的首段，不能凭空改写别的键族（打错一个字就会静默换归属）。`,
+        );
+      }
+      if (seenPrefix.has(p.prefix)) {
+        throw new Error(`name_prefixes 重复：${p.prefix}（既有 ${seenPrefix.get(p.prefix)}，又来 ${p.line}）`);
+      }
+      seenPrefix.set(p.prefix, p.line);
+      prefixes.push({ prefix: p.prefix, line: p.line, why: p.why, seg: row.seg });
+    }
+  }
+  // 最长优先由**生成顺序**保证（SQL 的 LATERAL 与 Go 的循环都按这个顺序取第一条命中），
+  // 所以排序放在这里——两个消费方自然同序，不必各自再排一次。
+  prefixes.sort((a, b) => [...b.prefix].length - [...a.prefix].length || (a.prefix < b.prefix ? -1 : 1));
+  return { rows, prefixes };
 }
 
 // 统一的 CTE 形状：三列都保留。`why` 在某些报表里不被 SELECT，但留着零成本，
@@ -81,7 +123,7 @@ function displayWidth(s) {
   return w;
 }
 
-function render(rows) {
+function render(rows, prefixes) {
   const pad = (s, target) => s + " ".repeat(Math.max(0, target - displayWidth(s)));
   const wSeg = Math.max(...rows.map((r) => displayWidth(`'${r.seg}',`)));
   const wLine = Math.max(...rows.map((r) => displayWidth(`'${r.line}',`)));
@@ -90,12 +132,56 @@ function render(rows) {
   const body = rows
     .map((r) => `        (${pad(`'${r.seg}',`, wSeg)} ${pad(`'${r.line}',`, wLine)} '${r.why}')`)
     .join(",\n");
+
+  // 空前缀表也必须能跑：`VALUES ()` 是语法错误，用 `SELECT … WHERE false` 表空集。
+  // 这一支不是假想——「把 name_prefixes 清空、报表应回到改前数值」正是本单的自证用例，
+  // 而第一版把 `VALUES` 写死在模板里，清空后渲染成 `VALUES SELECT …`，直到真跑才暴露。
+  let prefixCte;
+  if (prefixes.length === 0) {
+    prefixCte =
+      "prefix_aliases(prefix, line, why) AS (\n" +
+      "    SELECT NULL::text, NULL::text, NULL::text WHERE false\n" +
+      ")";
+  } else {
+    const wPref = Math.max(...prefixes.map((p) => displayWidth(`'${p.prefix}',`)));
+    const wPLine = Math.max(...prefixes.map((p) => displayWidth(`'${p.line}',`)));
+    const prefixRows = prefixes
+      .map((p) => `        (${pad(`'${p.prefix}',`, wPref)} ${pad(`'${p.line}',`, wPLine)} '${p.why}')`)
+      .join(",\n");
+    prefixCte = `prefix_aliases(prefix, line, why) AS (\n    VALUES\n${prefixRows}\n)`;
+  }
+
   // 结尾的 `),` 属于生成区域：这四个落点全是 WITH 列表里的 CTE 项，逗号是分隔符。
   // 首版只写 `)`，把 SQL 直接改成语法错误——验证时要 `psql` 真跑或至少看 EXPLAIN。
+  //
+  // `resolved` 把「按什么归的」也变成数据（by_rule + rule），这是报表能自证口径的前提：
+  // 只有金额、没有依据时，「归因生效了」与「规则一条都没命中」在读数上同形。
   return `${BEGIN}
 aliases(seg, line, why) AS (
     VALUES
 ${body}
+),
+${prefixCte},
+resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
+    SELECT k.id,
+           COALESCE(p.line, a.line, 'unknown'),
+           COALESCE(p.why, a.why, ''),
+           CASE WHEN p.line IS NOT NULL THEN 'prefix'
+                WHEN a.line IS NOT NULL THEN 'seg'
+                ELSE 'none' END,
+           COALESCE(p.prefix, a.seg),
+           CASE WHEN p.line IS NULL AND a.line IS NULL
+                THEN NULLIF(split_part(COALESCE(k.name, ''), '-', 1), '')
+           END
+    FROM api_keys k
+    LEFT JOIN LATERAL (
+        SELECT pa.prefix, pa.line, pa.why
+        FROM prefix_aliases pa
+        WHERE starts_with(COALESCE(k.name, ''), pa.prefix)
+        ORDER BY length(pa.prefix) DESC
+        LIMIT 1
+    ) p ON true
+    LEFT JOIN aliases a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)
 ),
 ${END}`;
 }
@@ -145,12 +231,20 @@ function replaceRegions(text, generated, file, expected) {
   return out;
 }
 
-function renderGo(rows) {
+function renderGo(rows, prefixes) {
   const pad = (s, n) => s + " ".repeat(Math.max(0, n - [...s].length));
   const keys = rows.map((r) => r.seg);
   const w = Math.max(...keys.map((k) => [...`"${k}":`].length));
   const body = rows
     .map((r) => `\t${pad(`"${r.seg}":`, w)} ${JSON.stringify(r.line)},`.replace(/"/g, '"'))
+    .join("\n");
+  // 前缀表按**生成顺序**（最长优先）排；Go 侧与 SQL 侧都取第一条命中，所以两边自然同序。
+  const pBody = prefixes
+    .map(
+      (p) =>
+        `\t{Prefix: ${JSON.stringify(p.prefix)}, Line: ${JSON.stringify(p.line)}, ` +
+        `Why: ${JSON.stringify(p.why)}},`,
+    )
     .join("\n");
   return `// Code generated by tools/gen-line-aliases.mjs from tools/line-aliases.json. DO NOT EDIT.
 //
@@ -169,13 +263,18 @@ ${body}
 var LineAliasReason = map[string]string{
 ${rows.map((r) => `\t${pad(`"${r.seg}":`, w)} ${JSON.stringify(r.why)},`).join("\n")}
 }
+
+// linePrefixAliases 是「首段撒谎」的修正表：key 名首段属于 A 线、实际用量由 B 线受益时，
+// 按**整名前缀**改写归属。顺序即优先级（最长前缀在前），与 tools/line-quota.sql 里
+// resolved CTE 的 LATERAL 取法一致；两边一旦分叉，--check 会红。
+var linePrefixAliases = []LinePrefixAlias{${pBody === "" ? "" : "\n" + pBody + "\n"}}
 `;
 }
 
 function main() {
   const check = process.argv.includes("--check");
-  const rows = loadAliases();
-  const generated = render(rows);
+  const { rows, prefixes } = loadAliases();
+  const generated = render(rows, prefixes);
   let drift = 0;
 
   // 元命令检查先跑：它不看别名内容，坏了就是「psycopg 一定跑不起来」，
@@ -209,7 +308,7 @@ function main() {
   }
 
   const goBefore = readFileSync(GO_TARGET, "utf8");
-  const goAfter = renderGo(rows);
+  const goAfter = renderGo(rows, prefixes);
   if (goBefore !== goAfter) {
     if (check) {
       drift += 1;
@@ -225,7 +324,7 @@ function main() {
       console.error(`\n✗ ${drift} 处漂移。跑 node tools/gen-line-aliases.mjs 重新生成，别手改生成件。`);
       process.exit(1);
     }
-    console.log(`✓ 别名口径一致：${rows.length} 条别名，${TARGETS.length} 个报表 + Go 侧`);
+    console.log(`✓ 别名口径一致：${rows.length} 条别名 + ${prefixes.length} 条前缀修正，${TARGETS.length} 个报表 + Go 侧`);
   }
 }
 
