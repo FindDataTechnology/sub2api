@@ -42,15 +42,45 @@ aliases(seg, line, why) AS (
         ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）'),
         ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段')
 ),
+prefix_aliases(prefix, line, why) AS (
+    VALUES
+        ('wanxing-probe-', '非产品流量', '键名自称 probe，实测是从单一内网主机 10.<internal>.1 连续跑了 168/168 小时的 harness 工作负载（7 日 7,674 次、只打 deepseek-v4.1-flash、均值 9,672 tok / 26.7 s、缓存读 17.3k）⇒ 可以确定不是萬星的产品用量；但它替谁跑，数据里看不出来，故单列而不并入任何产品线'),
+        ('wanxing-lex-',   '识律 lex',   '识律控制台副驾：key 挂在萬星账号名下（首段 wanxing），实际调用方是识律控制台——2026-11-15 实测 UA 为 deepseek-harness、来源 pod 10.<internal>.8.0，7 日 2,346 次 / $7.81，而识律自己的 lex 键同期只有 1 次请求 ⇒ 受益方是识律。不改名，因为改名只活在单个数据库、换环境即失效')
+),
+resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
+    SELECT k.id,
+           COALESCE(p.line, a.line, 'unknown'),
+           COALESCE(p.why, a.why, ''),
+           CASE WHEN p.line IS NOT NULL THEN 'prefix'
+                WHEN a.line IS NOT NULL THEN 'seg'
+                ELSE 'none' END,
+           COALESCE(p.prefix, a.seg),
+           CASE WHEN p.line IS NULL AND a.line IS NULL
+                THEN NULLIF(split_part(COALESCE(k.name, ''), '-', 1), '')
+           END
+    FROM api_keys k
+    LEFT JOIN LATERAL (
+        SELECT pa.prefix, pa.line, pa.why
+        FROM prefix_aliases pa
+        WHERE starts_with(COALESCE(k.name, ''), pa.prefix)
+        ORDER BY length(pa.prefix) DESC
+        LIMIT 1
+    ) p ON true
+    LEFT JOIN aliases a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)
+),
 -- <<< generated:line-aliases
+-- 归属走生成出来的 `resolved`：首段 / 声明前缀 / 未归因三档都在那一处算，报表不再自己 split_part。
+-- `by_rule` 必须一路带下去——只有金额、没有依据时，「修正生效了」与「规则一条都没命中」读数同形。
 attributed AS (
-    SELECT COALESCE(a.line, 'unknown') AS line,
-           CASE WHEN a.line IS NULL THEN split_part(COALESCE(k.name, '(deleted key)'), '-', 1) END AS raw_seg,
+    SELECT COALESCE(r.line, 'unknown') AS line,
+           COALESCE(r.by_rule, 'none') AS by_rule,
+           COALESCE(r.rule, '')        AS rule,
+           CASE WHEN r.line IS NULL OR r.line = 'unknown'
+                THEN COALESCE(r.raw_seg, '(deleted key)') END AS raw_seg,
            us.day,
            us.actual_usd
     FROM usage us
-    LEFT JOIN api_keys k ON k.id = us.api_key_id
-    LEFT JOIN aliases  a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)
+    LEFT JOIN resolved r ON r.key_id = us.api_key_id
 ),
 per_line_day AS (
     SELECT line,
@@ -60,6 +90,34 @@ per_line_day AS (
            round(sum(actual_usd), 4) AS actual_usd
     FROM attributed
     GROUP BY line, raw_prefix_if_unknown, day
+),
+-- 归属依据的审计：每线按 seg / prefix / none 拆开（与 per_line_day 同源，只是多一个维度）。
+-- 这一块不参与阈值判定，只回答「这一行的数是怎么来的」。
+by_rule_all AS (
+    SELECT line,
+           by_rule,
+           count(*)                  AS requests,
+           round(sum(actual_usd), 4) AS actual_usd
+    FROM attributed
+    GROUP BY line, by_rule
+),
+-- 每条声明前缀在本窗口的命中量：0 命中的那条必须打出来。
+-- 「规则写着、但一个键都没命中」与「规则生效了」在金额上同形，只有这一列能分开。
+prefix_hits AS (
+    SELECT COALESCE(r.rule, '') AS prefix,
+           count(*)             AS requests,
+           round(sum(us.actual_usd), 4) AS actual_usd
+    FROM usage us
+    JOIN resolved r ON r.key_id = us.api_key_id
+    WHERE r.by_rule = 'prefix'
+    GROUP BY 1
+),
+-- 声明过的线（首段表 + 前缀表的并集）。**用途只有一个**：把「声明了但本窗口没有用量」的线
+-- 单独点名。少了它，一条线会整条从 per_line_day 里消失，读起来像「这条线没了」。
+declared_lines AS (
+    SELECT line FROM aliases
+    UNION
+    SELECT line FROM prefix_aliases
 ),
 group_limits AS (
     SELECT g.name                                    AS group_name,
@@ -104,5 +162,36 @@ SELECT json_build_object(
                    'today_usd', today_usd)
                ORDER BY group_name)
         FROM group_limits
-    ), '[]'::json)
+    ), '[]'::json),
+    -- 归因依据：per_line_day 只给金额，读者无法由此判断「是按首段算的还是按声明前缀算的」。
+    -- 这一块是那半个答案；hit=false 的前缀行＝声明了但本窗口一个键都没命中。
+    'attribution', json_build_object(
+        'by_rule', COALESCE((
+            SELECT json_agg(json_build_object(
+                       'line', line,
+                       'by_rule', by_rule,
+                       'requests', requests,
+                       'usd', actual_usd)
+                   ORDER BY line, by_rule)
+            FROM by_rule_all
+        ), '[]'::json),
+        'declared_prefixes', COALESCE((
+            SELECT json_agg(json_build_object(
+                       'prefix', pa.prefix,
+                       'line', pa.line,
+                       'why', pa.why,
+                       'hit', ph.prefix IS NOT NULL,
+                       'requests', COALESCE(ph.requests, 0),
+                       'usd', COALESCE(ph.actual_usd, 0))
+                   ORDER BY pa.prefix)
+            FROM prefix_aliases pa
+            LEFT JOIN prefix_hits ph ON ph.prefix = pa.prefix
+        ), '[]'::json),
+        -- 声明了但没有用量的线：不是「这条线不存在」，是这个窗口里没有键在用（或全被前缀改写走）。
+        'declared_lines_without_usage', COALESCE((
+            SELECT json_agg(d.line ORDER BY d.line)
+            FROM declared_lines d
+            WHERE NOT EXISTS (SELECT 1 FROM by_rule_all b WHERE b.line = d.line)
+        ), '[]'::json)
+    )
 )::text;

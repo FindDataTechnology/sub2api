@@ -33,3 +33,11 @@ var LineAliasReason = map[string]string{
 	"特价":         "路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）",
 	"openrouter": "同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段",
 }
+
+// linePrefixAliases 是「首段撒谎」的修正表：key 名首段属于 A 线、实际用量由 B 线受益时，
+// 按**整名前缀**改写归属。顺序即优先级（最长前缀在前），与 tools/line-quota.sql 里
+// resolved CTE 的 LATERAL 取法一致；两边一旦分叉，--check 会红。
+var linePrefixAliases = []LinePrefixAlias{
+	{Prefix: "wanxing-probe-", Line: "非产品流量", Why: "键名自称 probe，实测是从单一内网主机 10.<internal>.1 连续跑了 168/168 小时的 harness 工作负载（7 日 7,674 次、只打 deepseek-v4.1-flash、均值 9,672 tok / 26.7 s、缓存读 17.3k）⇒ 可以确定不是萬星的产品用量；但它替谁跑，数据里看不出来，故单列而不并入任何产品线"},
+	{Prefix: "wanxing-lex-", Line: "识律 lex", Why: "识律控制台副驾：key 挂在萬星账号名下（首段 wanxing），实际调用方是识律控制台——2026-11-15 实测 UA 为 deepseek-harness、来源 pod 10.<internal>.8.0，7 日 2,346 次 / $7.81，而识律自己的 lex 键同期只有 1 次请求 ⇒ 受益方是识律。不改名，因为改名只活在单个数据库、换环境即失效"},
+}
