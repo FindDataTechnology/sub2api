@@ -70,3 +70,61 @@ func TestGetLineStatsReturnsMergedLinesAndDimensionNote(t *testing.T) {
 	require.Equal(t, "billing_subject", body.Data.Dim)
 	require.Contains(t, body.Data.Note, "计费主体")
 }
+
+// TestGetLineStatsCarriesRouteKeysAndReadableShare 钉住读面的**诚实性**：
+// 只给 lines 时，含路由键的那一行（自有平台）会被渲染成最大的产品线。
+// 所以响应必须同时带 route_keys 与 product_readable_share，且 note 要说清第三类。
+func TestGetLineStatsCarriesRouteKeysAndReadableShare(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &lineStatsRepo{rows: []usagestats.LineStatRow{
+		{KeyName: "特价-a", Requests: 100, ActualCost: 200, ListCost: 200},
+		{KeyName: "lex-a", Requests: 10, ActualCost: 20, ListCost: 20},
+	}}
+	handler := NewDashboardHandler(service.NewDashboardService(repo, nil, nil, nil), nil)
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/dashboard/lines", nil)
+	handler.GetLineStats(ctx)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var body struct {
+		Data struct {
+			Lines           []usagestats.LineStat     `json:"lines"`
+			RouteKeys       []usagestats.RouteKeyStat `json:"route_keys"`
+			RouteKeyUSD     float64                   `json:"route_key_usd"`
+			RouteKeyShare   float64                   `json:"route_key_share"`
+			ProductReadable *float64                  `json:"product_readable_share"`
+			TotalUSD        float64                   `json:"total_usd"`
+			Note            string                    `json:"note"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+
+	require.Len(t, body.Data.RouteKeys, 1)
+	require.Equal(t, "特价", body.Data.RouteKeys[0].Seg)
+	require.Equal(t, 200.0, body.Data.RouteKeys[0].ActualCost)
+	require.Equal(t, 200.0, body.Data.RouteKeyUSD)
+	require.Equal(t, 0.9091, body.Data.RouteKeyShare)
+	require.Equal(t, 220.0, body.Data.TotalUSD)
+
+	// 可判读 = 1 − 0(未归因) − 200/220
+	require.NotNil(t, body.Data.ProductReadable)
+	require.Equal(t, 0.0909, *body.Data.ProductReadable)
+
+	// 含路由键的那一行必须自己说明，不能只靠外部读数
+	var own *usagestats.LineStat
+	for i := range body.Data.Lines {
+		if body.Data.Lines[i].Line == "自有平台" {
+			own = &body.Data.Lines[i]
+		}
+	}
+	require.NotNil(t, own, "路由键仍归在自有平台（归属不变）")
+	require.Equal(t, []string{"特价"}, own.RouteKeys)
+
+	// note 要说出第三类，否则读的人只有「产品线」与「未归因」两档心智模型
+	require.Contains(t, body.Data.Note, "route_keys")
+	require.Contains(t, body.Data.Note, "product_readable_share")
+}

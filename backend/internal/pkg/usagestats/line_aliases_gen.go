@@ -41,3 +41,12 @@ var linePrefixAliases = []LinePrefixAlias{
 	{Prefix: "wanxing-probe-", Line: "非产品流量", Why: "键名自称 probe，实测是从单一内网主机 172.16.0.123 连续跑了 168/168 小时的 harness 工作负载（7 日 7,674 次、只打 deepseek-v4.1-flash、均值 9,672 tok / 26.7 s、缓存读 17.3k）⇒ 可以确定不是萬星的产品用量；但它替谁跑，数据里看不出来，故单列而不并入任何产品线"},
 	{Prefix: "wanxing-lex-", Line: "识律 lex", Why: "识律控制台副驾：key 挂在萬星账号名下（首段 wanxing），实际调用方是识律控制台——2026-11-15 实测 UA 为 deepseek-harness、来源 pod 10.42.8.0，7 日 2,346 次 / $7.81，而识律自己的 lex 键同期只有 1 次请求 ⇒ 受益方是识律。不改名，因为改名只活在单个数据库、换环境即失效"},
 }
+
+// lineRouteSegs 是声明为**路由键**（tools/line-aliases.json 里 "route": true）的段：
+// 键名编码的是上游折扣路由，不是产品线，因此其花费在结构上拆不到任何一条线。
+// 报表把它们的聚合摆成 route_keys 一等读数；控制台读面靠这张表把「含路由键的那一行」
+// 标出来，免得「自有平台」被读成一条产品线。**这张表也必须只有一处真源。**
+var lineRouteSegs = map[string]struct{}{
+	"特价":         {},
+	"openrouter": {},
+}

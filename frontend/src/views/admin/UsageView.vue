@@ -63,6 +63,94 @@
           />
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
         </div>
+        <!-- 按线花费：路由键与可判读覆盖率必须同屏给。只给逐线表时，含路由键的那一行
+             （自有平台）看上去就是最大的产品线——报表与告警已改口，这里必须同口径。 -->
+        <div class="card p-4">
+          <div class="flex flex-wrap items-center gap-3">
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">按线花费</h3>
+            <span class="text-xs text-gray-500 dark:text-gray-400">
+              维度=计费主体（谁持 key 调用），不是受益方
+            </span>
+          </div>
+          <div v-if="lineStatsLoading" class="py-6 text-center text-sm text-gray-400">…</div>
+          <!-- 无数据与「0 元」是两件事：窗口没用量、或读数取不到时不许渲染 0 -->
+          <div
+            v-else-if="lineStatsRows.length === 0"
+            class="py-6 text-center text-sm text-gray-500 dark:text-gray-400"
+          >
+            无数据（该窗口没有用量，或读数取不到）
+          </div>
+          <template v-else>
+            <div class="mt-3 overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="text-left text-xs text-gray-500 dark:text-gray-400">
+                    <th class="py-1 pr-3 font-medium">线</th>
+                    <th class="py-1 pr-3 text-right font-medium">请求</th>
+                    <th class="py-1 pr-3 text-right font-medium">实扣</th>
+                    <th class="py-1 text-right font-medium">占比</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="row in lineStatsRows"
+                    :key="row.line"
+                    class="border-t border-gray-100 dark:border-dark-700"
+                  >
+                    <td class="py-1 pr-3">
+                      <span
+                        :class="
+                          row.line === 'unknown'
+                            ? 'text-gray-500 dark:text-gray-400'
+                            : 'text-gray-900 dark:text-gray-100'
+                        "
+                        >{{ row.line }}</span
+                      >
+                      <span
+                        v-if="row.route_keys && row.route_keys.length"
+                        class="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                        title="键名编码上游折扣路由、不含线信息，结构上拆不到任何一条线"
+                      >
+                        含路由键 {{ row.route_keys.join(' / ') }}
+                      </span>
+                      <span
+                        v-if="row.unknown_segs && row.unknown_segs.length"
+                        class="ml-2 text-xs text-gray-500 dark:text-gray-400"
+                      >
+                        {{ row.unknown_segs.slice(0, 3).join(' / ') }}
+                      </span>
+                    </td>
+                    <td class="py-1 pr-3 text-right tabular-nums">
+                      {{ row.requests.toLocaleString() }}
+                    </td>
+                    <td class="py-1 pr-3 text-right tabular-nums">
+                      ${{ row.actual_cost.toFixed(2) }}
+                    </td>
+                    <td class="py-1 text-right tabular-nums">{{ row.share_pct.toFixed(1) }}%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="mt-3 text-xs text-gray-600 dark:text-gray-400">
+              <template v-if="lineStatsReadablePct === null">
+                该窗口实扣 ${{ lineStatsTotalUSD.toFixed(2) }}，
+                <span class="font-medium">没有可用于逐线判读的读数</span>
+                ——这不是「全部读得懂」。
+              </template>
+              <template v-else>
+                真正可逐线判读
+                <span class="font-medium">{{ lineStatsReadablePct.toFixed(1) }}%</span>
+                <span v-if="lineStatsRouteUSD > 0">
+                  ；另有 ${{ lineStatsRouteUSD.toFixed(2) }}（{{
+                    lineStatsRoutePct?.toFixed(1)
+                  }}%）落在路由键
+                  <span class="font-medium">{{ lineStatsRouteSegs.join('、') }}</span>
+                  ——键名编码上游折扣路由，不含线信息
+                </span>
+              </template>
+            </p>
+          </template>
+        </div>
       </div>
       <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
       <div class="card">
@@ -206,6 +294,7 @@ import ModelDistributionChart from '@/components/charts/ModelDistributionChart.v
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
+import type { LineStatsResponse } from '@/api/admin/dashboard'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -223,6 +312,9 @@ const loadedModelSources = reactive<Record<ModelDistributionSource, boolean>>({
   mapping: false,
 })
 const groupDistributionMetric = ref<DistributionMetric>('tokens')
+// 按线花费：逐线 + 路由键 + 可判读覆盖率。三样必须一起读，见 api/admin/dashboard.ts 的类型注释。
+const lineStats = ref<LineStatsResponse | null>(null)
+const lineStatsLoading = ref(false)
 const endpointDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionSource = ref<EndpointSource>('inbound')
 const inboundEndpointStats = ref<EndpointStat[]>([])
@@ -486,9 +578,43 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
   }
 }
 
+// 按线花费：与报表/告警同一窗口、同一别名表。失败时置 null 让界面打「无数据」，
+// 而不是留一组空数组冒充「这一窗口真的没有花费」。
+const loadLineStats = async () => {
+  lineStatsLoading.value = true
+  try {
+    lineStats.value = await adminAPI.dashboard.getLineStats({
+      start_date: filters.value.start_date || startDate.value,
+      end_date: filters.value.end_date || endDate.value
+    })
+  } catch (error) {
+    console.error('Failed to load line stats:', error)
+    lineStats.value = null
+  } finally {
+    lineStatsLoading.value = false
+  }
+}
+
+// 模板只读这几个派生值：`lineStats` 可能为 null，把判定与格式化收到脚本里，
+// 模板就不必依赖 v-if/v-else 的窄化（`!a || a.b` 的 else 分支不保证被 vue-tsc 收窄）。
+const lineStatsRows = computed(() => lineStats.value?.lines ?? [])
+const lineStatsTotalUSD = computed(() => lineStats.value?.total_usd ?? 0)
+const lineStatsRouteUSD = computed(() => lineStats.value?.route_key_usd ?? 0)
+const lineStatsRouteSegs = computed(() => (lineStats.value?.route_keys ?? []).map((k) => k.seg))
+// null 是「没有可判读的东西」（窗口无花费/读数取不到），不是「100% 都读得懂」。
+const lineStatsReadablePct = computed(() => {
+  const v = lineStats.value?.product_readable_share
+  return typeof v === 'number' ? Math.round(v * 1000) / 10 : null
+})
+const lineStatsRoutePct = computed(() => {
+  const v = lineStats.value?.route_key_share
+  return typeof v === 'number' ? Math.round(v * 1000) / 10 : null
+})
+
 const loadChartData = async () => {
   const seq = ++chartReqSeq
   chartsLoading.value = true
+  void loadLineStats()
   try {
     const requestType = filters.value.request_type
     const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream

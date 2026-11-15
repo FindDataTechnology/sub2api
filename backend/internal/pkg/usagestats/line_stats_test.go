@@ -169,3 +169,89 @@ func TestAggregateLinesSeparatesByRule(t *testing.T) {
 		t.Errorf("萬星应只拿到未声明那 3 元，实际 %+v", wx)
 	}
 }
+
+// TestAggregateLinesDetailedSplitsRouteKeys 钉住「路由键的花费不改变归属，但必须单列，
+// 且可判读份额要把未归因与路由键都扣掉」——这是控制台那一侧能力不再骗人的全部依据。
+func TestAggregateLinesDetailedSplitsRouteKeys(t *testing.T) {
+	rows := []LineStatRow{
+		{KeyName: "特价-a", Requests: 100, ActualCost: 200},
+		{KeyName: "openrouter-b", Requests: 50, ActualCost: 20},
+		{KeyName: "lex-a", Requests: 10, ActualCost: 20},
+		{KeyName: "413621549-c", Requests: 5, ActualCost: 5},
+	}
+	agg := AggregateLinesDetailed(rows)
+
+	// 1) 归属不变：路由键仍落在别名表声明的那条线上（可见性变更 ≠ 归因变更）
+	byLine := map[string]LineStat{}
+	for _, s := range agg.Lines {
+		byLine[s.Line] = s
+	}
+	own := byLine["自有平台"]
+	if own.ActualCost != 220 {
+		t.Fatalf("自有平台应仍是 220（200+20），实际 %+v", own)
+	}
+	// 2) 但那一行必须自己说明它含哪些路由键
+	if !reflect.DeepEqual(own.RouteKeys, []string{"openrouter", "特价"}) {
+		t.Errorf("自有平台应标出 route_keys=[openrouter 特价]，实际 %v", own.RouteKeys)
+	}
+
+	// 3) 路由键单列，按实扣降序
+	if len(agg.RouteKeys) != 2 {
+		t.Fatalf("期望 2 条路由键读数，实际 %+v", agg.RouteKeys)
+	}
+	if agg.RouteKeys[0].Seg != "特价" || agg.RouteKeys[0].ActualCost != 200 {
+		t.Errorf("路由键首项应是 特价 200，实际 %+v", agg.RouteKeys[0])
+	}
+	if agg.RouteKeyUSD != 220 || agg.RouteKeyShare != 0.8980 {
+		t.Errorf("路由键合计/份额应为 220 / 0.8980，实际 %v / %v", agg.RouteKeyUSD, agg.RouteKeyShare)
+	}
+
+	// 4) 可判读 = 1 − 未归因(5/245) − 路由键(220/245)
+	if agg.ProductReadableShare == nil {
+		t.Fatal("窗口内有花费时 product_readable_share 不应为 nil")
+	}
+	if got := *agg.ProductReadableShare; got != 0.0816 {
+		t.Errorf("可判读份额应为 0.0816（1 − 5/245 − 220/245），实际 %v", got)
+	}
+	if agg.TotalUSD != 245 {
+		t.Errorf("分母应为 245，实际 %v", agg.TotalUSD)
+	}
+}
+
+// TestAggregateLinesDetailedEmptyWindowIsNotFullCoverage 钉住「空窗口不是 100% 可判读」。
+// nil 与 1.0 在这一栏含义完全相反：前者是「没有可判读的东西」，后者是「全都读得懂」。
+func TestAggregateLinesDetailedEmptyWindowIsNotFullCoverage(t *testing.T) {
+	agg := AggregateLinesDetailed(nil)
+	if agg.ProductReadableShare != nil {
+		t.Fatalf("空窗口的 product_readable_share 必须是 nil，实际 %v", *agg.ProductReadableShare)
+	}
+	if len(agg.RouteKeys) != 0 {
+		t.Errorf("没有输入时不应伪造路由键读数，实际 %+v", agg.RouteKeys)
+	}
+
+	// 零花费但有条目：同样不能报 100%
+	agg = AggregateLinesDetailed([]LineStatRow{{KeyName: "lex-a", Requests: 3}})
+	if agg.ProductReadableShare != nil {
+		t.Fatalf("实扣为 0 时 product_readable_share 必须是 nil，实际 %v", *agg.ProductReadableShare)
+	}
+}
+
+// TestAggregateLinesDetailedRouteKeysNeedDeclaredSeg 钉住「路由键只在按首段命中时成立」：
+// 前缀规则是更具体的受益方声明，不能被路由键覆盖（同一条纪律：归因只能有一处生效）。
+func TestAggregateLinesDetailedRouteKeysNeedDeclaredSeg(t *testing.T) {
+	// wanxing-lex-console-copilot 由前缀规则改归识律；它不是路由键，也不该进 route_keys。
+	agg := AggregateLinesDetailed([]LineStatRow{
+		{KeyName: "wanxing-lex-console-copilot", Requests: 1, ActualCost: 5},
+	})
+	for _, s := range agg.Lines {
+		if len(s.RouteKeys) != 0 {
+			t.Errorf("前缀归因的行不该带 route_keys，实际 %+v", s)
+		}
+	}
+	if len(agg.RouteKeys) != 0 || agg.RouteKeyUSD != 0 {
+		t.Errorf("前缀归因不应产出路由键读数，实际 %+v / %v", agg.RouteKeys, agg.RouteKeyUSD)
+	}
+	if agg.ProductReadableShare == nil || *agg.ProductReadableShare != 1 {
+		t.Errorf("全部可判读时应为 1，实际 %v", agg.ProductReadableShare)
+	}
+}
