@@ -30,8 +30,8 @@ var LineAliasReason = map[string]string{
 	"lawbench":   "law-bench 无连字符写法",
 	"yizuo":      "平台自身承载的调用",
 	"platform":   "平台内部/演示 key",
-	"特价":         "路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性",
-	"openrouter": "同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性",
+	"特价":         "路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性；2026-11-15 按 UA 实测 7 日内部构成：deepseek-harness ~$99（壹座 dsh，经入口节点桥 10.<internal>.4/.9/.10 轮转——三桥花费几乎相等，是同一调用方不是三个）+ AsyncOpenAI/Python 单一内网主机 10.<internal>.1 ~$46（与 wanxing-probe- 前缀规则同一台机，属非产品流量却计入本桶 ⇒ 「自有平台」略被高估）+ 其余 ~$3",
+	"openrouter": "同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性；2026-11-15 按 UA 实测：本键 99.6% 是 deepseek-harness（~$90，入口桥 10.<internal>.12.0→12.1 于 11-14 切换）",
 }
 
 // linePrefixAliases 是「首段撒谎」的修正表：key 名首段属于 A 线、实际用量由 B 线受益时，
