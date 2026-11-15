@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -664,6 +663,22 @@ func sameVideoResolution(a, b string) bool {
 	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
 
+// VideoResolutionMismatch reports whether what upstream delivered differs in billing terms
+// from the tier the customer is being charged for.
+//
+// Empty on either side means "this side is unknown", never "different": a status body
+// without a resolution field must not manufacture a mismatch. The only place both sides
+// exist is the completion path, which holds the create-time snapshot and the status body
+// together — see OpenAIForwardResult.VideoResolutionDelivered.
+func VideoResolutionMismatch(billed, delivered string) bool {
+	billed = strings.TrimSpace(billed)
+	delivered = strings.TrimSpace(delivered)
+	if billed == "" || delivered == "" {
+		return false
+	}
+	return !sameVideoResolution(billed, delivered)
+}
+
 // ExtractGrokVideoBillingFromStatusBody builds usage units from a successful terminal
 // status (official `done` or the relay's `completed`/`succeeded`).
 //
@@ -731,25 +746,21 @@ func ExtractGrokVideoBillingFromStatusBody(statusBody []byte, pending *GrokVideo
 	}
 	// Delivery may not match the purchase: 2026-11-14/15 probe asked 480p and upstream
 	// answered `"resolution":"720P"`. Billing stays on the requested tier (that is what
-	// the customer bought) but the fact must be on the record for reconciliation —
-	// silently repricing either way is how a lane ends up billing the wrong tier.
-	if pending != nil {
-		requested := strings.TrimSpace(pending.VideoResolution)
-		if delivered := GrokVideoDeliveredResolution(statusBody); requested != "" && delivered != "" &&
-			!sameVideoResolution(requested, delivered) {
-			logger.LegacyPrintf("service.grok_media",
-				"video_resolution_delivered_differs: request_id=%s requested=%s delivered=%s billed=%s",
-				responseID, requested, delivered, NormalizeVideoBillingResolutionOrDefault(requested))
-		}
-	}
+	// the customer bought), so the delivered tier has to be carried out of here for the
+	// caller to record — this function never has the create-time snapshot (both production
+	// call sites pass pending=nil), so a comparison *here* could only ever compare the
+	// request-side default against the delivery. Callers hold both sides; see
+	// VideoResolutionDelivered.
+	deliveredResolution := GrokVideoDeliveredResolution(statusBody)
 	return &OpenAIForwardResult{
-		ResponseID:           responseID,
-		Model:                model,
-		BillingModel:         billingModel,
-		UpstreamModel:        upstreamModel,
-		VideoCount:           1,
-		VideoResolution:      resolution,
-		VideoDurationSeconds: durationSeconds,
+		ResponseID:               responseID,
+		Model:                    model,
+		BillingModel:             billingModel,
+		UpstreamModel:            upstreamModel,
+		VideoCount:               1,
+		VideoResolution:          resolution,
+		VideoResolutionDelivered: deliveredResolution,
+		VideoDurationSeconds:     durationSeconds,
 	}
 }
 
