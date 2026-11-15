@@ -40,12 +40,14 @@ aliases(seg, line, why) AS (
         ('yizuo',      '壹座 yizuo',    '平台自身承载的调用'),
         ('platform',   '壹座 platform', '平台内部/演示 key'),
         ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性；2026-11-15 按 UA 实测 7 日内部构成：deepseek-harness ~$99（壹座 dsh，经入口节点桥 10.42.4/.9/.10 轮转——三桥花费几乎相等，是同一调用方不是三个）+ AsyncOpenAI/Python 单一内网主机 172.16.0.123 ~$46（与 wanxing-probe- 前缀规则同一台机，属非产品流量却计入本桶 ⇒ 「自有平台」略被高估）+ 其余 ~$3'),
-        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性；2026-11-15 按 UA 实测：本键 99.6% 是 deepseek-harness（~$90，入口桥 10.42.12.0→12.1 于 11-14 切换）')
+        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性；2026-11-15 按 UA 实测：本键 99.6% 是 deepseek-harness（~$90，入口桥 10.42.12.0→12.1 于 11-14 切换）'),
+        ('vaas',       'VAAS',          'VAAS 是一条产品线（有独立产线镜像与集群车道），它的键全部以 `vaas-` 起首、挂在该产品的专属账号下 ⇒ 整族就是这一条线，不需要逐条细则。2026-11-16 实读 7 日：`vaas-media-grok` $0.8100（federation@finddatatech.cloud）、`vaas-wanxing-imagevideo` $0.1340 / `vaas-wanxing-voice` $0.0135（admin@finddatatech.cloud），同族另有 `vaas-tts` / `vaas-rerank` / `vaas-image-video` 三键同属 vaas@findmail.com（本期无用量）。此前整族落 unknown，约占 unknown 桶的三成')
 ),
 prefix_aliases(prefix, line, why) AS (
     VALUES
-        ('wanxing-probe-', '非产品流量', '键名自称 probe，实测是从单一内网主机 172.16.0.123 连续跑了 168/168 小时的 harness 工作负载（7 日 7,674 次、只打 deepseek-v4.1-flash、均值 9,672 tok / 26.7 s、缓存读 17.3k）⇒ 可以确定不是萬星的产品用量；但它替谁跑，数据里看不出来，故单列而不并入任何产品线'),
-        ('wanxing-lex-',   '识律 lex',   '识律控制台副驾：key 挂在萬星账号名下（首段 wanxing），实际调用方是识律控制台——2026-11-15 实测 UA 为 deepseek-harness、来源 pod 10.42.8.0，7 日 2,346 次 / $7.81，而识律自己的 lex 键同期只有 1 次请求 ⇒ 受益方是识律。不改名，因为改名只活在单个数据库、换环境即失效')
+        ('wanxing-probe-', '非产品流量',         '键名自称 probe，实测是从单一内网主机 172.16.0.123 连续跑了 168/168 小时的 harness 工作负载（7 日 7,674 次、只打 deepseek-v4.1-flash、均值 9,672 tok / 26.7 s、缓存读 17.3k）⇒ 可以确定不是萬星的产品用量；但它替谁跑，数据里看不出来，故单列而不并入任何产品线'),
+        ('fd-text-core-',  '文本核心 text-core', '`text-core` 是已声明的产品线（`all-services/prod/line-manifests.yaml` 的 19 条之一），而这条线的调用键名就叫 `fd-text-core-*`——首段 `fd` 是组织前缀，导致这条线在自己的报表里看不到自己的调用。2026-11-16 实读：`fd-text-core-embedding-bulk` 7 日 $0.4449 / 2,783 次，全部是 embedding 批量调用，属文本核心的检索/向量面'),
+        ('wanxing-lex-',   '识律 lex',           '识律控制台副驾：key 挂在萬星账号名下（首段 wanxing），实际调用方是识律控制台——2026-11-15 实测 UA 为 deepseek-harness、来源 pod 10.42.8.0，7 日 2,346 次 / $7.81，而识律自己的 lex 键同期只有 1 次请求 ⇒ 受益方是识律。不改名，因为改名只活在单个数据库、换环境即失效')
 ),
 resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
     SELECT k.id,

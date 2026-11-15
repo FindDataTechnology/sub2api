@@ -6,7 +6,9 @@
     "why = 为什么这个 seg 属于这条线。不写理由的归并等同于猜，闸会拒。",
     "不确定的键不要加进来——它们会落进 unknown 桶单列，那比编一个归属诚实。",
     "name_prefixes = 首段撒谎时的修正：一条 key 名的首段属于 A 线、实际用量由 B 线受益时，在这里登记整名前缀（以 '-' 结尾、必须落在本条 seg 之下，即 prefix 以 '<seg>-' 开头）。归属顺序：最长匹配前缀优先 → 无匹配再退回首段；同 seg 下未被声明的键不受影响。",
-    "name_prefixes 也必须有 why：它断言的是「这个键替谁跑」，没有证据就是猜。别用它替代重命名线上 key——重命名只活在一个数据库里，换环境或回滚即失效。"
+    "name_prefixes 也必须有 why：它断言的是「这个键替谁跑」，没有证据就是猜。别用它替代重命名线上 key——重命名只活在一个数据库里，换环境或回滚即失效。",
+    "prefix_families = 声明「这个首段是族前缀，不是一条线」（如 `fd-`：同族横跨多个产品与多个账号）。登记之后才能用下面的 prefixes 在族内逐条归属；不登记的族前缀不许出现在 prefixes 里——否则打错一个字就会造出没人声明的族，而报表看不出来。",
+    "prefixes = 族内的前缀细则（{prefix, line, why, covers}）：prefix 必须以 '-' 结尾、必须长于 '<seg>-'（只有 '<seg>-' 那就是一条首段规则，请挪进 aliases）；covers 是这条规则钉住的**精确键名**（至少一个，且每个都必须以该前缀开头）。covers 不是文档而是守卫：族按首段算，中间那段拼错一个字不会造出新族、只会变出一条匹配不到任何键的规则，报表静默不变——写下来才当场红。归属顺序与 name_prefixes 同一条：最长匹配前缀优先；族内未被任何细则命中的键仍落 unknown 单列，**不会**因为族被声明就并进某条线。"
   ],
   "aliases": [
     {
@@ -72,6 +74,25 @@
       "line": "自有平台",
       "why": "同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性；2026-11-15 按 UA 实测：本键 99.6% 是 deepseek-harness（~$90，入口桥 10.42.12.0→12.1 于 11-14 切换）",
       "route": true
+    },
+    {
+      "seg": "vaas",
+      "line": "VAAS",
+      "why": "VAAS 是一条产品线（有独立产线镜像与集群车道），它的键全部以 `vaas-` 起首、挂在该产品的专属账号下 ⇒ 整族就是这一条线，不需要逐条细则。2026-11-16 实读 7 日：`vaas-media-grok` $0.8100（federation@finddatatech.cloud）、`vaas-wanxing-imagevideo` $0.1340 / `vaas-wanxing-voice` $0.0135（admin@finddatatech.cloud），同族另有 `vaas-tts` / `vaas-rerank` / `vaas-image-video` 三键同属 vaas@findmail.com（本期无用量）。此前整族落 unknown，约占 unknown 桶的三成"
+    }
+  ],
+  "prefix_families": [
+    {
+      "seg": "fd",
+      "why": "`fd-` 是公司内部服务账号的键前缀，**不是一条线**：同族里 `fd-text-core-*` 属文本核心、`fd-memory*` 是记忆面、`fd-crawler-automation` 属另一个用户（p2walk1025@findmail.com）⇒ 把整族登记成一条线会把不同产品吞进同一行，所以这一族只能按 `prefixes` 逐条归。2026-11-16 实读 7 日：`fd-text-core-embedding-bulk` $0.4449 / 2,783 次、`fd-memory` $0.1293 / 11,446 次，两条都是 admin@finddatatech.cloud（user 1）名下的内部服务钥"
+    }
+  ],
+  "prefixes": [
+    {
+      "prefix": "fd-text-core-",
+      "line": "文本核心 text-core",
+      "why": "`text-core` 是已声明的产品线（`all-services/prod/line-manifests.yaml` 的 19 条之一），而这条线的调用键名就叫 `fd-text-core-*`——首段 `fd` 是组织前缀，导致这条线在自己的报表里看不到自己的调用。2026-11-16 实读：`fd-text-core-embedding-bulk` 7 日 $0.4449 / 2,783 次，全部是 embedding 批量调用，属文本核心的检索/向量面",
+      "covers": ["fd-text-core-embedding-bulk"]
     }
   ]
 }

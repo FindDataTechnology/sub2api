@@ -106,6 +106,101 @@ function loadAliases() {
       prefixes.push({ prefix: p.prefix, line: p.line, why: p.why, seg: row.seg });
     }
   }
+  // ── prefix_families + prefixes：族前缀下的细则 ──────────────────────────────
+  // 为什么需要第二档：线身份是 key 名首段，而有些首段是**组织/族前缀**（`fd-`），不是一条线；
+  // `name_prefixes` 只能细化一个已登记的首段，于是「首段是族前缀」的键族永远归不了。
+  // 2026-11-16 线上实读（7 日）：`text-core` 是 19 条已声明线之一，而它的调用键叫
+  // `fd-text-core-embedding-bulk`（$0.4449 / 2,783 次），首段是 `fd` ⇒ 整条线在报表里看不见自己。
+  //
+  // 四条校验各自拦一种「静默改写」：
+  //  ① 细则没钉住任何真实键名 ⇒ 打错一个字（`fd-tex-core-`）会变成一条**匹配不到任何键**的规则：
+  //     报表静默不变、没人发现。所以族内细则必须带 `covers`（至少一个精确键名），
+  //     且每个键名都得以该前缀开头——错一个字母当场红；
+  //  ② 不以 '-' 结尾 ⇒ 它其实是首段规则（`fd-tex` 会连 `fd-texfoo-1` 一起吃）；
+  //  ③ 与 name_prefixes 全局重复 ⇒ 两条规则都命中时归属取决于生成顺序，那是「看运气」不是口径；
+  //  ④ 族前缀本身就是已登记的别名 seg ⇒ 那种情形本该写 name_prefixes，两条路并存就是第二处口径。
+  const families = new Map();
+  const famList = doc.prefix_families;
+  if (famList !== undefined) {
+    if (!Array.isArray(famList) || famList.length === 0) {
+      throw new Error("prefix_families 必须是非空数组（要么不写这个键）");
+    }
+    for (const f of famList) {
+      for (const key of ["seg", "why"]) {
+        if (typeof f[key] !== "string" || f[key].trim() === "") {
+          throw new Error(`prefix_families 缺 ${key}：${JSON.stringify(f)}`);
+        }
+      }
+      if (f.seg.includes("-")) {
+        throw new Error(`prefix_families 的 seg 只能是首个连字符之前那一段：${f.seg}`);
+      }
+      if (seen.has(f.seg)) {
+        throw new Error(
+          `prefix_families 的 '${f.seg}' 已经是别名 seg（line=${seen.get(f.seg)}）` +
+            `\n  那种情形请在该 seg 下写 name_prefixes——两条路并存就是第二处口径。`,
+        );
+      }
+      if (families.has(f.seg)) throw new Error(`prefix_families 重复：${f.seg}`);
+      families.set(f.seg, f.why);
+    }
+  }
+
+  const famPrefixes = doc.prefixes;
+  if (famPrefixes !== undefined && !Array.isArray(famPrefixes)) {
+    throw new Error("prefixes 必须是数组（要么不写这个键）");
+  }
+  for (const p of famPrefixes || []) {
+    for (const key of ["prefix", "line", "why"]) {
+      if (typeof p[key] !== "string" || p[key].trim() === "") {
+        throw new Error(`prefixes 缺 ${key}：${JSON.stringify(p)}`);
+      }
+    }
+    if (!p.prefix.endsWith("-")) {
+      throw new Error(
+        `prefixes 的 prefix 必须以 '-' 结尾：${p.prefix}` +
+          `\n  否则它就是一条首段规则（会连 '${p.prefix}foo-1' 一起吃）。`,
+      );
+    }
+    const seg = p.prefix.slice(0, p.prefix.indexOf("-"));
+    if (!families.has(seg)) {
+      throw new Error(
+        `prefixes 的 '${p.prefix}' 落在未登记的前缀族 '${seg}' 下` +
+          `\n  先在 prefix_families 里声明这个族（为什么它是族前缀而不是一条线），再写细则。`,
+      );
+    }
+    // covers：这条规则**钉住**的键名。族是按首段算的，所以中间那段打错一个字不会造出新族，
+    // 只会变出一条匹配不到任何键的规则——报表静默不变，没有人会发现。把键名写下来，
+    // 拼错就不再是「静默」而是「生成器拒」。
+    if (!Array.isArray(p.covers) || p.covers.length === 0) {
+      throw new Error(
+        `prefixes 的 '${p.prefix}' 缺 covers（至少一个精确键名）：` +
+          `\n  规则必须钉住真实键名，否则拼错一个字就会静默变成「匹配不到任何键」。`,
+      );
+    }
+    for (const name of p.covers) {
+      if (typeof name !== "string" || name.trim() === "") {
+        throw new Error(`prefixes 的 '${p.prefix}' 的 covers 里有非字符串/空串：${JSON.stringify(p.covers)}`);
+      }
+      if (!name.startsWith(p.prefix)) {
+        throw new Error(
+          `prefixes 的 '${p.prefix}' 的 covers 里有键不以该前缀开头：'${name}'` +
+            `\n  要么是前缀写错了（拼一个字母就会静默失效），要么这个键不该在这条规则下。`,
+        );
+      }
+    }
+    if (p.prefix === `${seg}-`) {
+      // 整族归一条线不需要细则：把它写成 aliases 里的一行 seg 即可（`vaas` 就是这样）。
+      throw new Error(
+        `prefixes 的 '${p.prefix}' 只有首段，那是一条首段规则而不是细则：请挪进 aliases。`,
+      );
+    }
+    if (seenPrefix.has(p.prefix)) {
+      throw new Error(`prefixes 重复：${p.prefix}（既有 ${seenPrefix.get(p.prefix)}，又来 ${p.line}）`);
+    }
+    seenPrefix.set(p.prefix, p.line);
+    prefixes.push({ prefix: p.prefix, line: p.line, why: p.why, seg });
+  }
+
   // 最长优先由**生成顺序**保证（SQL 的 LATERAL 与 Go 的循环都按这个顺序取第一条命中），
   // 所以排序放在这里——两个消费方自然同序，不必各自再排一次。
   prefixes.sort((a, b) => [...b.prefix].length - [...a.prefix].length || (a.prefix < b.prefix ? -1 : 1));
