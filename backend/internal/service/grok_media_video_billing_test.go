@@ -46,11 +46,30 @@ func TestIsGrokVideoStatusBillable(t *testing.T) {
 	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"failed"}`)))
 	// done without video.url is not billable
 	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"done"}`)))
-	// URL alone (legacy/non-official shapes) is not enough
+	// A URL alone, without a success terminal, is not billable (placeholder URLs exist
+	// while the task is still running).
 	require.False(t, IsGrokVideoStatusBillable([]byte(`{"url":"https://example.com/v.mp4"}`)))
-	require.False(t, IsGrokVideoStatusBillable([]byte(`{"download_url":"/v1/videos/task/content"}`)))
-	// "completed" is not the official enum value
-	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"completed","video":{"url":"https://vidgen.x.ai/x.mp4"}}`)))
+	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"in_progress","url":"/v1/videos/x/content"}`)))
+	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"failed","url":"/v1/videos/x/content"}`)))
+
+	// FLIPPED 2026-11-15 — deliberately, not a mistake: this used to assert
+	// "completed is not the official enum value" and therefore not billable. Production
+	// proved the upstream we serve answers exactly this shape, so the old assertion was
+	// silently blessing a lane that billed nothing (group 19 relay, task
+	// vid_84655a2f5a1f13ee: status completed + flat url + seconds "3", real 3.1MB MP4).
+	require.True(t, IsGrokVideoStatusBillable([]byte(`{
+		"status":"completed",
+		"model":"kling-video-v3",
+		"url":"/v1/videos/vid_84655a2f5a1f13ee/content",
+		"seconds":"3"
+	}`)))
+	// Completed with the official nested url stays billable too.
+	require.True(t, IsGrokVideoStatusBillable([]byte(`{"status":"completed","video":{"url":"https://vidgen.x.ai/x.mp4"}}`)))
+	// Relay variants: `succeeded` and mixed case.
+	require.True(t, IsGrokVideoStatusBillable([]byte(`{"status":"succeeded","url":"/v1/videos/x/content"}`)))
+	require.True(t, IsGrokVideoStatusBillable([]byte(`{"status":"COMPLETED","url":"/v1/videos/x/content"}`)))
+	// A success terminal without any url is still not billable.
+	require.False(t, IsGrokVideoStatusBillable([]byte(`{"status":"completed"}`)))
 }
 
 func TestExtractGrokVideoBillingFromStatusBodyPrefersUpstreamParams(t *testing.T) {
@@ -71,7 +90,14 @@ func TestExtractGrokVideoBillingFromStatusBodyPrefersUpstreamParams(t *testing.T
 	result := ExtractGrokVideoBillingFromStatusBody(body, pending, "req-1")
 	require.NotNil(t, result)
 	require.Equal(t, 1, result.VideoCount)
-	require.Equal(t, "grok-imagine-video-1.5", result.Model)
+	// FLIPPED 2026-11-15 — deliberately: with a create-time snapshot the billing identity
+	// is the requested model, not the status body's model. For the official shape the two
+	// usually agree; for the relay they do not (status reports the serving model, e.g.
+	// kling-video-v3) and pricing is keyed on what the customer bought. The status model
+	// is preserved in UpstreamModel.
+	require.Equal(t, "pending-billing", result.BillingModel)
+	require.Equal(t, "pending-billing", result.Model)
+	require.Equal(t, "grok-imagine-video-1.5", result.UpstreamModel)
 	// Resolution is not in official status response — use create-time request.
 	require.Equal(t, VideoBillingResolution720P, result.VideoResolution)
 	// Duration prefers official video.duration.
@@ -97,7 +123,7 @@ func TestExtractGrokVideoBillingFromStatusBodyFallsBackToPending(t *testing.T) {
 	require.Equal(t, 10, result.VideoDurationSeconds)
 }
 
-func TestExtractGrokVideoBillingRejectsNonDoneStatus(t *testing.T) {
+func TestExtractGrokVideoBillingRejectsNonSuccessStatus(t *testing.T) {
 	t.Parallel()
 	pending := &GrokVideoPendingBilling{Model: "m", VideoDurationSeconds: 8, VideoResolution: "720p"}
 	require.Nil(t, ExtractGrokVideoBillingFromStatusBody(
@@ -105,6 +131,17 @@ func TestExtractGrokVideoBillingRejectsNonDoneStatus(t *testing.T) {
 		pending, "req",
 	))
 	require.Nil(t, ExtractGrokVideoBillingFromStatusBody(
+		[]byte(`{"status":"in_progress","url":"/v1/videos/x/content","seconds":"8"}`),
+		pending, "req",
+	))
+	require.Nil(t, ExtractGrokVideoBillingFromStatusBody(
+		[]byte(`{"status":"failed","url":"/v1/videos/x/content","seconds":"8"}`),
+		pending, "req",
+	))
+	// FLIPPED 2026-11-15 — deliberately: `completed` used to be asserted nil here because
+	// it is not the official enum value. It is what our upstream actually answers, so
+	// treating it as non-billable was the silent-zero-billing defect itself.
+	require.NotNil(t, ExtractGrokVideoBillingFromStatusBody(
 		[]byte(`{"status":"completed","video":{"url":"https://vidgen.x.ai/x.mp4","duration":8}}`),
 		pending, "req",
 	))
@@ -139,11 +176,97 @@ func TestGrokMediaUsageFromResponseVideoStatusBillsOnOfficialDone(t *testing.T) 
 	)
 	require.Equal(t, 0, pendingOnly.VideoCount)
 
-	// completed is not official done.
+	// FLIPPED 2026-11-15 — deliberately: `completed` is the shape our upstream relay
+	// actually returns, so it must bill. Keeping the old "not official → 0" assertion is
+	// what made every completed video free.
 	completed := grokMediaUsageFromResponse(
 		GrokMediaEndpointVideoStatus,
 		GrokMediaRequestInfo{},
-		[]byte(`{"status":"completed","video":{"url":"https://vidgen.x.ai/a.mp4","duration":9}}`),
+		[]byte(`{"status":"completed","model":"kling-video-v3","url":"/v1/videos/x/content","seconds":"3"}`),
 	)
-	require.Equal(t, 0, completed.VideoCount)
+	require.Equal(t, 1, completed.VideoCount)
+	require.Equal(t, 3, completed.VideoDurationSeconds)
+}
+
+// TestExtractGrokVideoBillingFromRelayShape is the production incident reproduced
+// offline: status completed + flat url + string seconds + serving-model echo.
+func TestExtractGrokVideoBillingFromRelayShape(t *testing.T) {
+	t.Parallel()
+	pending := &GrokVideoPendingBilling{
+		Model:                "grok-imagine-video",
+		BillingModel:         "grok-imagine-video",
+		VideoResolution:      "480p",
+		VideoDurationSeconds: 5,
+	}
+	body := []byte(`{
+		"id":"vid_84655a2f5a1f13ee",
+		"status":"completed",
+		"model":"kling-video-v3",
+		"url":"/v1/videos/vid_84655a2f5a1f13ee/content",
+		"seconds":"3",
+		"resolution":"720P"
+	}`)
+	result := ExtractGrokVideoBillingFromStatusBody(body, pending, "")
+	require.NotNil(t, result)
+	require.Equal(t, 1, result.VideoCount)
+	// Billing identity = what the customer bought; serving model is recorded separately.
+	require.Equal(t, "grok-imagine-video", result.BillingModel)
+	require.Equal(t, "grok-imagine-video", result.Model)
+	require.Equal(t, "kling-video-v3", result.UpstreamModel)
+	// String `seconds` must parse (the relay answers "3", not 3).
+	require.Equal(t, 3, result.VideoDurationSeconds)
+	// Billing tier stays on the requested resolution even though 720P was delivered.
+	require.Equal(t, "480p", result.VideoResolution)
+	require.Equal(t, "vid_84655a2f5a1f13ee", result.ResponseID)
+}
+
+// TestExtractGrokVideoBillingRelayUnparsableDurationFailsClosed pins the fail-closed
+// edge: a garbage duration must not be billed as 0 seconds, and with no snapshot there
+// is nothing to fall back to.
+func TestExtractGrokVideoBillingRelayUnparsableDurationFailsClosed(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{"status":"completed","url":"/v1/videos/x/content","seconds":"abc"}`)
+	result := ExtractGrokVideoBillingFromStatusBody(body, nil, "req-x")
+	require.NotNil(t, result)
+	require.Equal(t, 0, result.VideoDurationSeconds) // caller's fail-closed check sees 0
+	// With a snapshot the snapshot duration is used instead.
+	withPending := ExtractGrokVideoBillingFromStatusBody(body, &GrokVideoPendingBilling{
+		Model: "grok-imagine-video", BillingModel: "grok-imagine-video",
+		VideoDurationSeconds: 10, VideoResolution: "720p",
+	}, "req-x")
+	require.NotNil(t, withPending)
+	require.Equal(t, 10, withPending.VideoDurationSeconds)
+}
+
+// TestGrokVideoDeliveredResolution covers the shape-reading half of the delivery
+// disclosure: what upstream claims it produced, verbatim, and empty when it says nothing.
+func TestGrokVideoDeliveredResolution(t *testing.T) {
+	t.Parallel()
+	// Relay answers the flat field with an upper-case tier.
+	require.Equal(t, "720P", GrokVideoDeliveredResolution([]byte(`{"status":"completed","resolution":"720P"}`)))
+	// Nested variant, for shapes that nest resolution under video.
+	require.Equal(t, "1080p", GrokVideoDeliveredResolution([]byte(`{"status":"done","video":{"resolution":"1080p"}}`)))
+	// Official status response carries no resolution at all → unknown, not 480p.
+	require.Equal(t, "", GrokVideoDeliveredResolution([]byte(`{"status":"done","video":{"url":"https://x/y.mp4","duration":8}}`)))
+	// Unparseable / empty bodies are unknown too.
+	require.Equal(t, "", GrokVideoDeliveredResolution(nil))
+	require.Equal(t, "", GrokVideoDeliveredResolution([]byte(`not-json`)))
+	// An unrecognized word must stay visible; collapsing it to the 480p default would
+	// make every unknown delivery look like a 480p one and hide the mismatch entirely.
+	require.Equal(t, "4k", GrokVideoDeliveredResolution([]byte(`{"status":"completed","resolution":"4k"}`)))
+}
+
+// TestGrokVideoSameVideoResolution pins the comparison used to decide whether a delivery
+// mismatch deserves a log line: same tier in a different case is the same tier; words
+// outside our vocabulary fall back to case-insensitive text comparison.
+//
+// Named with the GrokVideo prefix on purpose: a targeted run of the video-billing family
+// (`-run 'GrokVideo|GrokMediaUsageFromResponseVideo'`) must not silently skip this one.
+func TestGrokVideoSameVideoResolution(t *testing.T) {
+	t.Parallel()
+	require.True(t, sameVideoResolution("720p", "720P"))
+	require.True(t, sameVideoResolution("480p", "480p"))
+	require.False(t, sameVideoResolution("480p", "720P"))
+	require.True(t, sameVideoResolution("4k", "4K"))
+	require.False(t, sameVideoResolution("4k", "8k"))
 }

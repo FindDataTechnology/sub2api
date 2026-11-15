@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -553,62 +554,149 @@ func StableGrokVideoBillingRequestID(taskRequestID string) string {
 //
 //	{"status":"done","model":"grok-imagine-video-1.5","video":{"url":"...","duration":8,"respect_moderation":true}}
 //
+// Compatibility shape actually served by our upstream relay (2026-11-14/15, group 19
+// fed-workbuddy-media, task vid_84655a2f5a1f13ee):
+//
+//	{"status":"completed","model":"kling-video-v3","url":"/v1/videos/<id>/content",
+//	 "seconds":"3","resolution":"720P"}
+//
 // Request may include resolution ("480p"|"720p"|"1080p"); completed status does not
 // document a resolution field — bill resolution from the create-time request snapshot.
 
-// IsGrokVideoStatusBillable matches official success: status == "done" AND non-empty video.url.
-// pending / expired / failed, or done without a video URL, are not billable.
+// grokVideoStatusSuccessWords is the set of terminal statuses we bill on.
+//
+// The official enum is pending | done | expired | failed, but the relay answers
+// `completed` (and OpenAI-compatible relays may answer `succeeded`). Keeping this as a
+// set is deliberate: a new synonymous terminal only has to be added here instead of
+// being threaded through three call sites again — which is exactly how this lane
+// silently billed nothing for every completed video.
+var grokVideoStatusSuccessWords = map[string]struct{}{
+	"done":      {},
+	"completed": {},
+	"succeeded": {},
+}
+
+// IsGrokVideoStatusBillable reports whether a status body describes a billable finish:
+// a success terminal AND a retrievable content URL.
+//
+// pending/in_progress/queued are not billable even when they carry a placeholder URL;
+// a success terminal without any URL means upstream produced nothing (the 2026-11-06
+// "HTTP 200 + site page + billed but zero artifact" soft-block shape) and is not
+// billable either. failed/expired/cancelled are never billable.
 func IsGrokVideoStatusBillable(statusBody []byte) bool {
 	if len(statusBody) == 0 || !gjson.ValidBytes(statusBody) {
 		return false
 	}
-	if !isOfficialGrokVideoStatusDone(statusBody) {
+	if !isGrokVideoStatusSuccess(statusBody) {
 		return false
 	}
-	return strings.TrimSpace(gjson.GetBytes(statusBody, "video.url").String()) != ""
+	return grokVideoContentURLFromStatus(statusBody) != ""
 }
 
-func isOfficialGrokVideoStatusDone(statusBody []byte) bool {
-	// Official enum: pending | done | expired | failed.
-	return strings.EqualFold(strings.TrimSpace(gjson.GetBytes(statusBody, "status").String()), "done")
+func isGrokVideoStatusSuccess(statusBody []byte) bool {
+	status := strings.ToLower(strings.TrimSpace(gjson.GetBytes(statusBody, "status").String()))
+	_, ok := grokVideoStatusSuccessWords[status]
+	return ok
 }
 
-// ExtractGrokVideoBillingFromStatusBody builds usage units from an official done status.
-// Field priority (official docs):
-//   - duration: video.duration (seconds)
-//   - model: top-level model
+// grokVideoContentURLFromStatus returns the content URL from either shape:
+// official `video.url` first, then the relay's flat `url`.
+func grokVideoContentURLFromStatus(statusBody []byte) string {
+	if u := strings.TrimSpace(gjson.GetBytes(statusBody, "video.url").String()); u != "" {
+		return u
+	}
+	return strings.TrimSpace(gjson.GetBytes(statusBody, "url").String())
+}
+
+// grokVideoDurationSecondsFromStatus extracts a whole-second duration from any shape we
+// have observed; the first source that parses wins: video.duration (number) → flat
+// seconds (string OR number) → flat duration (number). Returns 0 when none parses so the
+// caller falls back to the create-time snapshot — 0 MUST never be billed as a duration.
+//
+// The relay answers `"seconds":"3"` as a *string*; parsing numbers only is the other
+// half of why completed videos never produced a usage row.
+func grokVideoDurationSecondsFromStatus(statusBody []byte) int {
+	for _, path := range []string{"video.duration", "seconds", "duration"} {
+		v := gjson.GetBytes(statusBody, path)
+		if !v.Exists() {
+			continue
+		}
+		switch v.Type {
+		case gjson.Number:
+			if v.Float() > 0 {
+				return int(v.Float())
+			}
+		case gjson.String:
+			if n, err := strconv.Atoi(strings.TrimSpace(v.String())); err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+// GrokVideoDeliveredResolution returns the resolution upstream says it actually produced,
+// verbatim (the relay answers `"resolution":"720P"`). It does NOT normalize: a value we
+// cannot map must stay visible as "unknown word upstream said" instead of collapsing into
+// the 480p default, which would make every unrecognized delivery look like a 480p one.
+//
+// Empty means "this shape carries none" — the official status response omits resolution
+// entirely — so callers MUST treat empty as unknown, never as a mismatch.
+func GrokVideoDeliveredResolution(statusBody []byte) string {
+	if len(statusBody) == 0 || !gjson.ValidBytes(statusBody) {
+		return ""
+	}
+	if raw := strings.TrimSpace(gjson.GetBytes(statusBody, "resolution").String()); raw != "" {
+		return raw
+	}
+	return strings.TrimSpace(gjson.GetBytes(statusBody, "video.resolution").String())
+}
+
+// sameVideoResolution compares two resolution words on their billing meaning: two words
+// that canonicalize to the same tier are the same ("720P" == "720p"), and if either side
+// is outside our vocabulary they are compared as case-insensitive text.
+func sameVideoResolution(a, b string) bool {
+	na, okA := LookupVideoBillingResolution(a)
+	nb, okB := LookupVideoBillingResolution(b)
+	if okA && okB {
+		return na == nb
+	}
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+}
+
+// ExtractGrokVideoBillingFromStatusBody builds usage units from a successful terminal
+// status (official `done` or the relay's `completed`/`succeeded`).
+//
+// Field priority:
+//   - duration: video.duration (number) → flat seconds (string OR number) → flat
+//     duration (number) → create-time pending snapshot
+//   - model (billing identity): create-time requested model when a snapshot exists,
+//     because the relay reports the *serving* model (observed "kling-video-v3") and
+//     pricing follows what the customer bought; the serving model is recorded in
+//     UpstreamModel. Without a snapshot the status model is all we have.
 //   - resolution: not in status response → create-time pending snapshot → default 480p
 func ExtractGrokVideoBillingFromStatusBody(statusBody []byte, pending *GrokVideoPendingBilling, requestID string) *OpenAIForwardResult {
 	if !IsGrokVideoStatusBillable(statusBody) {
 		return nil
 	}
-	model := ""
+	statusModel := ""
 	billingModel := ""
 	upstreamModel := ""
 	resolution := ""
 	durationSeconds := 0
 
 	if gjson.ValidBytes(statusBody) {
-		// Official: top-level model.
-		model = strings.TrimSpace(gjson.GetBytes(statusBody, "model").String())
-		// Official: video.duration (number of seconds).
-		if v := gjson.GetBytes(statusBody, "video.duration"); v.Exists() && v.Type == gjson.Number {
-			durationSeconds = int(v.Int())
-			if durationSeconds == 0 && v.Float() > 0 {
-				// Sub-second values are unexpected for this API; still accept truncated int path above.
-				durationSeconds = int(v.Float())
-			}
-		}
+		statusModel = strings.TrimSpace(gjson.GetBytes(statusBody, "model").String())
+		durationSeconds = grokVideoDurationSecondsFromStatus(statusBody)
 	}
 	if pending != nil {
-		if model == "" {
-			model = firstNonEmpty(pending.BillingModel, pending.Model, pending.OriginalModel)
-		}
-		if billingModel == "" {
-			billingModel = firstNonEmpty(pending.BillingModel, pending.Model)
+		// Billing identity follows the create-time request; the status model is an
+		// upstream fact (see doc comment above).
+		if bm := firstNonEmpty(pending.BillingModel, pending.Model, pending.OriginalModel); bm != "" {
+			billingModel = bm
 		}
 		if upstreamModel == "" {
-			upstreamModel = pending.UpstreamModel
+			upstreamModel = firstNonEmpty(statusModel, pending.UpstreamModel)
 		}
 		// Official status has no resolution — always take create request when available.
 		resolution = pending.VideoResolution
@@ -616,6 +704,13 @@ func ExtractGrokVideoBillingFromStatusBody(statusBody []byte, pending *GrokVideo
 			durationSeconds = pending.VideoDurationSeconds
 		}
 	}
+	if billingModel == "" {
+		billingModel = statusModel
+	}
+	if upstreamModel == "" {
+		upstreamModel = statusModel
+	}
+	model := billingModel
 	if model == "" {
 		// Official default video model family when status omits model.
 		model = "grok-imagine-video"
@@ -633,6 +728,19 @@ func ExtractGrokVideoBillingFromStatusBody(statusBody []byte, pending *GrokVideo
 	responseID := extractGrokMediaVideoRequestID(statusBody)
 	if responseID == "" {
 		responseID = strings.TrimSpace(requestID)
+	}
+	// Delivery may not match the purchase: 2026-11-14/15 probe asked 480p and upstream
+	// answered `"resolution":"720P"`. Billing stays on the requested tier (that is what
+	// the customer bought) but the fact must be on the record for reconciliation —
+	// silently repricing either way is how a lane ends up billing the wrong tier.
+	if pending != nil {
+		requested := strings.TrimSpace(pending.VideoResolution)
+		if delivered := GrokVideoDeliveredResolution(statusBody); requested != "" && delivered != "" &&
+			!sameVideoResolution(requested, delivered) {
+			logger.LegacyPrintf("service.grok_media",
+				"video_resolution_delivered_differs: request_id=%s requested=%s delivered=%s billed=%s",
+				responseID, requested, delivered, NormalizeVideoBillingResolutionOrDefault(requested))
+		}
 	}
 	return &OpenAIForwardResult{
 		ResponseID:           responseID,
