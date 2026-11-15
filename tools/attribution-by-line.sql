@@ -46,8 +46,8 @@ aliases(seg, line, why) AS (
         ('lawbench',   'law-bench',     'law-bench 无连字符写法'),
         ('yizuo',      '壹座 yizuo',    '平台自身承载的调用'),
         ('platform',   '壹座 platform', '平台内部/演示 key'),
-        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）'),
-        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段')
+        ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性'),
+        ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性')
 ),
 prefix_aliases(prefix, line, why) AS (
     VALUES
@@ -75,6 +75,11 @@ resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
     ) p ON true
     LEFT JOIN aliases a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)
 ),
+route_segs(seg) AS (
+    VALUES
+        ('特价'      ),
+        ('openrouter')
+),
 -- <<< generated:line-aliases
 -- 归属走生成的 `resolved`（首段 / 声明前缀 / 未归因都在那一处算）。
 -- `by_rule` 与 `rule` 一起带出来：读者要能分清「这条线是按首段算的」还是「按声明前缀改写的」。
@@ -87,14 +92,54 @@ attributed AS (
            us.actual_usd, us.list_usd
     FROM usage us
     LEFT JOIN resolved r ON r.key_id = us.api_key_id
+),
+-- 取法与 line-quota.sql 的 route_key_spend 一致：走 resolved.rule（seg 命中时 rule=seg），
+-- 不走 attributed.raw_seg（它只对 unknown 行非空，路由键经 seg 命中后是 NULL）。
+route_key_spend AS (
+    SELECT r.rule                       AS seg,
+           count(*)                     AS requests,
+           round(sum(us.actual_usd), 4) AS usd
+    FROM usage us
+    JOIN resolved r ON r.key_id = us.api_key_id
+    WHERE r.by_rule = 'seg'
+      AND r.rule IN (SELECT seg FROM route_segs)
+    GROUP BY 1
 )
+-- 路由键读数（declare-route-keys-in-report）并进**同一条语句**，用 `by_rule='route'` 标记、
+-- 排在末尾：别名表声明 route:true 的 seg 编码的是上游路由（折扣渠道）而非产品线，流量结构上
+-- 不可按线拆分，归入「自有平台」只因键名归属登记。这笔钱必须作为一等读数摆出来，否则读的人
+-- 会把该桶当杂项或当产品线。无声明时这组行不存在（不是伪造的零值行）。
+--
+-- 为什么不是「追加一条独立 SELECT」：CTE 是**语句级**的，第二条语句看不见 attributed /
+-- route_key_spend，会报 relation does not exist；而 psql 默认遇错继续，把 stderr 一关，
+-- 输出看上去「跑完了」（2026-11-15 首版就是这个形态，自己踩的）。
 SELECT line,
        by_rule,
-       COALESCE(raw_seg, rule)                                  AS attributed_by,
-       count(*)                                                 AS requests,
-       round(sum(actual_usd), 2)                                AS actual_usd,
-       round(sum(list_usd), 2)                                  AS list_usd,
-       round(100 * sum(actual_usd) / NULLIF((SELECT sum(actual_usd) FROM attributed), 0), 1) AS pct
-FROM attributed
-GROUP BY line, by_rule, COALESCE(raw_seg, rule)
-ORDER BY actual_usd DESC;
+       attributed_by,
+       requests,
+       actual_usd,
+       list_usd,
+       pct
+FROM (
+    SELECT line,
+           by_rule,
+           COALESCE(raw_seg, rule)                              AS attributed_by,
+           count(*)                                             AS requests,
+           round(sum(actual_usd), 2)                             AS actual_usd,
+           round(sum(list_usd), 2)                               AS list_usd,
+           round(100 * sum(actual_usd) / NULLIF((SELECT sum(actual_usd) FROM attributed), 0), 1) AS pct,
+           0                                                     AS sort_route
+    FROM attributed
+    GROUP BY line, by_rule, COALESCE(raw_seg, rule)
+    UNION ALL
+    SELECT rk.seg,
+           'route',
+           rk.seg,
+           rk.requests,
+           rk.usd,
+           NULL::numeric,
+           round(100 * rk.usd / NULLIF((SELECT sum(actual_usd) FROM attributed), 0), 1),
+           1
+    FROM route_key_spend rk
+) t
+ORDER BY sort_route, actual_usd DESC;
