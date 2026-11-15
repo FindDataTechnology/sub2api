@@ -270,3 +270,42 @@ func TestGrokVideoSameVideoResolution(t *testing.T) {
 	require.True(t, sameVideoResolution("4k", "4K"))
 	require.False(t, sameVideoResolution("4k", "8k"))
 }
+
+// TestGrokVideoResolutionsMismatchMarksDelivery 钉住「交付与计费档不一致」的判据本身。
+//
+// 为什么这条判据要有自己的用例：它此前写在提取器的 pending!=nil 分支里，而生产两个
+// 调用点都传 pending=nil ⇒ 那段从未执行过（2026-11-15 实调用 480p、上游交 720P，
+// 账单正确但一行留痕都没有）。现在判据被搬到同时握着「创建快照」与「状态体」的完成路径，
+// 这里的断言保证「未知不当成不同」和三档实际比较都不回归。
+func TestGrokVideoResolutionsMismatchMarksDelivery(t *testing.T) {
+	t.Parallel()
+	// The production shape: billed 480p from the create request, upstream delivered 720P.
+	require.True(t, VideoResolutionMismatch("480p", "720P"))
+	require.True(t, VideoResolutionMismatch("1080P", "720p"))
+	// Same tier in a different case is not a mismatch.
+	require.False(t, VideoResolutionMismatch("720p", "720P"))
+	require.False(t, VideoResolutionMismatch("480p", "480p"))
+	// Unknown on either side must never manufacture a mismatch: the official status body
+	// carries no resolution at all, and that is the common case for xAI-native responses.
+	require.False(t, VideoResolutionMismatch("480p", ""))
+	require.False(t, VideoResolutionMismatch("", "720P"))
+	require.False(t, VideoResolutionMismatch("", ""))
+}
+
+// TestGrokVideoExtractCarriesDeliveredResolution 保证「交付了什么」被带出提取器。
+//
+// 提取器本身拿不到创建快照（生产调用点传 nil），所以它不能自己比较；它唯一能做且必须
+// 做的是把状态体里的交付档原样放进结果，让完成路径去比。缺了这一步，判据再对也无数据。
+func TestGrokVideoExtractCarriesDeliveredResolution(t *testing.T) {
+	t.Parallel()
+	relay := []byte(`{"status":"completed","model":"kling-video-v3","seconds":"3","resolution":"720P","url":"/v1/videos/vid_x/content"}`)
+	got := ExtractGrokVideoBillingFromStatusBody(relay, nil, "vid_x")
+	require.NotNil(t, got)
+	require.Equal(t, "720P", got.VideoResolutionDelivered, "delivered tier must survive extraction verbatim")
+	require.Equal(t, 3, got.VideoDurationSeconds)
+
+	official := []byte(`{"status":"done","model":"grok-imagine-video-1.5","video":{"url":"https://x/y.mp4","duration":8}}`)
+	got = ExtractGrokVideoBillingFromStatusBody(official, nil, "vid_y")
+	require.NotNil(t, got)
+	require.Equal(t, "", got.VideoResolutionDelivered, "official shape carries no resolution → unknown, not a default")
+}

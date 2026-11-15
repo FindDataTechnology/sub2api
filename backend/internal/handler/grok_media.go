@@ -672,8 +672,8 @@ func prepareGrokVideoCompletionBilling(
 			merged.UpstreamModel = pending.UpstreamModel
 		}
 		// Official status omits resolution — always prefer create request. Delivery may
-		// differ (2026-11-14 probe: asked 480p, got 720P); billing stays on the requested
-		// tier and the mismatch is recorded by the service extractor, never repriced here.
+		// differ (2026-11-14/15 probe: asked 480p, got 720P); billing stays on the requested
+		// tier and is never repriced here.
 		if strings.TrimSpace(pending.VideoResolution) != "" {
 			merged.VideoResolution = pending.VideoResolution
 		}
@@ -699,6 +699,22 @@ func prepareGrokVideoCompletionBilling(
 	merged.ImageCount = 0
 	// Official default resolution is 480p when the create request omitted it.
 	merged.VideoResolution = service.NormalizeVideoBillingResolutionOrDefault(merged.VideoResolution)
+	// Delivery may not match the purchase, and only here do both sides exist: the billed
+	// tier comes from the create-time snapshot above, the delivered tier from the status
+	// body (`VideoResolutionDelivered`). Billing deliberately stays on the requested tier —
+	// that is what the customer bought — but a silent mismatch is how a lane ends up
+	// charging the wrong tier for months, so record it on every claimed completion.
+	if pending != nil {
+		reqLog.Info("grok_media.video_billing_terms",
+			zap.String("request_id", merged.RequestID),
+			zap.String("billed_model", merged.BillingModel),
+			zap.String("serving_model", merged.UpstreamModel),
+			zap.String("billed_resolution", merged.VideoResolution),
+			zap.String("delivered_resolution", merged.VideoResolutionDelivered),
+			zap.Int("billed_duration_seconds", merged.VideoDurationSeconds),
+			zap.Bool("resolution_mismatch", service.VideoResolutionMismatch(merged.VideoResolution, merged.VideoResolutionDelivered)),
+		)
+	}
 	// Official default duration is 8s when neither status nor create provided it.
 	merged.VideoDurationSeconds = service.NormalizeVideoBillingDurationSecondsOrDefault(merged.VideoDurationSeconds)
 	// E2E latency for async video: create accept → this discovery of done+url.
