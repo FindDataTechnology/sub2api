@@ -292,20 +292,42 @@ func TestGrokVideoResolutionsMismatchMarksDelivery(t *testing.T) {
 	require.False(t, VideoResolutionMismatch("", ""))
 }
 
-// TestGrokVideoExtractCarriesDeliveredResolution 保证「交付了什么」被带出提取器。
+// TestGrokVideoExtractCarriesDeliveredResolution 保证「交付了什么 / 承做是谁」被带出提取器。
 //
 // 提取器本身拿不到创建快照（生产调用点传 nil），所以它不能自己比较；它唯一能做且必须
-// 做的是把状态体里的交付档原样放进结果，让完成路径去比。缺了这一步，判据再对也无数据。
+// 做的是把状态体里的交付档与承做模型原样放进结果，让完成路径去比。缺了这一步，判据再
+// 对也无数据。这里同时钉住一个真实的返工点（2026-11-15 15:0xZ 线上实测）：首轮只在
+// 提取器加了字段，两个组装点（status-poll 的 grokMediaUsageFromResponse 与 content
+// 下载路径）都是逐字段显式拷贝、没有新字段 ⇒ 线上日志 delivered_resolution=""、
+// resolution_mismatch=false，看起来像「查过了、没差异」。
 func TestGrokVideoExtractCarriesDeliveredResolution(t *testing.T) {
 	t.Parallel()
 	relay := []byte(`{"status":"completed","model":"kling-video-v3","seconds":"3","resolution":"720P","url":"/v1/videos/vid_x/content"}`)
 	got := ExtractGrokVideoBillingFromStatusBody(relay, nil, "vid_x")
 	require.NotNil(t, got)
 	require.Equal(t, "720P", got.VideoResolutionDelivered, "delivered tier must survive extraction verbatim")
+	require.Equal(t, "kling-video-v3", got.VideoServingModel, "status self-reported model must survive extraction")
 	require.Equal(t, 3, got.VideoDurationSeconds)
 
 	official := []byte(`{"status":"done","model":"grok-imagine-video-1.5","video":{"url":"https://x/y.mp4","duration":8}}`)
 	got = ExtractGrokVideoBillingFromStatusBody(official, nil, "vid_y")
 	require.NotNil(t, got)
 	require.Equal(t, "", got.VideoResolutionDelivered, "official shape carries no resolution → unknown, not a default")
+	require.Equal(t, "grok-imagine-video-1.5", got.VideoServingModel)
+}
+
+// TestGrokVideoUsageMetaCarriesDeliveredResolution 钉住两个组装点里最容易被漏的那个。
+//
+// grokMediaUsageFromResponse 的 VideoStatus 分支是状态轮询路径上唯一能把交付档/承做
+// 模型带出 ForwardGrokMedia 的地方；首轮返工漏掉的正是它（2026-11-15 线上实测日志为
+// 空）。这条用例的存在理由：任何往这几个结构里加字段的人，都会在改完这里后看到测试
+// 红——而不是在上线后看到空日志。
+func TestGrokVideoUsageMetaCarriesDeliveredResolution(t *testing.T) {
+	t.Parallel()
+	info := GrokMediaRequestInfo{Model: "grok-imagine-video", Resolution: "480p", DurationSeconds: 3}
+	body := []byte(`{"status":"completed","model":"kling-video-v3","request_id":"vid_meta","seconds":"3","resolution":"720P","url":"/v1/videos/vid_meta/content"}`)
+	meta := grokMediaUsageFromResponse(GrokMediaEndpointVideoStatus, info, body)
+	require.Equal(t, "720P", meta.VideoResolutionDelivered)
+	require.Equal(t, "kling-video-v3", meta.VideoServingModel)
+	require.Equal(t, 3, meta.VideoDurationSeconds)
 }
