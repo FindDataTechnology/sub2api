@@ -41,13 +41,17 @@ aliases(seg, line, why) AS (
         ('platform',   '壹座 platform', '平台内部/演示 key'),
         ('特价',       '自有平台',      '路由命名的共享键（折扣渠道），不是产品线；user_id=1 的自有账号，消费方是 dsh harness，键名不含线信息 ⇒ 单列（证据见 openspec ciyuan-consumer-surface 5.5-1）；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性；2026-11-15 按 UA 实测 7 日内部构成：deepseek-harness ~$99（壹座 dsh，经入口节点桥 10.<internal>.4/.9/.10 轮转——三桥花费几乎相等，是同一调用方不是三个）+ AsyncOpenAI/Python 单一内网主机 10.<internal>.1 ~$46（与 wanxing-probe- 前缀规则同一台机，属非产品流量却计入本桶 ⇒ 「自有平台」略被高估）+ 其余 ~$3'),
         ('openrouter', '自有平台',      '同上：上游路由命名的共享键，不是产品线，消费方同为 dsh harness。注意与模型 id `openrouter/free` 同词不同物——本字段只匹配 key 名首段；已声明为路由键（route:true），报表以 route_keys 读数呈现其不可拆分性；2026-11-15 按 UA 实测：本键 99.6% 是 deepseek-harness（~$90，入口桥 10.<internal>.12.0→12.1 于 11-14 切换）'),
-        ('vaas',       'VAAS',          'VAAS 是一条产品线（有独立产线镜像与集群车道），它的键全部以 `vaas-` 起首、挂在该产品的专属账号下 ⇒ 整族就是这一条线，不需要逐条细则。2026-11-16 实读 7 日：`vaas-media-grok` $0.8100（federation@example.com）、`vaas-wanxing-imagevideo` $0.1340 / `vaas-wanxing-voice` $0.0135（admin@example.com），同族另有 `vaas-tts` / `vaas-rerank` / `vaas-image-video` 三键同属 vaas@example.invalid（本期无用量）。此前整族落 unknown，约占 unknown 桶的三成')
+        ('vaas',       'VAAS',          'VAAS 是一条产品线（有独立产线镜像与集群车道），它的键全部以 `vaas-` 起首、挂在该产品的专属账号下 ⇒ 整族就是这一条线，不需要逐条细则。2026-11-16 实读 7 日：`vaas-media-grok` $0.8100（federation@example.com）、`vaas-wanxing-imagevideo` $0.1340 / `vaas-wanxing-voice` $0.0135（admin@example.com），同族另有 `vaas-tts` / `vaas-rerank` / `vaas-image-video` 三键同属 vaas@example.invalid（本期无用量）。此前整族落 unknown，约占 unknown 桶的三成'),
+        ('acp',        '非产品流量',    '`acp-*` 是内部 ACP harness 的调用（`acp-claude-code` / `acp-claude-code-20261112` 两个键，持 key 账号 harness-acp@example.com）。2026-11-16 按 UA 实测 7 日 79 次 / $0.0852：`claude-cli/2.1.44 (external, sdk-ts, agent-sdk/0.2.44)` 51 次 + `sdk-cli` 10 次 + curl 9 次，模型全是 deepseek-v4.1-flash ⇒ 是 Claude Code CLI 指到我们网关的研发自测，不是产品用量'),
+        ('fed',        '非产品流量',    '`fed-*` 是联邦池探测（`fed-all` / `fed-scnet` / `fed-workbuddy-cn` / `fed-workbuddy-media` / `fed-zcode`，持 key 账号 federation@example.com；网关里也有同名计费分组）。2026-11-16 UA 实测：全部 `curl/8.22.0`，模型横跨 glm-5.3-flash / SCNet-Max / hy3 / grok-imagine-image|edit；7 日 13 次 / $0.0402（grok 图片两条各 $0.02）⇒ 探通用性用的，不是客户用量'),
+        ('probe',      '非产品流量',    '`probe-*` 是单次探测（`probe-grok-media-20261115`，UA `Wget`、模型 `grok-imagine-image`、1 次 / $0.02、federation 账号）⇒ 与既有的 `wanxing-probe-` 前缀同一族语义：键名自称 probe、实测是探测')
 ),
 prefix_aliases(prefix, line, why) AS (
     VALUES
         ('wanxing-probe-', '非产品流量',         '键名自称 probe，实测是从单一内网主机 10.<internal>.1 连续跑了 168/168 小时的 harness 工作负载（7 日 7,674 次、只打 deepseek-v4.1-flash、均值 9,672 tok / 26.7 s、缓存读 17.3k）⇒ 可以确定不是萬星的产品用量；但它替谁跑，数据里看不出来，故单列而不并入任何产品线'),
         ('fd-text-core-',  '文本核心 text-core', '`text-core` 是已声明的产品线（`all-services/prod/line-manifests.yaml` 的 19 条之一），而这条线的调用键名就叫 `fd-text-core-*`——首段 `fd` 是组织前缀，导致这条线在自己的报表里看不到自己的调用。2026-11-16 实读：`fd-text-core-embedding-bulk` 7 日 $0.4449 / 2,783 次，全部是 embedding 批量调用，属文本核心的检索/向量面'),
-        ('wanxing-lex-',   '识律 lex',           '识律控制台副驾：key 挂在萬星账号名下（首段 wanxing），实际调用方是识律控制台——2026-11-15 实测 UA 为 deepseek-harness、来源 pod 10.<internal>.8.0，7 日 2,346 次 / $7.81，而识律自己的 lex 键同期只有 1 次请求 ⇒ 受益方是识律。不改名，因为改名只活在单个数据库、换环境即失效')
+        ('wanxing-lex-',   '识律 lex',           '识律控制台副驾：key 挂在萬星账号名下（首段 wanxing），实际调用方是识律控制台——2026-11-15 实测 UA 为 deepseek-harness、来源 pod 10.<internal>.8.0，7 日 2,346 次 / $7.81，而识律自己的 lex 键同期只有 1 次请求 ⇒ 受益方是识律。不改名，因为改名只活在单个数据库、换环境即失效'),
+        ('fd-memory',      '记忆 fd-memory',     '`fd-memory` 是自家记忆服务的键名，它的嵌入调用经词元计费：2026-11-16 实读 7 日 9,571 次 / $0.1053（UA `AsyncOpenAI/Python 2.54.0`、模型 `Qwen/Qwen3-Embedding-8B`、admin 名下 user 1），是全库调用量最高的内部产品键（≈1,370 次/天）。它的名字**恰好等于服务名**、没有更深一层命名 ⇒ 族细则必须能表达这一形态（这正是前缀改成连字符边界匹配的原因，covers 就是这个名字）。同族 `fd-crawler-automation` 属另一个用户、`embedding-internal`（31 次 / $0.00002）归属在记忆与文本核心之间分不清 ⇒ 两者都仍落 unknown')
 ),
 resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
     SELECT k.id,
@@ -64,8 +68,11 @@ resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
     LEFT JOIN LATERAL (
         SELECT pa.prefix, pa.line, pa.why
         FROM prefix_aliases pa
-        WHERE starts_with(COALESCE(k.name, ''), pa.prefix)
-        ORDER BY length(pa.prefix) DESC
+        WHERE COALESCE(k.name, '') = pa.prefix
+           OR starts_with(COALESCE(k.name, ''),
+                          CASE WHEN right(pa.prefix, 1) = '-' THEN pa.prefix
+                               ELSE pa.prefix || '-' END)
+        ORDER BY length(rtrim(pa.prefix, '-')) DESC
         LIMIT 1
     ) p ON true
     LEFT JOIN aliases a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)

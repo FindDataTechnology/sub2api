@@ -122,6 +122,17 @@ func TestLineAliasForNamePrefixBeatsSegment(t *testing.T) {
 	}{
 		{"wanxing-lex-console-copilot", "识律 lex", ByRulePrefix, "wanxing-lex-"},
 		{"wanxing-probe-1791014842023", "非产品流量", ByRulePrefix, "wanxing-probe-"},
+		// 键名**恰好等于**细则前缀（族内细则不带尾 '-'，靠连字符边界命中）
+		{"fd-memory", "记忆 fd-memory", ByRulePrefix, "fd-memory"},
+		{"fd-memory-bulk", "记忆 fd-memory", ByRulePrefix, "fd-memory"},
+		// 但边界不吞近邻：fd-memory2 的首段仍是 fd（未登记），必须落 unknown
+		{"fd-memory2", "", ByRuleNone, "fd"},
+		// 同一族里更长的细则优先（fd-text-core 长于 fd-memory）
+		{"fd-text-core-embedding-bulk", "文本核心 text-core", ByRulePrefix, "fd-text-core-"},
+		// 归一之前整族落 unknown 的内部工具键：首段别名即可归位
+		{"acp-claude-code", "非产品流量", ByRuleSeg, "acp"},
+		{"fed-workbuddy-media", "非产品流量", ByRuleSeg, "fed"},
+		{"probe-grok-media-20261115", "非产品流量", ByRuleSeg, "probe"},
 		// 同 seg、未声明 ⇒ 仍按首段归萬星（这条就是「不许连带改写」）
 		{"wanxing-wire-cluster-macro", "萬星 wanxing", ByRuleSeg, "wanxing"},
 		{"wanxing", "萬星 wanxing", ByRuleSeg, "wanxing"},

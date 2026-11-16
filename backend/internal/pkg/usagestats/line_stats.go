@@ -117,12 +117,31 @@ func FirstSegment(name string) string {
 	return name
 }
 
+// prefixMatches 按**连字符边界**判定一条 key 名是否命中前缀规则：
+// 名字等于前缀本身，或名字以 `<prefix>-` 开头。
+//
+// 前缀自带尾 '-' 时它退化为 HasPrefix（既有规则的读数一个字节都不变）；不带尾 '-' 的前缀
+// 用来表达「键名恰好等于服务名」这一形态（`fd-memory`），并且**不会**吃掉 `fd-memory2`
+// 这种同前缀近邻——那是另一个服务名，不是它的 `-` 子段。
+//
+// 判据与 tools/gen-line-aliases.mjs 生成区里的 SQL 表达式同义（那边是
+// `name = prefix OR starts_with(name, prefix || '-')`），两边改一边就是第二处口径。
+func prefixMatches(name, prefix string) bool {
+	if name == prefix {
+		return true
+	}
+	if strings.HasSuffix(prefix, "-") {
+		return strings.HasPrefix(name, prefix)
+	}
+	return strings.HasPrefix(name, prefix+"-")
+}
+
 // LineAliasForName 按「最长匹配前缀 → 首段」解析一个 key 名的归属。
 // 返回 (line, why, byRule, rule)：rule 是命中的那条规则原文（前缀或段名）；
 // 未归因时 line 为空、rule 仍是首段原文（空键名时为空串）——unknown 桶要靠它点名。
 func LineAliasForName(name string) (line, why, byRule, rule string) {
 	for _, pa := range linePrefixAliases {
-		if strings.HasPrefix(name, pa.Prefix) {
+		if prefixMatches(name, pa.Prefix) {
 			return pa.Line, pa.Why, ByRulePrefix, pa.Prefix
 		}
 	}

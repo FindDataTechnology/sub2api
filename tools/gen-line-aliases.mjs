@@ -38,8 +38,30 @@ const GO_TARGET = join(HERE, "..", "backend", "internal", "pkg", "usagestats", "
 const BEGIN = "-- >>> generated:line-aliases（真源 tools/line-aliases.json；改它，别改这里）";
 const END = "-- <<< generated:line-aliases";
 
-function loadAliases() {
-  const doc = JSON.parse(readFileSync(SOURCE, "utf8"));
+// ── 前缀匹配：连字符边界 ────────────────────────────────────────────────────
+//
+// 命中条件 = 名字**等于前缀本身**，或名字以 `<prefix>-` 开头（前缀自带尾 '-' 时退化为
+// 纯粹的 starts_with，既有三条规则的读数一个字节都不变）。
+//
+// 为什么要这一档：有些内部服务的键名**恰好等于服务名**（`fd-memory`），没有更深一层的
+// `fd-memory-xyz`。`starts_with` 语义当然是 true，但生成器原先要求前缀以 '-' 结尾 ⇒ 这种
+// 形态根本写不进去（2026-11-16 实测：`fd-memory` 7 日 9,571 次嵌入调用、$0.1053，是调用量
+// 最高的内部产品键，却只能落 unknown）。而一旦允许不带尾 '-'，就必须同时收紧语义：
+// `fd-memory` 不许吃掉 `fd-memory2`（那是另一个服务名，不是它的子段）。
+//
+// 两个消费方（SQL 的 LATERAL、Go 的 LineAliasForName）用的是同一条判据，SQL 侧的表达式
+// 在 render() 里，Go 侧在 line_stats.go:prefixMatches。
+function prefixMatches(name, prefix) {
+  if (name === prefix) return true;
+  return name.startsWith(prefix.endsWith("-") ? prefix : `${prefix}-`);
+}
+
+// 去掉尾 '-' 之后的键：仅用于「同一条规则的两种写法」去重与排序，不改变写进生成区的原文。
+function prefixKey(prefix) {
+  return prefix.endsWith("-") ? prefix.slice(0, -1) : prefix;
+}
+
+function loadAliases() {  const doc = JSON.parse(readFileSync(SOURCE, "utf8"));
   const rows = doc.aliases;
   if (!Array.isArray(rows) || rows.length === 0) {
     throw new Error("tools/line-aliases.json 里没有 aliases 数组");
@@ -99,10 +121,12 @@ function loadAliases() {
             `\n  前缀规则只能细化一个已登记的首段，不能凭空改写别的键族（打错一个字就会静默换归属）。`,
         );
       }
-      if (seenPrefix.has(p.prefix)) {
-        throw new Error(`name_prefixes 重复：${p.prefix}（既有 ${seenPrefix.get(p.prefix)}，又来 ${p.line}）`);
+      if (seenPrefix.has(prefixKey(p.prefix))) {
+        throw new Error(
+          `name_prefixes 重复：${p.prefix}（既有 ${seenPrefix.get(prefixKey(p.prefix))}，又来 ${p.line}）`,
+        );
       }
-      seenPrefix.set(p.prefix, p.line);
+      seenPrefix.set(prefixKey(p.prefix), p.line);
       prefixes.push({ prefix: p.prefix, line: p.line, why: p.why, seg: row.seg });
     }
   }
@@ -155,13 +179,11 @@ function loadAliases() {
         throw new Error(`prefixes 缺 ${key}：${JSON.stringify(p)}`);
       }
     }
-    if (!p.prefix.endsWith("-")) {
-      throw new Error(
-        `prefixes 的 prefix 必须以 '-' 结尾：${p.prefix}` +
-          `\n  否则它就是一条首段规则（会连 '${p.prefix}foo-1' 一起吃）。`,
-      );
-    }
-    const seg = p.prefix.slice(0, p.prefix.indexOf("-"));
+    // 前缀按**连字符边界**匹配（见 prefixMatches）：带不带尾 '-' 都合法。
+    // 不带尾 '-' 的那一形态是为「键名恰好等于服务名」准备的（`fd-memory`），
+    // 而它不会吞掉 `fd-memory2` 这种近邻——边界判据只管 `<prefix>` 与其 `-子段`。
+    // 因此「漏写尾 '-'」不再是一条格式错误，而是一条**能被 covers 抓到**的语义错误。
+    const seg = p.prefix.indexOf("-") < 0 ? p.prefix : p.prefix.slice(0, p.prefix.indexOf("-"));
     if (!families.has(seg)) {
       throw new Error(
         `prefixes 的 '${p.prefix}' 落在未登记的前缀族 '${seg}' 下` +
@@ -181,29 +203,37 @@ function loadAliases() {
       if (typeof name !== "string" || name.trim() === "") {
         throw new Error(`prefixes 的 '${p.prefix}' 的 covers 里有非字符串/空串：${JSON.stringify(p.covers)}`);
       }
-      if (!name.startsWith(p.prefix)) {
+      if (!prefixMatches(name, p.prefix)) {
         throw new Error(
-          `prefixes 的 '${p.prefix}' 的 covers 里有键不以该前缀开头：'${name}'` +
-            `\n  要么是前缀写错了（拼一个字母就会静默失效），要么这个键不该在这条规则下。`,
+          `prefixes 的 '${p.prefix}' 的 covers 里有键不满足该前缀的连字符边界：'${name}'` +
+            `\n  边界 = 等于前缀本身、或以其 '-子段' 开头。拼错一个字母就会静默失效，这里当场拒。`,
         );
       }
     }
-    if (p.prefix === `${seg}-`) {
+    if (p.prefix === `${seg}-` || p.prefix === seg) {
       // 整族归一条线不需要细则：把它写成 aliases 里的一行 seg 即可（`vaas` 就是这样）。
       throw new Error(
         `prefixes 的 '${p.prefix}' 只有首段，那是一条首段规则而不是细则：请挪进 aliases。`,
       );
     }
-    if (seenPrefix.has(p.prefix)) {
-      throw new Error(`prefixes 重复：${p.prefix}（既有 ${seenPrefix.get(p.prefix)}，又来 ${p.line}）`);
+    if (seenPrefix.has(prefixKey(p.prefix))) {
+      throw new Error(
+        `prefixes 重复：${p.prefix}（既有 ${seenPrefix.get(prefixKey(p.prefix))}，又来 ${p.line}）`,
+      );
     }
-    seenPrefix.set(p.prefix, p.line);
+    seenPrefix.set(prefixKey(p.prefix), p.line);
     prefixes.push({ prefix: p.prefix, line: p.line, why: p.why, seg });
   }
 
   // 最长优先由**生成顺序**保证（SQL 的 LATERAL 与 Go 的循环都按这个顺序取第一条命中），
   // 所以排序放在这里——两个消费方自然同序，不必各自再排一次。
-  prefixes.sort((a, b) => [...b.prefix].length - [...a.prefix].length || (a.prefix < b.prefix ? -1 : 1));
+  // 长度按**去掉尾 '-'** 之后算：`fd-text-core-` 与 `fd-text-core` 是同一条规则的两种写法，
+  // 排序不能因为写法不同而落到不同位置。
+  prefixes.sort(
+    (a, b) =>
+      [...prefixKey(b.prefix)].length - [...prefixKey(a.prefix)].length ||
+      (prefixKey(a.prefix) < prefixKey(b.prefix) ? -1 : 1),
+  );
   const routeSegs = rows.filter((r) => r.route === true).map((r) => r.seg);
   return { rows, prefixes, routeSegs };
 }
@@ -304,8 +334,11 @@ resolved(key_id, line, why, by_rule, rule, raw_seg) AS (
     LEFT JOIN LATERAL (
         SELECT pa.prefix, pa.line, pa.why
         FROM prefix_aliases pa
-        WHERE starts_with(COALESCE(k.name, ''), pa.prefix)
-        ORDER BY length(pa.prefix) DESC
+        WHERE COALESCE(k.name, '') = pa.prefix
+           OR starts_with(COALESCE(k.name, ''),
+                          CASE WHEN right(pa.prefix, 1) = '-' THEN pa.prefix
+                               ELSE pa.prefix || '-' END)
+        ORDER BY length(rtrim(pa.prefix, '-')) DESC
         LIMIT 1
     ) p ON true
     LEFT JOIN aliases a ON a.seg = split_part(COALESCE(k.name, ''), '-', 1)

@@ -8,7 +8,9 @@
     "name_prefixes = 首段撒谎时的修正：一条 key 名的首段属于 A 线、实际用量由 B 线受益时，在这里登记整名前缀（以 '-' 结尾、必须落在本条 seg 之下，即 prefix 以 '<seg>-' 开头）。归属顺序：最长匹配前缀优先 → 无匹配再退回首段；同 seg 下未被声明的键不受影响。",
     "name_prefixes 也必须有 why：它断言的是「这个键替谁跑」，没有证据就是猜。别用它替代重命名线上 key——重命名只活在一个数据库里，换环境或回滚即失效。",
     "prefix_families = 声明「这个首段是族前缀，不是一条线」（如 `fd-`：同族横跨多个产品与多个账号）。登记之后才能用下面的 prefixes 在族内逐条归属；不登记的族前缀不许出现在 prefixes 里——否则打错一个字就会造出没人声明的族，而报表看不出来。",
-    "prefixes = 族内的前缀细则（{prefix, line, why, covers}）：prefix 必须以 '-' 结尾、必须长于 '<seg>-'（只有 '<seg>-' 那就是一条首段规则，请挪进 aliases）；covers 是这条规则钉住的**精确键名**（至少一个，且每个都必须以该前缀开头）。covers 不是文档而是守卫：族按首段算，中间那段拼错一个字不会造出新族、只会变出一条匹配不到任何键的规则，报表静默不变——写下来才当场红。归属顺序与 name_prefixes 同一条：最长匹配前缀优先；族内未被任何细则命中的键仍落 unknown 单列，**不会**因为族被声明就并进某条线。"
+    "prefixes = 族内的前缀细则（{prefix, line, why, covers}）：前缀按**连字符边界**匹配——键名等于 `<prefix>` 本身、或以 `<prefix>-` 开头（前缀自带尾 '-' 时就是原来的 starts_with）。于是它既能表达 `fd-text-core-*` 这种子族，也能表达 `fd-memory` 这种「键名恰好等于服务名」的形态，且不会吞掉 `fd-memory2` 这类近邻；前缀不能只有族首段（那是首段规则，请挪进 aliases）。covers 是这条规则钉住的**精确键名**（至少一个，且每个都必须满足同一条边界判据）。covers 不是文档而是守卫：族按首段算，中间那段拼错一个字不会造出新族、只会变出一条匹配不到任何键的规则，报表静默不变——写下来才当场红。归属顺序与 name_prefixes 同一条：最长匹配前缀优先（按去掉尾 '-' 的长度比）；族内未被任何细则命中的键仍落 unknown 单列，**不会**因为族被声明就并进某条线。",
+    "归到「非产品流量」的每条 why 必须带实测证据（UA / 模型 / 持 key 账号）——「不是产品用量」是强断言，写「测试用」不算理由。",
+    "个人客户的键不许为它编线（一条线是一条产品，不是一个人）：留在 unknown，靠 unknown 的原始前缀点名可见；归属分不清的内部键（如 embedding-internal）同样留 unknown，别按名字猜。"
   ],
   "aliases": [
     {
@@ -79,6 +81,21 @@
       "seg": "vaas",
       "line": "VAAS",
       "why": "VAAS 是一条产品线（有独立产线镜像与集群车道），它的键全部以 `vaas-` 起首、挂在该产品的专属账号下 ⇒ 整族就是这一条线，不需要逐条细则。2026-11-16 实读 7 日：`vaas-media-grok` $0.8100（federation@example.com）、`vaas-wanxing-imagevideo` $0.1340 / `vaas-wanxing-voice` $0.0135（admin@example.com），同族另有 `vaas-tts` / `vaas-rerank` / `vaas-image-video` 三键同属 vaas@example.invalid（本期无用量）。此前整族落 unknown，约占 unknown 桶的三成"
+    },
+    {
+      "seg": "acp",
+      "line": "非产品流量",
+      "why": "`acp-*` 是内部 ACP harness 的调用（`acp-claude-code` / `acp-claude-code-20261112` 两个键，持 key 账号 harness-acp@example.com）。2026-11-16 按 UA 实测 7 日 79 次 / $0.0852：`claude-cli/2.1.44 (external, sdk-ts, agent-sdk/0.2.44)` 51 次 + `sdk-cli` 10 次 + curl 9 次，模型全是 deepseek-v4.1-flash ⇒ 是 Claude Code CLI 指到我们网关的研发自测，不是产品用量"
+    },
+    {
+      "seg": "fed",
+      "line": "非产品流量",
+      "why": "`fed-*` 是联邦池探测（`fed-all` / `fed-scnet` / `fed-workbuddy-cn` / `fed-workbuddy-media` / `fed-zcode`，持 key 账号 federation@example.com；网关里也有同名计费分组）。2026-11-16 UA 实测：全部 `curl/8.22.0`，模型横跨 glm-5.3-flash / SCNet-Max / hy3 / grok-imagine-image|edit；7 日 13 次 / $0.0402（grok 图片两条各 $0.02）⇒ 探通用性用的，不是客户用量"
+    },
+    {
+      "seg": "probe",
+      "line": "非产品流量",
+      "why": "`probe-*` 是单次探测（`probe-grok-media-20261115`，UA `Wget`、模型 `grok-imagine-image`、1 次 / $0.02、federation 账号）⇒ 与既有的 `wanxing-probe-` 前缀同一族语义：键名自称 probe、实测是探测"
     }
   ],
   "prefix_families": [
@@ -93,6 +110,12 @@
       "line": "文本核心 text-core",
       "why": "`text-core` 是已声明的产品线（`all-services/prod/line-manifests.yaml` 的 19 条之一），而这条线的调用键名就叫 `fd-text-core-*`——首段 `fd` 是组织前缀，导致这条线在自己的报表里看不到自己的调用。2026-11-16 实读：`fd-text-core-embedding-bulk` 7 日 $0.4449 / 2,783 次，全部是 embedding 批量调用，属文本核心的检索/向量面",
       "covers": ["fd-text-core-embedding-bulk"]
+    },
+    {
+      "prefix": "fd-memory",
+      "line": "记忆 fd-memory",
+      "why": "`fd-memory` 是自家记忆服务的键名，它的嵌入调用经词元计费：2026-11-16 实读 7 日 9,571 次 / $0.1053（UA `AsyncOpenAI/Python 2.54.0`、模型 `Qwen/Qwen3-Embedding-8B`、admin 名下 user 1），是全库调用量最高的内部产品键（≈1,370 次/天）。它的名字**恰好等于服务名**、没有更深一层命名 ⇒ 族细则必须能表达这一形态（这正是前缀改成连字符边界匹配的原因，covers 就是这个名字）。同族 `fd-crawler-automation` 属另一个用户、`embedding-internal`（31 次 / $0.00002）归属在记忆与文本核心之间分不清 ⇒ 两者都仍落 unknown",
+      "covers": ["fd-memory"]
     }
   ]
 }
