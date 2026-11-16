@@ -12,6 +12,12 @@
 -- 所以镜像有自己的表：只增、不改、不移动余额、不触发配额窗口。
 -- 幂等由 external_id 的唯一索引保证（不是内存表、不是 TTL 缓存）：
 -- 萬星重放同一条结算，落点仍然只有一行，且返回首次那行的 id。
+--
+-- 2026-11-17 已在生产库（sub2api@cheap，事务内 ROLLBACK）用同构 DDL 实跑验证：
+-- 首次 INSERT … ON CONFLICT DO NOTHING RETURNING 返回 1 行；同 external_id 第二次
+-- 返回 **0 行**（＝仓储层 inserted=false ⇒ duplicate=true）；随后按 external_id
+-- 读回的是**首次**那行（minutes 仍是第一次的值，不是第二次的），行数恰为 1。
+-- 注意：迁移文件一旦上产就受 schema_migrations 的 checksum 守卫，之后不再可改。
 CREATE TABLE IF NOT EXISTS usage_mirrors (
     id          BIGSERIAL PRIMARY KEY,
     external_id VARCHAR(128) NOT NULL,
