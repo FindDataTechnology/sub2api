@@ -713,6 +713,10 @@ func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	usage := admin.Group("/usage")
 	{
 		usage.GET("", h.Admin.Usage.List)
+		// 套餐/外部结算的虚拟用量镜像（add-serving-plans D6）：只增展示、不动余额。
+		// 契约是 {ok, usage_id, duplicate}，正本见 fd-wanxing/docs/sub2api-usage-mirror.md。
+		usage.POST("", h.Admin.Usage.RecordMirror)
+		usage.GET("/mirrors", h.Admin.Usage.ListMirrors)
 		usage.GET("/stats", h.Admin.Usage.Stats)
 		usage.GET("/search-users", h.Admin.Usage.SearchUsers)
 		usage.GET("/search-api-keys", h.Admin.Usage.SearchAPIKeys)
