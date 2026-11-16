@@ -3,6 +3,8 @@
     <div class="space-y-6">
       <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
 
+      <UsageMirrorsCard />
+
       <div class="space-y-4">
         <div class="card p-4">
           <div class="flex flex-wrap items-center gap-4">
@@ -229,6 +231,7 @@ import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'
+import UsageMirrorsCard from '@/components/user/UsageMirrorsCard.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'

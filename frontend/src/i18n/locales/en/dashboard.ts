@@ -333,6 +333,16 @@ export default {
   usage: {
     title: 'Usage Records',
     description: 'View and analyze your API usage history',
+    mirrors: {
+      title: 'Plan Usage',
+      description: 'Settled plan consumption mirrored from the billing side — display only',
+      badge: 'Settled plan',
+      empty: 'No plan usage yet',
+      emptyHint: 'When a plan settlement is mirrored from the billing side it shows up here.',
+      loadFailed: 'Could not load plan usage',
+      retry: 'Retry',
+      minutesUnit: 'min'
+    },
     costDetails: 'Cost Breakdown',
     tokenDetails: 'Token Breakdown',
     cacheTtlOverriddenHint: 'Cache TTL Override enabled',

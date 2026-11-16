@@ -108,6 +108,8 @@ func RegisterUserRoutes(
 			usage.GET("/errors/:id", h.Usage.GetErrorDetail)
 			usage.GET("/:id", h.Usage.GetByID)
 			usage.GET("/stats", h.Usage.Stats)
+			// 套餐/外部结算的镜像行（本人视角；user_id 取自登录主体，见 handler 注释）
+			usage.GET("/mirrors", h.Usage.ListMyMirrors)
 			// User dashboard endpoints
 			usage.GET("/dashboard/stats", h.Usage.DashboardStats)
 			usage.GET("/dashboard/trend", h.Usage.DashboardTrend)

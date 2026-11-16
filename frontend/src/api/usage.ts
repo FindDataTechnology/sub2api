@@ -370,6 +370,43 @@ export async function getMyErrorDetail(id: number): Promise<UserErrorRequestDeta
   return data
 }
 
+// ==================== Plan Usage Mirrors ====================
+//
+// 套餐/外部结算的虚拟用量镜像（add-serving-plans D6）：账本权威在萬星 facade，
+// 这里只读回**当前登录用户自己**的镜像行。后端按登录主体取 user_id
+// （GET /api/v1/usage/mirrors），所以这里刻意不传 user_id。
+
+export interface UsageMirrorRow {
+  id: number
+  external_id: string
+  user_id: number
+  minutes: number
+  note: string
+  /** RFC3339（后端是 TIMESTAMPTZ） */
+  recorded_at: string
+}
+
+export interface UsageMirrorListResponse {
+  items: UsageMirrorRow[]
+  total: number
+}
+
+/**
+ * Get plan/external-settlement usage mirrors for the current user
+ * @param params - Optional limit (backend default 50, cap 200)
+ * @returns Mirror rows
+ */
+export async function listMirrors(
+  params: { limit?: number } = {},
+  config: { signal?: AbortSignal } = {}
+): Promise<UsageMirrorListResponse> {
+  const { data } = await apiClient.get<UsageMirrorListResponse>('/usage/mirrors', {
+    ...config,
+    params
+  })
+  return data
+}
+
 export const usageAPI = {
   list,
   query,
@@ -384,6 +421,8 @@ export const usageAPI = {
   getMyApiKeyDailyUsage,
   getDashboardSnapshotV2,
   getDashboardApiKeysUsage,
+  // Plan / external-settlement usage mirrors (read-only, current user)
+  listMirrors,
   // Error requests
   listMyErrorRequests,
   getMyErrorDetail

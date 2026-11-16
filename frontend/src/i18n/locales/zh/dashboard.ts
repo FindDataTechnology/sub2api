@@ -338,6 +338,16 @@ export default {
   usage: {
     title: '使用记录',
     description: '查看和分析您的 API 使用历史',
+    mirrors: {
+      title: '套餐用量',
+      description: '计费侧镜像过来的套餐结算消费——仅作展示',
+      badge: '已结算套餐',
+      empty: '暂无套餐用量',
+      emptyHint: '计费侧镜像回一条套餐结算后，就会显示在这里。',
+      loadFailed: '套餐用量读取失败',
+      retry: '重试',
+      minutesUnit: '分钟'
+    },
     costDetails: '费用明细',
     tokenDetails: 'Token 明细',
     cacheTtlOverriddenHint: '缓存 TTL Override 已启用',
