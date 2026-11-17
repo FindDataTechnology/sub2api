@@ -39,8 +39,14 @@ type usageMirrorResponse struct {
 func (h *UsageHandler) RecordMirror(c *gin.Context) {
 	var req RecordUsageMirrorRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		// 请求体都解不开时，最有用的判词是「external_id 必填」——它也正是契约的第一条。
-		response.ErrorFrom(c, service.ErrUsageMirrorExternalIDRequired)
+		// 解不开请求体时要报**解不开的原因**：一律翻成「external_id 必填」会把
+		// `minutes` 是小数（Go 侧 int）这类类型错误指到一个没问题的字段上，
+		// 而上游看到 400 只会打一行 warn（见 facade 的 mirrorPlanUsage）。
+		// 字段缺失/为空仍由 service 层给 EXTERNAL_ID_REQUIRED，所以这里不丢判词。
+		response.ErrorFrom(c, infraerrors.BadRequest(
+			"USAGE_MIRROR_BODY_INVALID",
+			"request body is not a valid usage mirror payload: "+err.Error(),
+		))
 		return
 	}
 
