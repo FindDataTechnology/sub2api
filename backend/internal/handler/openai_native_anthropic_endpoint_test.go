@@ -59,6 +59,11 @@ func (u *nativeEndpointUpstream) DoWithTLS(req *http.Request, proxy string, acco
 	return u.Do(req, proxy, accountID, concurrency)
 }
 
+// RecordAIMDResult：fork 给 HTTPUpstream port 追加的 AIMD 喂点。
+// 本 fake 嵌入的是 nil 接口，不显式实现会在错误路径上 SIGSEGV
+// （openai_account_runtime_block_fastpath.go 调它）。本用例不关心 AIMD 记账。
+func (u *nativeEndpointUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func TestOpenAINativeAnthropicEndpointDiagnostics(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, route := range []struct {

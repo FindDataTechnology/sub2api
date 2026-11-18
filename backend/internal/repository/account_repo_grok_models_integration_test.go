@@ -277,11 +277,14 @@ type grokCatalogRow struct {
 // readGrokCatalogToken 解密账号凭据并取 access_token。
 // 明文列 credentials 已在迁移 251 drop，凭据只剩 credentials_encrypted；
 // mustCreateAccount 写入时用的就是 credentialTestEncryptor，这里用同一个解。
-func readGrokCatalogToken(t *testing.T, id int64) string {
+//
+// client 必须传**调用方自己的** client：多数用例跑在 testEntTx 的事务里，
+// 用全局 integrationEntClient 会看不见未提交的行（实测报 `ent: account not found`）。
+func readGrokCatalogToken(t *testing.T, client *dbent.Client, id int64) string {
 	t.Helper()
-	row, err := integrationEntClient.Account.Get(context.Background(), id)
+	row, err := client.Account.Get(context.Background(), id)
 	require.NoError(t, err)
-	r := newAccountRepositoryWithSQLCrypto(integrationEntClient, integrationDB, nil, credentialTestEncryptor(t))
+	r := newAccountRepositoryWithSQLCrypto(client, integrationDB, nil, credentialTestEncryptor(t))
 	creds, err := r.credentialsFromEntity(row)
 	require.NoError(t, err)
 	token, _ := creds["access_token"].(string)
@@ -289,6 +292,23 @@ func readGrokCatalogToken(t *testing.T, id int64) string {
 }
 
 func readGrokCatalogRow(t *testing.T, q grokCatalogSQL, id int64) grokCatalogRow {
+	return readGrokCatalogRowWithClient(t, q, grokCatalogEntClientOf(t, q), id)
+}
+
+// grokCatalogEntClientOf 从传入的 SQL 执行器推断对应的 ent client。
+// 测试里两种形态：*dbent.Tx（事务）与 *sql.DB（全局）。前者必须用 tx.Client()，
+// 否则读不到未提交的行。
+func grokCatalogEntClientOf(t *testing.T, q grokCatalogSQL) *dbent.Client {
+	t.Helper()
+	switch v := q.(type) {
+	case *dbent.Tx:
+		return v.Client()
+	default:
+		return integrationEntClient
+	}
+}
+
+func readGrokCatalogRowWithClient(t *testing.T, q grokCatalogSQL, client *dbent.Client, id int64) grokCatalogRow {
 	t.Helper()
 	// access_token 是密钥子键，不在 credentials_meta 白名单里（明文列已在迁移 251 drop），
 	// SQL 取不到它。这里先用 SQL 取非密文字段，token 再经 ent + credentialsFromEntity 解密。
@@ -307,7 +327,7 @@ func readGrokCatalogRow(t *testing.T, q grokCatalogSQL, id int64) grokCatalogRow
 	var raw string
 	require.NoError(t, rows.Scan(&row.unrelated, &raw, &row.status, &row.rateMultiplier, &row.deleted))
 	require.NoError(t, rows.Err())
-	row.token = readGrokCatalogToken(t, id)
+	row.token = readGrokCatalogToken(t, client, id)
 	row.rawModels = json.RawMessage(raw)
 	if raw != "null" {
 		var payload struct {

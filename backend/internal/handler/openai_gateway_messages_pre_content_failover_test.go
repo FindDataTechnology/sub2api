@@ -334,3 +334,8 @@ func TestOpenAIMessagesHTTPStatusFailoverExhaustedIgnoresPassthroughRule(t *test
 	require.NotEqual(t, http.StatusTeapot, rec.Code, "body: %q", body)
 	require.Equal(t, "Upstream service temporarily unavailable", gjson.Get(body, "error.message").String(), "body: %q", body)
 }
+
+// RecordAIMDResult：fork 给 HTTPUpstream port 追加的 AIMD 喂点。
+// 本 fake 嵌入的是 nil 接口，不显式实现会在错误路径上 SIGSEGV
+// （openai_account_runtime_block_fastpath.go 调它）。本用例不关心 AIMD 记账。
+func (u *preContentFailoverUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
