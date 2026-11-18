@@ -108,10 +108,10 @@ func websearchNum(raw any) (int, bool) {
 // 池），失败按 hash8 进程内冷却并回退池；来源三态经 x-search-source 如实标注
 // （语义对齐 search-relay add-search-byok）。key 值绝不入日志/响应/错误文本。
 const (
-	websearchBYOKHeader  = "X-Serpapi-Key"
-	websearchBYOKMarker  = "byok:" // 用量行归因前缀（UpstreamModel=byok:<hash8>）
-	websearchSourceUser  = "user"
-	websearchSourcePool  = "pool"
+	websearchBYOKHeader                 = "X-Serpapi-Key"
+	websearchBYOKMarker                 = "byok:" // 用量行归因前缀（UpstreamModel=byok:<hash8>）
+	websearchSourceUser                 = "user"
+	websearchSourcePool                 = "pool"
 	websearchSourcePoolAfterUserFailure = "pool-after-user-failure"
 )
 

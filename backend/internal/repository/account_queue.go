@@ -42,10 +42,10 @@ var (
 const (
 	defaultAccountQueueBound = 8
 	aimdFloor                = 1
-	aimdTripThreshold        = 3 // 连续失败次数到达即减半
-	acctQueueBoundEnv        = "UPSTREAM_CONCURRENCY_MAX"     // 每账号默认并发上限（design 对齐）
-	acctQueueWaitersEnv      = "UPSTREAM_QUEUE_BOUND"        // 每账号队列深度
-	acctQueueAIMDEnv         = "UPSTREAM_AIMD_ENABLED"       // true/false；false=静态并发（有界队列仍生效）
+	aimdTripThreshold        = 3                          // 连续失败次数到达即减半
+	acctQueueBoundEnv        = "UPSTREAM_CONCURRENCY_MAX" // 每账号默认并发上限（design 对齐）
+	acctQueueWaitersEnv      = "UPSTREAM_QUEUE_BOUND"     // 每账号队列深度
+	acctQueueAIMDEnv         = "UPSTREAM_AIMD_ENABLED"    // true/false；false=静态并发（有界队列仍生效）
 )
 
 // 兜底轮询：唤醒通知 cap1 会合并（多次 release 只留一个信号），等待者被
@@ -56,20 +56,19 @@ var (
 	acctQueuePollInterval = 200 * time.Millisecond
 )
 
-
 type accountQueueState struct {
-	bound       int32  // 当前允许的并发上限（AIMD 动态收窄，≤ limit）
-	limit       int32  // 初始 bound（恢复封顶）
-	inFlight    int32  // 已发出去未归还的槽位
-	waiting     int32  // 在队列里等槽位的请求数
-	waitMax     int32  // 等待队列上限
+	bound       int32         // 当前允许的并发上限（AIMD 动态收窄，≤ limit）
+	limit       int32         // 初始 bound（恢复封顶）
+	inFlight    int32         // 已发出去未归还的槽位
+	waiting     int32         // 在队列里等槽位的请求数
+	waitMax     int32         // 等待队列上限
 	wake        chan struct{} // cap1 释放通知；丢失由兜底轮询自愈
-	tripped     int32  // AIMD：1 = 连续失败已触发减半（探针=inFlight 里的请求）
-	failStreak  int32  // 连续失败计数（success 清零）
-	lastRecover int64  // 上次 +1 恢复的 unixNano（cooldown 去抖）
-	maxSeen     int32  // 观测峰值（metrics 用）
-	queueFull   int64  // ErrQueueFull 计数（metrics）
-	tripCount   int64  // AIMD 减半次数（metrics）
+	tripped     int32         // AIMD：1 = 连续失败已触发减半（探针=inFlight 里的请求）
+	failStreak  int32         // 连续失败计数（success 清零）
+	lastRecover int64         // 上次 +1 恢复的 unixNano（cooldown 去抖）
+	maxSeen     int32         // 观测峰值（metrics 用）
+	queueFull   int64         // ErrQueueFull 计数（metrics）
+	tripCount   int64         // AIMD 减半次数（metrics）
 }
 
 // accountQueues: 进程级注册表，键 = 账号 ID（隔离粒度与调度一致；
@@ -290,7 +289,10 @@ func AccountQueueMetrics(accountID int64) (AccountQueueMetricsSnapshot, bool) {
 	if !ok {
 		return AccountQueueMetricsSnapshot{}, false
 	}
-	st := v.(*accountQueueState)
+	st, ok := v.(*accountQueueState)
+	if !ok {
+		return AccountQueueMetricsSnapshot{}, false
+	}
 	return AccountQueueMetricsSnapshot{
 		Bound:     atomic.LoadInt32(&st.bound),
 		Limit:     atomic.LoadInt32(&st.limit),

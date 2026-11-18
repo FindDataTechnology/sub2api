@@ -37,9 +37,11 @@ func TestStressQueueBoundedUnder5xxStorm(t *testing.T) {
 			case <-time.After(1 * time.Millisecond):
 				if v, ok := accountQueues.Load(accountID); ok {
 					// 一次 tick 打满三连（真实风暴=持续失败），击穿成功清零。
-					aimdRecordFailure(v.(*accountQueueState))
-					aimdRecordFailure(v.(*accountQueueState))
-					aimdRecordFailure(v.(*accountQueueState))
+					if st, ok := v.(*accountQueueState); ok {
+						aimdRecordFailure(st)
+						aimdRecordFailure(st)
+						aimdRecordFailure(st)
+					}
 				}
 			}
 		}
