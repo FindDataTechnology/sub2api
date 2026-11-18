@@ -60,9 +60,13 @@ func (s *UserRepoAPIKeyGroupFilterSuite) mustCreateGroup(name string) *dbent.Gro
 
 func (s *UserRepoAPIKeyGroupFilterSuite) mustCreateAPIKey(userID int64, key, name string, groupID *int64) *dbent.APIKey {
 	s.T().Helper()
+	// 明文列 api_keys.key 已在迁移 251 drop，key 只能以派生列落库。
+	keyHash, keyEncrypted, err := apiKeyDerivedColumns(key, credentialTestEncryptor(s.T()))
+	s.Require().NoError(err)
 	create := s.client.APIKey.Create().
 		SetUserID(userID).
-		SetKey(key).
+		SetKeyHash(keyHash).
+		SetNillableKeyEncrypted(keyEncrypted).
 		SetName(name)
 	if groupID != nil {
 		create = create.SetGroupID(*groupID)

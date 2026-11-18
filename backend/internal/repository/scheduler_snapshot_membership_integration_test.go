@@ -37,9 +37,16 @@ func TestSchedulerSnapshotConfiguredMembership(t *testing.T) {
 							accountPlatform = service.PlatformOpenAI
 						}
 					}
+					// 明文列 credentials 已在迁移 251 drop，凭据只能以派生列落库。
+					emptyCreds, err := CredentialCryptoColumnsFor(map[string]any{}, credentialTestEncryptor(t))
+					require.NoError(t, err)
 					create := client.Account.Create().SetName(fmt.Sprintf("%s-%d", kind, gid)).
 						SetPlatform(accountPlatform).SetType(service.AccountTypeAPIKey).
-						SetCredentials(map[string]any{}).SetExtra(map[string]any{"mixed_scheduling": kind == "mixed_on"}).
+						SetCredentialsMeta(emptyCreds.Meta).
+						SetNillableCredentialsEncrypted(emptyCreds.Encrypted).
+						SetNillableCredentialsHash(emptyCreds.Hash).
+						SetNillableCredentialsAPIKeyHash(emptyCreds.APIKeyHash).
+						SetExtra(map[string]any{"mixed_scheduling": kind == "mixed_on"}).
 						SetStatus(service.StatusActive).SetSchedulable(kind != "manual")
 					switch kind {
 					case "cooling":

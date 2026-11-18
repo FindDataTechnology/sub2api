@@ -300,11 +300,13 @@ type grokManagedExtraRow struct {
 
 func readGrokManagedExtra(t *testing.T, q grokCatalogSQL, id int64) grokManagedExtraRow {
 	t.Helper()
+	// base_url 走 credentials_meta（凭据加密后唯一可 SQL 筛选的明文副本；
+	// 明文列 credentials 已在迁移 251 drop）。其余字段仍在 extra。
 	rows, err := q.QueryContext(context.Background(), `
 		SELECT name,
 		       COALESCE(extra->>'note', ''),
 		       COALESCE(extra->>'unrelated', ''),
-		       COALESCE(credentials->>'base_url', ''),
+		       COALESCE(credentials_meta->>'base_url', ''),
 		       COALESCE((extra->'grok_observed_models')::text, 'null'),
 		       COALESCE((extra->'upstream_model_metadata')::text, 'null')
 		FROM accounts

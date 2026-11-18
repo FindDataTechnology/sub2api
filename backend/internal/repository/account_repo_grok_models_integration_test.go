@@ -274,12 +274,27 @@ type grokCatalogRow struct {
 	deleted        bool
 }
 
+// readGrokCatalogToken 解密账号凭据并取 access_token。
+// 明文列 credentials 已在迁移 251 drop，凭据只剩 credentials_encrypted；
+// mustCreateAccount 写入时用的就是 credentialTestEncryptor，这里用同一个解。
+func readGrokCatalogToken(t *testing.T, id int64) string {
+	t.Helper()
+	row, err := integrationEntClient.Account.Get(context.Background(), id)
+	require.NoError(t, err)
+	r := newAccountRepositoryWithSQLCrypto(integrationEntClient, integrationDB, nil, credentialTestEncryptor(t))
+	creds, err := r.credentialsFromEntity(row)
+	require.NoError(t, err)
+	token, _ := creds["access_token"].(string)
+	return token
+}
+
 func readGrokCatalogRow(t *testing.T, q grokCatalogSQL, id int64) grokCatalogRow {
 	t.Helper()
+	// access_token 是密钥子键，不在 credentials_meta 白名单里（明文列已在迁移 251 drop），
+	// SQL 取不到它。这里先用 SQL 取非密文字段，token 再经 ent + credentialsFromEntity 解密。
 	rows, err := q.QueryContext(context.Background(), `
 		SELECT COALESCE(extra->>'unrelated', ''),
 		       COALESCE((extra->'grok_observed_models')::text, 'null'),
-		       COALESCE(credentials->>'access_token', ''),
 		       status,
 		       rate_multiplier::text,
 		       deleted_at IS NOT NULL
@@ -290,8 +305,9 @@ func readGrokCatalogRow(t *testing.T, q grokCatalogSQL, id int64) grokCatalogRow
 	require.True(t, rows.Next())
 	var row grokCatalogRow
 	var raw string
-	require.NoError(t, rows.Scan(&row.unrelated, &raw, &row.token, &row.status, &row.rateMultiplier, &row.deleted))
+	require.NoError(t, rows.Scan(&row.unrelated, &raw, &row.status, &row.rateMultiplier, &row.deleted))
 	require.NoError(t, rows.Err())
+	row.token = readGrokCatalogToken(t, id)
 	row.rawModels = json.RawMessage(raw)
 	if raw != "null" {
 		var payload struct {

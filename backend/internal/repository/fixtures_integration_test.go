@@ -280,9 +280,15 @@ func mustCreateApiKey(t *testing.T, client *dbent.Client, k *service.APIKey) *se
 		k.Name = "default"
 	}
 
+	// 阶段 5.2：api_keys.key 明文列已删除，key 只能以派生列落库
+	// （key_hash 供查找、key_encrypted 供解密），与生产写路径一致。
+	keyHash, keyEncrypted, err := apiKeyDerivedColumns(k.Key, credentialTestEncryptor(t))
+	require.NoError(t, err)
+
 	create := client.APIKey.Create().
 		SetUserID(k.UserID).
-		SetKey(k.Key).
+		SetKeyHash(keyHash).
+		SetNillableKeyEncrypted(keyEncrypted).
 		SetName(k.Name).
 		SetStatus(k.Status)
 	if k.Quota != 0 {
