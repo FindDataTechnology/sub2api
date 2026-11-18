@@ -3616,13 +3616,21 @@ func (r *accountRepository) bulkMergeCredentialsOnly(ctx context.Context, ids []
 		}
 	}
 	// 计数与主 UPDATE 同口径：只数未被软删的行。
-	var affected int64
-	if err := exec.QueryRowContext(ctx,
+	// 用 QueryContext 而非 QueryRowContext —— sqlExecutor 接口只声明了前者。
+	rows, err := exec.QueryContext(ctx,
 		`SELECT count(*) FROM accounts WHERE id = ANY($1) AND deleted_at IS NULL`,
-		pq.Array(ids)).Scan(&affected); err != nil {
+		pq.Array(ids))
+	if err != nil {
 		return 0, err
 	}
-	return affected, nil
+	defer func() { _ = rows.Close() }()
+	var affected int64
+	if rows.Next() {
+		if err := rows.Scan(&affected); err != nil {
+			return 0, err
+		}
+	}
+	return affected, rows.Err()
 }
 
 func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID int64, opts accountGroupQueryOptions) ([]service.Account, error) {
