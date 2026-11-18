@@ -136,8 +136,11 @@ func (s *schedulerCacheRecorder) SetOutboxWatermark(ctx context.Context, id int6
 }
 
 func (s *AccountRepoSuite) SetupTest() {
-	s.ctx = context.Background()
 	tx := testEntTx(s.T())
+	// ctx 必须绑定事务：BulkUpdate 等写路径用 dbent.TxFromContext(ctx) 判断是否已在
+	// 事务里，拿不到就**新开一个独立事务**。那样它的写入对外层 testEntTx 不可见，
+	// 随后的 GetByID 读不到刚写的值（表现为 `expected "new_value", actual nil`）。
+	s.ctx = dbent.NewTxContext(context.Background(), tx)
 	s.client = tx.Client()
 	// 必须注入与 mustCreateAccount 同一个加密器：迁移 251 之后凭据只有
 	// credentials_encrypted，repo 没有 cryptor 时 credentialsFromEntity 会
