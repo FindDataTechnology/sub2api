@@ -383,4 +383,3 @@ func TestOpenAIGatewayServiceForwardAPIKeyRemoteCompactV2PreservesResponsesWire(
 	require.NotNil(t, result.ReasoningEffort)
 	require.Equal(t, "max", *result.ReasoningEffort)
 }
-

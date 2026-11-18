@@ -2339,4 +2339,3 @@ func TestForwardAsAnthropic_AstraContinuationRestoresHistoryAndDisablesUnsupport
 	require.False(t, isOpenAICompatPreviousResponseUnsupported(http.StatusUnauthorized, "previous_response_id is not available for this user", nil))
 	require.False(t, isOpenAICompatPreviousResponseUnsupported(http.StatusBadRequest, "The model is not available for this user", nil))
 }
-

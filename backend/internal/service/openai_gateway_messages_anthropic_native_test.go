@@ -213,4 +213,3 @@ func TestNativeAnthropicPassthroughLeavesOtherThinkingUntouched(t *testing.T) {
 		})
 	}
 }
-

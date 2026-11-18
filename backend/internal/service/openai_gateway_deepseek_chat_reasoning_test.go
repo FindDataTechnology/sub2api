@@ -251,4 +251,3 @@ func TestForwardResponses_NonDeepSeekChatFallbackDoesNotInjectReasoningPlacehold
 	require.NotNil(t, result)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "messages.0.reasoning_content").Exists())
 }
-

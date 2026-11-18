@@ -256,4 +256,3 @@ func requireJSONArgument(t *testing.T, arguments string) {
 	var decoded any
 	require.NoError(t, json.Unmarshal([]byte(arguments), &decoded))
 }
-

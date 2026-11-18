@@ -121,4 +121,3 @@ func TestCodexDirectImagesShadowCredentials(t *testing.T) {
 	require.Equal(t, "test-account", upstream.lastReq.Header.Get("Chatgpt-Account-Id"))
 	require.Equal(t, "/backend-api/codex/images/generations", upstream.lastReq.URL.Path)
 }
-

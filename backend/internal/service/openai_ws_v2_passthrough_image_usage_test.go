@@ -101,4 +101,3 @@ func TestOpenAIWSPassthroughTurnResultCarriesImageUsage(t *testing.T) {
 		t.Fatal("passthrough turn result was not reported")
 	}
 }
-

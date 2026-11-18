@@ -233,4 +233,3 @@ func TestCodexDirectImagesAccountTestAndWhitelist(t *testing.T) {
 		require.NotEqual(t, "gpt-image-2.5-sunburst", model.ID)
 	}
 }
-

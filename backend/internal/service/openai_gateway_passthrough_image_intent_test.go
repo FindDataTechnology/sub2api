@@ -57,4 +57,3 @@ func TestOpenAIGatewayService_APIKeyPassthrough_ImageIntentPreservesGateAndBilli
 		require.Equal(t, "2048x1152", result.ImageInputSize)
 	})
 }
-

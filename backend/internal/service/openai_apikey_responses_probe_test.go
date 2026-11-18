@@ -210,4 +210,3 @@ func TestSelectResponsesProbeModel(t *testing.T) {
 	}}
 	require.Equal(t, openai.DefaultTestModel, selectResponsesProbeModel(acctAllWild))
 }
-

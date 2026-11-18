@@ -857,4 +857,3 @@ func newOpenAIImageGenerationControlTestAccount() *Account {
 		},
 	}
 }
-

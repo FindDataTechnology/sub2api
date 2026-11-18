@@ -120,4 +120,3 @@ func TestOpenAIGatewayServiceForwardOAuthDerivesEffortFromSuffixModel(t *testing
 	require.NotNil(t, result.ReasoningEffort)
 	require.Equal(t, "xhigh", *result.ReasoningEffort)
 }
-

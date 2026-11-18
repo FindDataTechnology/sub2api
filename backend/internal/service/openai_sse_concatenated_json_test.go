@@ -401,4 +401,3 @@ func openAIConcatenatedJSONTestEvents(t *testing.T) (string, string, string) {
 	require.Equal(t, int64(javascriptErrorPosition+1), syntaxErr.Offset)
 	return largeInProgress, outputItemAdded, completed
 }
-

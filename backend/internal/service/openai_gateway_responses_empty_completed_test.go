@@ -234,4 +234,3 @@ func TestOpenAIResponsesEmptyCompletedWithOutputSucceedsGrok(t *testing.T) {
 	require.Equal(t, 11, result.Usage.InputTokens)
 	require.Equal(t, 4, result.Usage.OutputTokens)
 }
-

@@ -320,4 +320,3 @@ func TestForwardAsAnthropic_ResponseFailed_ErrorCodeRuleMatchesViaSemanticStatus
 	respBody := rec.Body.String()
 	require.NotEmpty(t, gjson.Get(respBody, "error.message").String())
 }
-

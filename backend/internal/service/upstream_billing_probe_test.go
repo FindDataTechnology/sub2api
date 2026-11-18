@@ -1303,5 +1303,4 @@ func TestUpstreamBillingProbeLeaderLockCoversStaggeredInstancesInCadenceWindow(t
 	require.Equal(t, int64(1), upstream.calls.Load(), "a staggered instance must not start a second batch inside the cadence window")
 }
 
-
 func (u *upstreamBillingProbeHTTPStub) RecordAIMDResult(accountID int64, statusCode int) {}

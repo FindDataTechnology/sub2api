@@ -470,4 +470,3 @@ func TestForwardResponses_ChatFallbackRestoresReasoningFromCache(t *testing.T) {
 	// 明文 summary 的 item 被回写进缓存（自愈）。
 	require.Equal(t, "plain thinking", cache.snapshotSets()["item_plain"])
 }
-

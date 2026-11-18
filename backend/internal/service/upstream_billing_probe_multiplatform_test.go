@@ -294,4 +294,3 @@ func TestBuildAccountForCreateAcceptsTypeSafeAPIKeyWithProbeEnabled(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, true, account.Extra[UpstreamBillingProbeEnabledExtraKey])
 }
-

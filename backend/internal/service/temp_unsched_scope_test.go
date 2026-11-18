@@ -491,4 +491,3 @@ func TestAnthropicFailoverEntries_ExplicitModelScopeOnlyCoolsModel(t *testing.T)
 		require.Equal(t, "claude-sonnet-4-5", repo.modelRateLimitCalls[0].scope)
 	})
 }
-

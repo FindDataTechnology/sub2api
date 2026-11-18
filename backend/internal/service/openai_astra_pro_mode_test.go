@@ -242,4 +242,3 @@ func TestForward_AstraOAuth_Stream_PreservesResponseReasoningMode(t *testing.T) 
 		"streamed completed response object must keep reasoning.mode")
 	require.Equal(t, "max", gjson.Get(completedJSON, "response.reasoning.effort").String())
 }
-

@@ -90,4 +90,3 @@ func TestOpenAIGatewayService_OAuthAstraProModeKeptAcrossRejectedFieldRetry(t *t
 	require.Equal(t, "completed", gjson.GetBytes(upstream.bodies[0], "input.0.status").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.status").Exists())
 }
-

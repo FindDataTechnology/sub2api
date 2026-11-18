@@ -646,4 +646,3 @@ func TestClineOfficialHostSkipsUpstreamBillingProbe(t *testing.T) {
 	require.True(t, upstreamBillingProbeTargetIsOfficialAPI(DefaultClineBaseURL))
 	require.False(t, upstreamBillingProbeTargetIsOfficialAPI("https://relay.example.com/v1"))
 }
-

@@ -418,4 +418,3 @@ func TestCommandCodeGatewayFetchesModelCatalog(t *testing.T) {
 		require.Equal(t, fmt.Sprintf("t-%d", account.ID), getHeaderRaw(req.Header, "x-tenant"))
 	}
 }
-

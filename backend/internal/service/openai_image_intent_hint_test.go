@@ -336,4 +336,3 @@ func BenchmarkOpenAIPassthroughImageIntentHintLargeBody(b *testing.B) {
 		b.ReportMetric(float64(calls)/float64(b.N), "classifier_calls/op")
 	})
 }
-

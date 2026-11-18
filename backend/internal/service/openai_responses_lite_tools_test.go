@@ -612,4 +612,3 @@ func TestOpenAIGatewayServiceForward_DisablesParallelToolCallsForResponsesLiteAP
 		})
 	}
 }
-

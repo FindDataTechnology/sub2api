@@ -328,4 +328,3 @@ func TestCompactProbeSessionID_IsUUIDShaped(t *testing.T) {
 	require.Equal(t, compactProbeSessionID(7), compactProbeSessionID(7), "同账号应稳定复用同一会话")
 	require.NotEqual(t, compactProbeSessionID(7), compactProbeSessionID(8))
 }
-

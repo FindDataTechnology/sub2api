@@ -264,4 +264,3 @@ func TestFixedCNResponsesProtocolOverridesStaleChatMode(t *testing.T) {
 		})
 	}
 }
-

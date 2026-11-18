@@ -749,4 +749,3 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyClearsUntypedStatusAtInde
 	require.Equal(t, "keep_a", gjson.GetBytes(retryBody, "input.0.status").String())
 	require.False(t, gjson.GetBytes(retryBody, "input.1.status").Exists())
 }
-

@@ -47,4 +47,3 @@ func TestSelectResponsesProbeModelPrefersGeneralTextModel(t *testing.T) {
 	}}}
 	require.Equal(t, "gpt-5.5", selectResponsesProbeModel(account))
 }
-

@@ -840,4 +840,3 @@ func TestResolvedOpenAIUpstreamServiceTier(t *testing.T) {
 		require.Equal(t, "priority", *got)
 	})
 }
-

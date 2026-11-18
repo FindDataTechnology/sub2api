@@ -134,4 +134,3 @@ func TestForwardAsAnthropic_StreamCyberPolicyNoFailover(t *testing.T) {
 	require.NotNil(t, GetOpsCyberPolicy(c), "cyber mark must be set")
 	require.Contains(t, rec.Body.String(), "event: error", "must emit anthropic SSE error event")
 }
-

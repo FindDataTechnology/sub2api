@@ -122,4 +122,3 @@ func TestOpenCodeGatewayAppliesMappedModelOnAllIngresses(t *testing.T) {
 		})
 	}
 }
-

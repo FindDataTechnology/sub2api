@@ -59,4 +59,3 @@ func TestAlphaSearchFallbackCompletionPreservesOutputAndCitations(t *testing.T) 
 		require.JSONEq(t, `{"output":"search result","results":[{"type":"text_result","ref_id":"turn0search0","url":"https://example.com/news","title":"Example News"}]}`, string(body))
 	}
 }
-

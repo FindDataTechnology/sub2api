@@ -149,4 +149,3 @@ func TestCompatibleImagesNativeAccountsRejectGeminiBeforeForwarding(t *testing.T
 		}
 	}
 }
-

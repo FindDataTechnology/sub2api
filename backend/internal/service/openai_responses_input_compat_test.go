@@ -220,4 +220,3 @@ func TestOpenAIGatewayService_PreservesOversizedToolOutputForUpstream(t *testing
 	require.Len(t, upstream.bodies, 1)
 	require.Equal(t, oversized, gjson.GetBytes(upstream.bodies[0], "input.1.output").String())
 }
-

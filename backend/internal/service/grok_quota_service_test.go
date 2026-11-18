@@ -1319,4 +1319,3 @@ func TestShouldAutoPauseGrokAccountByQuota(t *testing.T) {
 		})
 	}
 }
-

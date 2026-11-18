@@ -267,4 +267,3 @@ func TestForwardAsRawChatCompletions_OllamaCloudThinkingAliasNonStreaming(t *tes
 	require.Equal(t, "final answer", gjson.Get(rec.Body.String(), "choices.0.message.content").String())
 	require.Equal(t, int64(4), gjson.Get(rec.Body.String(), "usage.completion_tokens_details.reasoning_tokens").Int())
 }
-

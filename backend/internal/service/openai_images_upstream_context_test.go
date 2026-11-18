@@ -152,4 +152,3 @@ func TestDetachUpstreamContextSemantics(t *testing.T) {
 		require.NoError(t, detached.Err())
 	})
 }
-

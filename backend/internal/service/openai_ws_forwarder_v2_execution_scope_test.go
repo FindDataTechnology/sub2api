@@ -199,4 +199,3 @@ func TestOpenAIGatewayService_Forward_WSv2_ExecutionScopeUsesOriginalIdentity(t 
 	_, boundC := stateStore.GetSessionTurnState(groupID, scopeC)
 	require.True(t, boundC, "客户端自带线程标识时，键必须与按原始报文算出的一致，不受账号 namespace 改写影响")
 }
-

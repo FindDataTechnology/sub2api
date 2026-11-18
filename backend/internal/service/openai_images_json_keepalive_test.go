@@ -280,4 +280,3 @@ func waitForOpenAIImagesJSONKeepalive(t *testing.T, c *gin.Context) {
 		return k.started
 	}, time.Second, time.Millisecond)
 }
-

@@ -656,4 +656,3 @@ func TestIsOpenAIAlphaSearchEndpointUnsupported(t *testing.T) {
 	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(oauth, http.StatusNotFound))
 	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(nil, http.StatusNotFound))
 }
-
