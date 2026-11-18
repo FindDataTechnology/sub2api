@@ -51,7 +51,8 @@ gh run list --repo Wei-Shaw/sub2api --workflow CI --limit 3
 - `golangci-lint` 的失败：那是**我们自己的代码**（`internal/lanes/`、`account_queue.go` 等），
   必须修，不得登记到这里。
 - `Security Scan` 的依赖漏洞：需逐个评估是升依赖还是登记 exception（见 `.github/audit-exceptions.yml`）。
-- 集成测试失败：fork 的凭据加密改造与上游测试不兼容，已在 `merge-upstream-v0-2-23` 修完。
+- 集成测试失败：**原先**是 fork 的凭据加密改造与上游测试不兼容（已在 `merge-upstream-v0-2-23` 修完
+  那一批）；**现在**剩下的 `TestAccountRepoSuite` 快照同步冲突见下方「已知债务」。
 
 ## 已知债务（fork 侧，非上游）
 
