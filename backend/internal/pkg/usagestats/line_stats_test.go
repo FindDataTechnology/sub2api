@@ -51,7 +51,7 @@ func TestAggregateLinesKeepsUnknownSegsVisible(t *testing.T) {
 		{KeyName: "lex-a", Requests: 1, ActualCost: 1},
 		// 这两个是**真的**未登记段：`特价`/`openrouter` 已于 2026-11-15 归入「自有平台」，
 		// `fd-memory` 已于 2026-11-16 归入「记忆 fd-memory」——所以未知样本用同族里
-		// 仍然没有归属的 `fd-crawler-automation`（属另一个用户 internal-user@example.invalid）。
+		// 仍然没有归属的 `fd-crawler-automation`（属另一个用户 acct-2@example.invalid）。
 		// 这条用例自己的教训：**拿「当前恰好未登记」的键当未知样本，归因表一改它就在测别的东西**
 		// （2026-11-16 上产时正是它把「fd-memory 已归位」抓了出来）。
 		{KeyName: "fd-crawler-automation", Requests: 2, ActualCost: 2},

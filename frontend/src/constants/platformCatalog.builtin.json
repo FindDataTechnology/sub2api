@@ -281,31 +281,31 @@
     },
     {
       "id": "siliconflow",
-      "display_name": "SiliconFlow 硅基流动",
+      "display_name": "SiliconFlow",
       "gateway": "lane",
       "cn_provider": false
     },
     {
       "id": "serpapi",
-      "display_name": "SerpAPI 搜索",
+      "display_name": "SerpAPI",
       "gateway": "lane",
       "cn_provider": false
     },
     {
       "id": "openainext",
-      "display_name": "OpenAI-Next 聚合",
+      "display_name": "OpenAI-Next",
       "gateway": "lane",
       "cn_provider": false
     },
     {
       "id": "doubao",
-      "display_name": "豆包语音 火山引擎",
+      "display_name": "Doubao Voice (Volcengine)",
       "gateway": "lane",
       "cn_provider": false
     },
     {
       "id": "tencent",
-      "display_name": "腾讯云语音",
+      "display_name": "Tencent Cloud Voice",
       "gateway": "lane",
       "cn_provider": false
     }

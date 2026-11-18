@@ -173,7 +173,7 @@ func TestScopedAdminList_ModelMappingWithoutPlaintextColumn(t *testing.T) {
 		}}},
 	})
 
-	list, total, err := repo.ScopedAdminList(principalCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "")
+	list, total, err := repo.ScopedAdminList(principalCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "", 0)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
 	require.Len(t, list, 1)
@@ -182,7 +182,7 @@ func TestScopedAdminList_ModelMappingWithoutPlaintextColumn(t *testing.T) {
 		list[0].Credentials, "只保留字符串值，且只回传 model_mapping（api_key 不外带）")
 
 	// 同上：表是按 ent schema 建的，明文列已不存在，无需再"清空"。
-	list, total, err = repo.ScopedAdminList(principalCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "")
+	list, total, err = repo.ScopedAdminList(principalCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "", 0)
 	require.NoError(t, err, "明文列不存在时也必须能列出 —— 映射只能来自密文解密")
 	require.Equal(t, int64(1), total)
 	require.Equal(t, map[string]any{"model_mapping": map[string]string{"claude-3": "gpt-4o"}},

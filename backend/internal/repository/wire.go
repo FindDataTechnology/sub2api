@@ -66,6 +66,8 @@ func ProvideSchedulerCache(rdb *redis.Client, cfg *config.Config) service.Schedu
 // ProviderSet is the Wire provider set for all repositories
 var ProviderSet = wire.NewSet(
 	NewUserRepository,
+	NewMCPOAuthRepository,
+	// 用 Crypto 版：明文列已在迁移 251 drop，API key 只能解密密文列。
 	NewAPIKeyRepositoryCrypto,
 	NewGroupRepository,
 	NewAdminGroupRepository,

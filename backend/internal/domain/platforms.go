@@ -73,11 +73,16 @@ var platformList = []PlatformSpec{
 	// 登记后进入「所有平台」类列表（账号管理面下拉即达=复用既有账号管理形态）；
 	// 也会出现在分组平台下拉——误建 chat 分组会走默认网关失败，属可恢复误配
 	//（词元单管理员，风险受控）；车道池取数=ListSchedulableByPlatform。
-	{ID: PlatformSiliconFlow, DisplayName: "SiliconFlow 硅基流动", Gateway: PlatformGatewayLane},
-	{ID: PlatformSerpAPI, DisplayName: "SerpAPI 搜索", Gateway: PlatformGatewayLane},
-	{ID: PlatformOpenAINext, DisplayName: "OpenAI-Next 聚合", Gateway: PlatformGatewayLane},
-	{ID: PlatformDoubao, DisplayName: "豆包语音 火山引擎", Gateway: PlatformGatewayLane},
-	{ID: PlatformTencent, DisplayName: "腾讯云语音", Gateway: PlatformGatewayLane},
+	// DisplayName 刻意**不含中文**：平台展示名没有 i18n 通道（前端直接读
+	// display_name），而管理台英文界面有"不得出现 CJK"的断言
+	// （AdminAccessKeysSettings.i18n.spec.ts 的资源标签扫描）。中文厂名放到
+	// `DisplayNameCN` 之外的 i18n 通道是后续事；先把跨语言可读性修好（2026-11-18
+	// merge-upstream-v0-2-23 引入上游该断言时抓到）。
+	{ID: PlatformSiliconFlow, DisplayName: "SiliconFlow", Gateway: PlatformGatewayLane},
+	{ID: PlatformSerpAPI, DisplayName: "SerpAPI", Gateway: PlatformGatewayLane},
+	{ID: PlatformOpenAINext, DisplayName: "OpenAI-Next", Gateway: PlatformGatewayLane},
+	{ID: PlatformDoubao, DisplayName: "Doubao Voice (Volcengine)", Gateway: PlatformGatewayLane},
+	{ID: PlatformTencent, DisplayName: "Tencent Cloud Voice", Gateway: PlatformGatewayLane},
 }
 
 var platformIndex = func() map[string]int {

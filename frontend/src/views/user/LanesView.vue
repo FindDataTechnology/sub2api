@@ -61,7 +61,7 @@
 
       <section>
         <h2 class="mb-3 text-base font-semibold text-gray-900 dark:text-white">{{ t('lanes.exampleTitle') }}</h2>
-        <p class="mb-3 text-sm text-gray-600 dark:text-gray-300">{{ t('lanes.exampleNote', { apiKey: 'ciyuan-...', base: 'https://token.example.com' }) }}</p>
+        <p class="mb-3 text-sm text-gray-600 dark:text-gray-300">{{ t('lanes.exampleNote', { apiKey: 'ciyuan-...', base: exampleBase }) }}</p>
         <pre class="overflow-x-auto rounded-lg bg-gray-900 px-4 py-4 text-xs leading-6 text-gray-100 dark:bg-dark-950">{{ examples }}</pre>
       </section>
     </div>
@@ -81,6 +81,9 @@ const rows = [
   { laneKey: 'lanes.rows.audioStt.lane', endpoint: 'POST /v1/audio/transcriptions', protocolKey: 'lanes.rows.audioStt.protocol', billingKey: 'lanes.rows.audioStt.billing', shapeKey: 'lanes.shapes.asr' },
   { laneKey: 'lanes.rows.audioTts.lane', endpoint: 'POST /v1/audio/speech', protocolKey: 'lanes.rows.audioTts.protocol', billingKey: 'lanes.rows.audioTts.billing', shapeKey: 'lanes.shapes.tts' },
 ]
+
+// 示例里的 base 取当前站点 origin，不写死任何部署域名（公开仓不得含内部域名）。
+const exampleBase = typeof window !== 'undefined' ? window.location.origin : 'https://your-gateway.example.com'
 
 const examples = computed(() =>
   [
@@ -103,6 +106,6 @@ const examples = computed(() =>
     `curl -X POST {base}/v1/audio/speech \\`,
     `  -H "Authorization: Bearer {apiKey}" -H "Content-Type: application/json" \\`,
     `  -d '{"input":"你好，壹座","voice":"FunAudioLLM/CosyVoice2-0.5B:alex"}' --output out.mp3`,
-  ].join('\n').split('{base}').join('https://token.example.com').split('{apiKey}').join('ciyuan-...')
+  ].join('\n').split('{base}').join(exampleBase).split('{apiKey}').join('ciyuan-...')
 )
 </script>

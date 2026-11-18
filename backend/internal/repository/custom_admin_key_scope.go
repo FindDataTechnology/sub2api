@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -17,16 +18,47 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.PaginationParams, platform, kind, status, search string) ([]service.Account, int64, error) {
+func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.PaginationParams, platform, kind, status, search string, groupID int64) ([]service.Account, int64, error) {
 	principal := adminaccess.FromContext(ctx)
 	if principal == nil {
 		return nil, 0, fmt.Errorf("缺少受限身份")
 	}
-	alternatives := scopedAdminAccountPredicates(principal.Policy, "accounts.read")
+	readPolicy := principal.Policy
+	if groupID > 0 {
+		readPolicy.Rules = nil
+		for _, rule := range principal.Policy.RulesFor("accounts.read") {
+			if rule.AllGroups || slices.Contains(rule.GroupIDs, groupID) {
+				readPolicy.Rules = append(readPolicy.Rules, rule)
+			}
+		}
+	}
+	alternatives := scopedAdminAccountPredicates(readPolicy, "accounts.read")
 	if len(alternatives) == 0 {
 		return []service.Account{}, 0, nil
 	}
-	q := r.accountListFilteredQuery(platform, kind, status, search, 0, "").Where(dbaccount.Or(alternatives...))
+	q := r.accountListFilteredQuery(platform, kind, status, "", groupID, "").Where(dbaccount.Or(alternatives...))
+	if search != "" {
+		matches := []dbpredicate.Account{dbaccount.NameContainsFold(search)}
+		identityScope := scopedAdminAccountPredicates(principal.Policy, "accounts.identity.read")
+		if len(identityScope) > 0 {
+			// 上游 v0.2.23 起支持「按邮箱搜索」，原实现查两处：
+			// `credentials->>'email'` 与 `extra->>'email'`。
+			// **前一处在迁移 251 后不存在**（明文列已 drop），SQL 直接表达不出；
+			// 后一处仍然可用（extra 未加密），故保留 —— 它不是降级，是唯一可 SQL 化的那一半。
+			//
+			// 想按凭据里的邮箱搜，只能先解密再筛，而那是分页后的行、不是全表；
+			// 强行做会把「按 id 分页」变成「解全部候选再分页」。真有此需求时按
+			// `credentials_meta` 白名单扩键（见 account_credentials_crypto.go 的
+			// credentialMetaWhitelist 与其"必须保持极窄"的约束）再谈，不在这里偷偷加解密路径。
+			email := dbpredicate.Account(func(s *entsql.Selector) {
+				s.Where(entsql.P(func(b *entsql.Builder) {
+					b.WriteString("lower(" + s.C(dbaccount.FieldExtra) + "->>'email') = ").Arg(strings.ToLower(search))
+				}))
+			})
+			matches = append(matches, dbaccount.And(dbaccount.Or(identityScope...), email))
+		}
+		q.Where(dbaccount.Or(matches...))
+	}
 	total, err := q.Clone().Count(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -35,10 +67,16 @@ func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.Pa
 	// drop 明文列之后那条聚合会运行期报错，所以改成**解密后取值**。
 	// **只选密文列，明文列一次都不碰** —— 上游守卫的原意是"这个面不读凭据"，
 	// 而读整份明文的成本/风险都高于读密文（后者 drop 之后也仍然存在）。
+	//
+	// 时间类字段（expires_at / rate_limit_reset_at / overload_until /
+	// temp_unschedulable_until）是上游 v0.2.23 新增到本列表的展示字段：它们是
+	// 独立列、不是凭据子键，直接 SELECT 即可，无需解密。
 	models, err := q.Offset(p.Offset()).Limit(p.Limit()).Order(dbaccount.ByID()).
 		Select(dbaccount.FieldID, dbaccount.FieldName, dbaccount.FieldNotes,
 			dbaccount.FieldPlatform, dbaccount.FieldType, dbaccount.FieldStatus,
 			dbaccount.FieldSchedulable, dbaccount.FieldConcurrency, dbaccount.FieldPriority,
+			dbaccount.FieldExpiresAt, dbaccount.FieldRateLimitResetAt,
+			dbaccount.FieldOverloadUntil, dbaccount.FieldTempUnschedulableUntil,
 			dbaccount.FieldCredentialsEncrypted).
 		All(ctx)
 	if err != nil {
@@ -68,7 +106,99 @@ func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.Pa
 		if len(mapping) > 0 {
 			outCredentials = map[string]any{"model_mapping": mapping}
 		}
-		accounts = append(accounts, service.Account{ID: m.ID, Name: m.Name, Notes: m.Notes, Platform: m.Platform, Type: m.Type, Status: m.Status, Schedulable: m.Schedulable, Concurrency: m.Concurrency, Priority: m.Priority, GroupIDs: groups, Credentials: outCredentials})
+		accounts = append(accounts, service.Account{ID: m.ID, Name: m.Name, Notes: m.Notes,
+			Platform: m.Platform, Type: m.Type, Status: m.Status, Schedulable: m.Schedulable,
+			Concurrency: m.Concurrency, Priority: m.Priority, GroupIDs: groups,
+			Credentials: outCredentials, ExpiresAt: m.ExpiresAt,
+			RateLimitResetAt: m.RateLimitResetAt, OverloadUntil: m.OverloadUntil,
+			TempUnschedulableUntil: m.TempUnschedulableUntil})
+	}
+	// 身份字段只为本页逐行鉴权通过的账户批量投影，不加载完整凭证或 extra。
+	identityIDs := make([]int64, 0, len(accounts))
+	identityAccounts := make(map[int64]*service.Account)
+	for i := range accounts {
+		a := &accounts[i]
+		if principal.Policy.AllowsAccount("accounts.identity.read", adminaccess.Account{ID: a.ID, GroupIDs: a.GroupIDs, Type: a.Type, Platform: a.Platform}) {
+			identityIDs = append(identityIDs, a.ID)
+			identityAccounts[a.ID] = a
+		}
+	}
+	if len(identityIDs) > 0 {
+		// 身份三字段（email / plan_type / subscription_expires_at）都在凭据密文里，
+		// 明文列已在迁移 251 drop —— 原先的 SQL 聚合 `credentials->'email'` 取不到，
+		// 改为**解密后按白名单取键**。只取这三把，其余凭据子键
+		//（access_token / refresh_token / api_key …）不进返回值：本投影存在的理由
+		// 就是「给邮箱不给令牌」。
+		//
+		// extra 列未加密，仍按上游原样取（它只放 UI 展示用的邮箱副本）。
+		identRows, err := r.client.Account.Query().Where(dbaccount.IDIn(identityIDs...)).
+			Select(dbaccount.FieldID, dbaccount.FieldCreatedAt, dbaccount.FieldExtra,
+				dbaccount.FieldCredentialsEncrypted).
+			All(ctx)
+		if err != nil {
+			return nil, 0, err
+		}
+		for _, row := range identRows {
+			a := identityAccounts[row.ID]
+			if a == nil {
+				continue
+			}
+			creds, perr := r.credentialsFromEntity(row)
+			if perr != nil {
+				// 解不开时该行不给身份字段，但留痕——否则「管理端看不到邮箱」
+				// 会变成查不出原因的现象（与上面 model_mapping 同口径）。
+				logger.LegacyPrintf("repository.scopedadmin",
+					"[ScopedAdminList] cannot resolve identity for account=%d: %v", row.ID, perr)
+			} else {
+				for _, key := range []string{"email", "plan_type", "subscription_expires_at"} {
+					v, ok := creds[key]
+					if !ok {
+						continue
+					}
+					if a.Credentials == nil {
+						a.Credentials = make(map[string]any, 3)
+					}
+					a.Credentials[key] = v
+				}
+			}
+			if email, ok := row.Extra["email"]; ok {
+				if a.Extra == nil {
+					a.Extra = make(map[string]any, 1)
+				}
+				a.Extra["email"] = email
+			}
+			a.CreatedAt = row.CreatedAt
+		}
+	}
+	// 仅为本页已获额度权限的账户批量加载三个周额度快照字段。
+	usageIDs := make([]int64, 0, len(accounts))
+	usageAccounts := make(map[int64]*service.Account)
+	for i := range accounts {
+		a := &accounts[i]
+		if principal.Policy.AllowsAccount("accounts.usage.read", adminaccess.Account{ID: a.ID, GroupIDs: a.GroupIDs, Type: a.Type, Platform: a.Platform}) {
+			usageIDs = append(usageIDs, a.ID)
+			usageAccounts[a.ID] = a
+		}
+	}
+	if len(usageIDs) > 0 {
+		var snapshots []struct {
+			ID    int64           `json:"id"`
+			Extra json.RawMessage `json:"extra"`
+		}
+		err := r.client.Account.Query().Where(dbaccount.IDIn(usageIDs...)).Select(dbaccount.FieldID).
+			Aggregate(func(s *entsql.Selector) string {
+				extra := s.C(dbaccount.FieldExtra)
+				return "jsonb_strip_nulls(jsonb_build_object('codex_usage_updated_at', " + extra + "->'codex_usage_updated_at', 'codex_7d_used_percent', " + extra + "->'codex_7d_used_percent', 'codex_7d_reset_at', " + extra + "->'codex_7d_reset_at')) AS extra"
+			}).Scan(ctx, &snapshots)
+		if err != nil {
+			return nil, 0, err
+		}
+		for _, snapshot := range snapshots {
+			// 合并到已有 extra，保留独立身份权限允许读取的邮箱。
+			if err := json.Unmarshal(snapshot.Extra, &usageAccounts[snapshot.ID].Extra); err != nil {
+				return nil, 0, err
+			}
+		}
 	}
 	return accounts, int64(total), nil
 }
