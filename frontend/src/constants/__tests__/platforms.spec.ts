@@ -73,7 +73,7 @@ describe('platform catalog with a newly registered platform', () => {
     expect(CONCRETE_PLATFORM_OPTIONS.map((option) => option.label)).toEqual([
       'Anthropic', 'OpenAI', 'Gemini', 'Antigravity', 'Grok',
       'Kimi', 'Zhipu GLM', 'DeepSeek', 'MiniMax', 'OpenCode', 'TypeSafe / Jev', 'Command Code', 'Cline',
-      'SiliconFlow 硅基流动', 'SerpAPI 搜索', 'OpenAI-Next 聚合', '豆包语音 火山引擎', '腾讯云语音'
+      'SiliconFlow', 'SerpAPI', 'OpenAI-Next', 'Doubao Voice (Volcengine)', 'Tencent Cloud Voice'
     ])
     expect(platformLabel('zhipu')).toBe('Zhipu GLM')
     expect(platformLabel('composite')).toBe('Composite')

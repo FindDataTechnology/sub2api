@@ -1351,7 +1351,7 @@ func TestOIDCRedirectURLForRequestAliasWhitelist(t *testing.T) {
 	})
 
 	t.Run("别名大小写不敏感但返回值原文", func(t *testing.T) {
-		got := oidcRedirectURLForRequest(newCtx("ROUTER.FindDataTech.Cloud"), cfg)
+		got := oidcRedirectURLForRequest(newCtx("ROUTER.Example.COM"), cfg)
 		require.Equal(t, routerCallback, got)
 	})
 

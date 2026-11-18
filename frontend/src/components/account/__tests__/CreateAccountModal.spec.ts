@@ -706,11 +706,11 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const labels = (testid: string) =>
       wrapper.get(`[data-testid="${testid}"]`).findAll('button').map(button => button.text().trim())
     expect(labels('platform-row-lanes')).toEqual([
-      'SiliconFlow 硅基流动',
-      'SerpAPI 搜索',
-      'OpenAI-Next 聚合',
-      '豆包语音 火山引擎',
-      '腾讯云语音',
+      'SiliconFlow',
+      'SerpAPI',
+      'OpenAI-Next',
+      'Doubao Voice (Volcengine)',
+      'Tencent Cloud Voice',
     ])
   })
 
