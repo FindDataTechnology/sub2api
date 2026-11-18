@@ -3480,7 +3480,13 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 
 	if len(setClauses) == 0 {
-		return 0, nil
+		// 只改凭据（没有任何别的列）时，主 UPDATE 无事可做，但**凭据合并仍须执行**。
+		// 早退会让 BulkUpdate 静默变成 no-op：调用方拿到 rows=0，"看起来成功"，
+		// 实际什么都没写（2026-11-18 真库实测：`expected "new_value", actual nil`）。
+		if !mergeCredentials {
+			return 0, nil
+		}
+		return r.bulkMergeCredentialsOnly(ctx, ids, updates.Credentials)
 	}
 
 	setClauses = append(setClauses, "updated_at = NOW()")
@@ -3573,6 +3579,50 @@ type accountGroupQueryOptions struct {
 	schedulable          bool
 	ignoreTransientState bool
 	platforms            []string // 允许的多个平台，空切片表示不进行平台过滤
+}
+
+
+// bulkMergeCredentialsOnly 处理「只改凭据、没有别的列」的批量更新。
+//
+// 主 UPDATE 在这种情形下 setClauses 为空，但不能因此跳过凭据合并：
+// mergeAccountCredentialsInTx 是唯一的写路径，跳过即静默 no-op。
+// 返回受影响行数（与主 UPDATE 口径一致：只数实际存在的行）。
+func (r *accountRepository) bulkMergeCredentialsOnly(ctx context.Context, ids []int64, delta map[string]any) (int64, error) {
+	if len(ids) == 0 || len(delta) == 0 {
+		return 0, nil
+	}
+	exec := r.sql
+	var tx *dbent.Tx
+	if contextTx := dbent.TxFromContext(ctx); contextTx != nil {
+		exec = contextTx.Client()
+	} else if r.client != nil {
+		var txErr error
+		tx, txErr = r.client.Tx(ctx)
+		if txErr != nil && !errors.Is(txErr, dbent.ErrTxStarted) {
+			return 0, txErr
+		}
+		if tx != nil {
+			defer func() { _ = tx.Rollback() }()
+			ctx = dbent.NewTxContext(ctx, tx)
+			exec = tx.Client()
+		}
+	}
+	if err := mergeAccountCredentialsInTx(ctx, exec, r.cryptorOrNil(), ids, delta); err != nil {
+		return 0, err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
+	}
+	// 计数与主 UPDATE 同口径：只数未被软删的行。
+	var affected int64
+	if err := exec.QueryRowContext(ctx,
+		`SELECT count(*) FROM accounts WHERE id = ANY($1) AND deleted_at IS NULL`,
+		pq.Array(ids)).Scan(&affected); err != nil {
+		return 0, err
+	}
+	return affected, nil
 }
 
 func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID int64, opts accountGroupQueryOptions) ([]service.Account, error) {

@@ -1730,20 +1730,7 @@ func (s *AccountRepoSuite) TestBulkUpdate_MergeCredentials() {
 
 	got, gerr := s.repo.GetByID(s.ctx, a1.ID)
 	s.Require().NoError(gerr, "GetByID after BulkUpdate")
-	if got == nil {
-		s.FailNow("GetByID returned nil account")
-	}
-	// 诊断：BulkUpdate 之后库里到底有什么
-	var diagEnc *string
-	var diagHash *string
-	diagRows, derr := s.repo.sql.QueryContext(s.ctx,
-		`SELECT credentials_encrypted, credentials_hash FROM accounts WHERE id=$1`, a1.ID)
-	s.Require().NoError(derr, "diag query")
-	defer func() { _ = diagRows.Close() }()
-	s.Require().True(diagRows.Next())
-	s.Require().NoError(diagRows.Scan(&diagEnc, &diagHash), "diag scan")
-	s.T().Logf("DIAG after BulkUpdate: encNil=%v hash=%v gotCreds=%+v",
-		diagEnc == nil, diagHash != nil, got.Credentials)
+	s.Require().NotNil(got)
 	s.Require().Equal("value", got.Credentials["existing"])
 	s.Require().Equal("new_value", got.Credentials["new_key"])
 }
