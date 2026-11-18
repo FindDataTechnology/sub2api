@@ -1402,7 +1402,7 @@ func TestGrokOAuthConditionalMutationRollsBackWhenOutboxInsertFails(t *testing.T
 		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM scheduler_outbox WHERE account_id = $1", account.ID)
 		_ = client.Account.DeleteOneID(account.ID).Exec(context.Background())
 	})
-	repo := newAccountRepositoryWithSQLCrypto(client, &failAtomicSchedulerOutboxSQLExecutor{sqlExecutor: integrationDB}, nil, credentialTestEncryptor(s.T()))
+	repo := newAccountRepositoryWithSQLCrypto(client, &failAtomicSchedulerOutboxSQLExecutor{sqlExecutor: integrationDB}, nil, credentialTestEncryptor(t))
 
 	applied, err := repo.SetGrokOAuthErrorIfCredentialsUnchanged(
 		context.Background(),
