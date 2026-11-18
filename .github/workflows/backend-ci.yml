@@ -9,7 +9,11 @@ permissions:
 
 jobs:
   shell:
-    runs-on: macos-15
+    # fork 偏离上游：原为 macos-15。该 job 只做 `/bin/bash -n` 语法检查（6 个脚本），
+    # 纯语法解析不依赖 macOS 运行时，ubuntu 上等价；而公开仓的 macOS runner
+    # 并发槽位极少且按 10 倍分钟计费，占着它会让整条 CI 排队 5–15 分钟。
+    # 合流时若上游改这几行，保留本注释并按 ubuntu 解。
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - name: Check deployment scripts
