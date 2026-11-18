@@ -1,7 +1,9 @@
 # ciyuan-upstream-sync Specification
 
 ## Purpose
-TBD - created by archiving change merge-upstream-v0-2-19. Update Purpose after archive.
+规定词元 fork 消纳上游 sub2api 版本的合流纪律：fork 不变量在上游合流后必须保全、快照版本号与迁移编号
+碰撞时的处理规则、出片滚版链的可追溯性，以及把「定期跟上游」从人工记忆升级为可失败检查（窗口触发、
+缝点集合不扩大、归档前 tasks 勾账）。
 
 ## Requirements
 
