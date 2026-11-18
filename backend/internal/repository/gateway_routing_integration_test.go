@@ -24,7 +24,7 @@ func (s *GatewayRoutingSuite) SetupTest() {
 	s.ctx = context.Background()
 	tx := testEntTx(s.T())
 	s.client = tx.Client()
-	s.accountRepo = newAccountRepositoryWithSQLCrypto(s.client, tx, credentialTestEncryptor(t))
+	s.accountRepo = newAccountRepositoryWithSQLCrypto(s.client, tx, nil, credentialTestEncryptor(t))
 }
 
 func TestGatewayRoutingSuite(t *testing.T) {

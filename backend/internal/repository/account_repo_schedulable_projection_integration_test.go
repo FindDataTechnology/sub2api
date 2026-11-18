@@ -15,7 +15,7 @@ func TestListSchedulableAccountLoadsMatchesListSchedulable(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
 	client := tx.Client()
-	repo := newAccountRepositoryWithSQLCrypto(client, tx, credentialTestEncryptor(t))
+	repo := newAccountRepositoryWithSQLCrypto(client, tx, nil, credentialTestEncryptor(t))
 	now := time.Now()
 	past := now.Add(-time.Hour)
 	future := now.Add(time.Hour)

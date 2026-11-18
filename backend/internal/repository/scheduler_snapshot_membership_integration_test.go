@@ -19,7 +19,7 @@ func TestSchedulerSnapshotConfiguredMembership(t *testing.T) {
 			ctx := context.Background()
 			tx := testEntTx(t)
 			client := tx.Client()
-			repo := newAccountRepositoryWithSQLCrypto(client, tx, credentialTestEncryptor(t))
+			repo := newAccountRepositoryWithSQLCrypto(client, tx, nil, credentialTestEncryptor(t))
 			group := mustCreateGroup(t, client, &service.Group{Name: "snapshot-pool", Platform: platform})
 			other := mustCreateGroup(t, client, &service.Group{Name: "snapshot-other", Platform: platform})
 			future, past := time.Now().Add(time.Hour), time.Now().Add(-time.Hour)
