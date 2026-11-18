@@ -177,6 +177,89 @@ func (h *APIKeyHandler) GetByID(c *gin.Context) {
 	response.Success(c, dto.APIKeyFromService(key).Localized(c.GetHeader("Accept-Language")))
 }
 
+// State 回报该 key 的容量状态：库里的配置、鉴权链实际看到的值、运行时在飞数、
+// 以及"配置是否已生效"。
+//
+// 存在理由：认证快照有 L1(15s)/L2(300s) 缓存，改完 concurrency 后运维只能等 15 秒猜。
+// 这个端点把"猜"变成"看"。
+// GET /api/v1/keys/:id/state
+func (h *APIKeyHandler) State(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	keyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid key ID")
+		return
+	}
+
+	state, err := h.apiKeyService.GetKeyCapacityState(c.Request.Context(), keyID, middleware2.CapacityGate())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	// 越权返回 404（不泄露存在性），与 GetByID 一致
+	if state == nil {
+		response.NotFound(c, "API key not found")
+		return
+	}
+	owner, gerr := h.apiKeyService.GetByID(c.Request.Context(), keyID)
+	if gerr != nil || owner == nil || owner.UserID != subject.UserID {
+		response.NotFound(c, "API key not found")
+		return
+	}
+
+	response.Success(c, state)
+}
+
+// Stability 回报该 key 的**基线**（新 key 从同类群体继承，带置信度）与**稳定性**
+// （成功率/p95/限流占比/活跃时段）。
+//
+// 存在理由：用户问「平台侧怎么快速统计出某个新 key 的基础情况」和「key 的稳定性」。
+// 口径纪律：成功率分母含失败（否则恒 100%）；无数据给 null 不给 0/1。
+// GET /api/v1/keys/:id/stability?window=1h|24h|7d
+func (h *APIKeyHandler) Stability(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	keyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid key ID")
+		return
+	}
+
+	window, lookback, okWindow := service.ParseKeyUsageWindow(c.Query("window"))
+	if !okWindow {
+		response.BadRequest(c, "Invalid window, use 1h|24h|7d")
+		return
+	}
+
+	key, err := h.apiKeyService.GetByID(c.Request.Context(), keyID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	// 越权返回 404（不泄露存在性），与 GetByID / State 一致
+	if key == nil || key.UserID != subject.UserID {
+		response.NotFound(c, "API key not found")
+		return
+	}
+
+	view, err := h.apiKeyService.GetKeyStability(c.Request.Context(), key, window, lookback)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, view)
+}
+
 // Create handles creating a new API key
 // POST /api/v1/api-keys
 func (h *APIKeyHandler) Create(c *gin.Context) {

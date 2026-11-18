@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -19,11 +21,73 @@ import (
 
 const maxAPIKeyAuthorizationHeaderBytes = service.MaxAPIKeyCredentialBytes + 128
 
+// capacityGate 是 key 容量闸（add-key-capacity-contract）。
+// 用包级注入而不是改构造函数签名：本中间件的构造点被大量测试使用，
+// 改签名会把无关测试一起卷进改动面。nil = 未装配 = fail-open（限流器故障不得全站 429）。
+var capacityGate *service.KeyCapacityGate
+
+// SetCapacityGate 由路由装配层在启动时注入一次。
+func SetCapacityGate(g *service.KeyCapacityGate) { capacityGate = g }
+
+// CapacityGate 暴露当前装配的容量闸，供 state 端点回报运行时计数（只读）。
+func CapacityGate() *service.KeyCapacityGate { return capacityGate }
+
+// timeNow 是生效时刻判定的时钟。单独抽出来是为了测试能控制"现在"，
+// 而不是靠 sleep 或依赖真实时间（后者在 CI 上必然间歇性失败）。
+var timeNow = time.Now
+
+// KeyCapacityExemptPath 报告该路径是否豁免 key 容量闸。
+//
+// 只有任务车道的提交/查询路径豁免：它们本身不产生上游在飞调用。
+// 执行（重放）走 /v1/chat/completions，不在豁免名单里，因此席位语义不变。
+//
+// 两条防绕过：
+//  1. 精确路径 + 边界前缀，杜绝 /v1/ciyuan/tasks-evil 这类同前缀的误放行；
+//  2. **非规范路径一律不豁免**（path.Clean 必须原样返回）——否则
+//     /v1/ciyuan/tasks/../chat/completions 这种穿越形态会拿着任务路径的豁免
+//     去跑真正的上游调用，等于把席位契约作废。
+func KeyCapacityExemptPath(p string) bool {
+	if p == "" || path.Clean(p) != p {
+		return false
+	}
+	if p == "/v1/ciyuan/tasks" {
+		return true
+	}
+	return strings.HasPrefix(p, "/v1/ciyuan/tasks/")
+}
+
+// acquireKeyCapacity 返回 (是否放行, 归因层, release)。
+// 归因层取值 "" | "user" | "key" —— 直接进错误体，让调用方知道是哪一层挡的。
+func acquireKeyCapacity(apiKey *service.APIKey) (bool, string, func()) {
+	if apiKey == nil || capacityGate == nil {
+		return true, "", func() {}
+	}
+	var userID int64
+	var poolCap int
+	if apiKey.User != nil {
+		userID = apiKey.User.ID
+		poolCap = apiKey.User.Concurrency
+	}
+	decision, release := capacityGate.TryAcquireCapacity(userID, apiKey.ID, poolCap, apiKey.ConcurrencyLimit)
+	if !decision.Allowed {
+		return false, decision.Scope, func() {}
+	}
+	return true, "", release
+}
+
 // statusClientClosedRequest 非标准状态码 499：客户端在响应前断开。
 const statusClientClosedRequest = 499
 
 // NewAPIKeyAuthMiddleware 创建 API Key 认证中间件
 func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) APIKeyAuthMiddleware {
+	// 容量闸在此处装配一次（add-key-capacity-contract）。
+	// 计数为进程内原子：生产 1 副本（2026-11-11 实测）故精确；扩副本必须换共享计数，
+	// 否则各实例独立计数会把总量放大 N 倍——届时 state 端点须回报计数后端类型。
+	// 对账：每 30s 扫一次，60s 未释放即判泄漏并回收（**并记账**，泄漏要可见）。
+	gate := service.NewKeyCapacityGate()
+	gate.StartCapacityReconciler(30*time.Second, 60*time.Second)
+	SetCapacityGate(gate)
+
 	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg))
 }
 
@@ -134,6 +198,17 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			apiKey.Status != service.StatusAPIKeyQuotaExhausted {
 			MarkIngressRejected(c, IngressRejectAPIKeyDisabled)
 			AbortWithError(c, 401, "API_KEY_DISABLED", "API key is disabled")
+			return
+		}
+
+		// 生效时刻（add-key-capacity-contract）：未到点 → 拒绝，但**不用 401**。
+		// 401 语义是"身份无效"，而这里是身份有效、只是时间未到；用 401 会让调用方
+		// 误判为 key 无效去重新申请，实际只需等到点。
+		// 放在状态检查之后、IP 检查之前：时间问题比 IP 问题更基础，且不泄露 IP 策略。
+		if apiKey.EffectiveAt != nil && timeNow().Before(*apiKey.EffectiveAt) {
+			MarkIngressRejected(c, IngressRejectKeyNotEffective)
+			AbortWithError(c, http.StatusForbidden, "KEY_NOT_YET_EFFECTIVE",
+				"API key is not yet effective (effective_at="+apiKey.EffectiveAt.UTC().Format(time.RFC3339)+")")
 			return
 		}
 
@@ -272,6 +347,33 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 					AbortWithError(c, 403, "INSUFFICIENT_BALANCE", "Insufficient account balance")
 					return
 				}
+			}
+		}
+
+		// ── 6.5 容量闸（add-key-capacity-contract）───────────────────
+		// 位置：鉴权通过之后、分组 allowlist 门之前 —— key 的容量契约先于分组语义，
+		// 且超限时不该先做一次 allowlist 计算。
+		//
+		// 两级硬顶：池（user.Concurrency）与该 key 硬顶（ConcurrencyLimit）。
+		// 0 表示不限（沿用本仓 quota=0 语义），故存量 key（0/0）行为零变化。
+		// fail-open：闸未装配时放行 —— 限流器故障不得变成全站 429。
+		//
+		// release 必须 defer：泄漏一次该 key 就永久少一个并发且外部看不出来。
+		// 回收由周期性对账兜底，并在 state 端点回报 leaked 计数（泄漏要可见）。
+		//
+		// 豁免：任务车道的**提交**请求本身不产生上游在飞调用（它只写一行任务或
+		// 同步重放一次）。若不豁免，池满时 mode=defer 的提交也会被 429 ——
+		// 而那正是最需要排队的时候。真正执行时走的是 /v1/chat/completions，
+		// 那条路径照常占席位，故席位语义不变。
+		if !KeyCapacityExemptPath(c.Request.URL.Path) {
+			if allowed, scope, release := acquireKeyCapacity(apiKey); !allowed {
+				MarkIngressRejected(c, IngressRejectKeyCapacity)
+				AbortWithError(c, http.StatusTooManyRequests,
+					"KEY_CAPACITY_EXCEEDED",
+					"key capacity exceeded (scope="+scope+"); retry later")
+				return
+			} else {
+				defer release()
 			}
 		}
 

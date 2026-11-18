@@ -679,6 +679,41 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it('keeps a lane account minimal: empty base URL clears the override instead of writing a default', async () => {
+    const account = buildAccount()
+    account.platform = 'serpapi'
+    account.name = 'SerpAPI pool'
+    account.credentials = { api_key: 'sk-serp' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    // 装载：无存储 base_url 时输入框留空（不落 anthropic 默认值）。
+    expect((wrapper.get('[data-testid="edit-base-url"]').element as HTMLInputElement).value).toBe('')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(credentials).toEqual({ api_key: 'sk-serp' })
+    expect(credentials).not.toHaveProperty('base_url')
+  })
+
+  it('submits an explicit lane base_url override when filled', async () => {
+    const account = buildAccount()
+    account.platform = 'serpapi'
+    account.name = 'SerpAPI pool'
+    account.credentials = { api_key: 'sk-serp', base_url: 'https://serpapi.example.com' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="edit-base-url"]').setValue('https://serpapi.example.com/v2')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toEqual({
+      api_key: 'sk-serp',
+      base_url: 'https://serpapi.example.com/v2',
+    })
+  })
+
   it('preserves adaptive Kimi Responses endpoint on submit', async () => {
     const account = buildAccount()
     account.platform = 'kimi'

@@ -148,3 +148,4 @@ func assertConvertedReasoningPrice(t *testing.T, result *OpenAIForwardResult, wa
 	require.InDelta(t, wantCost, cost.TotalCost, 1e-12)
 	require.InDelta(t, wantCost, cost.ActualCost, 1e-12)
 }
+

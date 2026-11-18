@@ -53,15 +53,21 @@ type APIKey struct {
 	ExpiresAt *time.Time // Expiration time (nil = never expires)
 
 	// Rate limit fields
-	RateLimit5h   float64    // Rate limit in USD per 5h (0 = unlimited)
-	RateLimit1d   float64    // Rate limit in USD per 1d (0 = unlimited)
-	RateLimit7d   float64    // Rate limit in USD per 7d (0 = unlimited)
-	Usage5h       float64    // Used amount in current 5h window
-	Usage1d       float64    // Used amount in current 1d window
-	Usage7d       float64    // Used amount in current 7d window
-	Window5hStart *time.Time // Start of current 5h window
-	Window1dStart *time.Time // Start of current 1d window
-	Window7dStart *time.Time // Start of current 7d window
+	RateLimit5h float64 // Rate limit in USD per 5h (0 = unlimited)
+	RateLimit1d float64 // Rate limit in USD per 1d (0 = unlimited)
+	RateLimit7d float64 // Rate limit in USD per 7d (0 = unlimited)
+
+	// 容量契约（add-key-capacity-contract）：user 是池（User.Concurrency），key 是池内席位。
+	ConcurrencyRequest int        // 保底：额度保留，不保证饱和吞吐（0 = 不占席位）
+	ConcurrencyLimit   int        // 该 key 硬顶（0 = 不额外限制，可借支到池上限）
+	RPMLimit           int        // 每分钟请求上限（0 = 不限）
+	EffectiveAt        *time.Time // 生效时刻（nil = 立即生效）
+	Usage5h            float64    // Used amount in current 5h window
+	Usage1d            float64    // Used amount in current 1d window
+	Usage7d            float64    // Used amount in current 7d window
+	Window5hStart      *time.Time // Start of current 5h window
+	Window1dStart      *time.Time // Start of current 1d window
+	Window7dStart      *time.Time // Start of current 7d window
 }
 
 func (k *APIKey) IsActive() bool {

@@ -280,7 +280,10 @@ func compositeRouteFromInput(groupID int64, input CompositeRouteInput) (*Composi
 func defaultModelsListCandidateIDs(platform string) []string {
 	switch platform {
 	case PlatformOpenAI:
-		return openai.DefaultModelIDs()
+		// fork 补丁（ciyuan-v0.2.16-16）：聚合渠道的 /v1/models 不列 embedding
+		// 模型，默认集也没有——后台白名单候选里因此永远选不到 embedding，
+		// 分组也就无法在管理台上配置它。仅在默认集基础上补齐，既有条目零改动。
+		return withEmbeddingModels(openai.DefaultModelIDs())
 	case PlatformGemini:
 		ids := make([]string, 0, len(geminicli.DefaultModels))
 		for _, model := range geminicli.DefaultModels {
@@ -448,6 +451,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	videoPrice720P := normalizePrice(input.VideoPrice720P)
 	videoPrice1080P := normalizePrice(input.VideoPrice1080P)
 	webSearchPricePerCall := normalizePrice(input.WebSearchPricePerCall)
+	rerankPricePerRequest := normalizePrice(input.RerankPricePerRequest)
 	searchPricePer1k := normalizePrice(input.SearchPricePer1k)
 	audioRealtimePricePerMin := normalizePrice(input.AudioRealtimePricePerMin)
 	audioTTSPricePerMillionChars := normalizePrice(input.AudioTTSPricePerMillionChars)
@@ -614,6 +618,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		VideoPrice1080P:                 videoPrice1080P,
 		VideoModelPrices:                NormalizeVideoModelPrices(input.VideoModelPrices),
 		WebSearchPricePerCall:           webSearchPricePerCall,
+		RerankPricePerRequest:           rerankPricePerRequest,
 		SearchPricePer1k:                searchPricePer1k,
 		AudioRealtimePricePerMin:        audioRealtimePricePerMin,
 		AudioTTSPricePerMillionChars:    audioTTSPricePerMillionChars,
@@ -950,6 +955,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.WebSearchPricePerCall != nil {
 		group.WebSearchPricePerCall = normalizePrice(input.WebSearchPricePerCall)
+	}
+	if input.RerankPricePerRequest != nil {
+		group.RerankPricePerRequest = normalizePrice(input.RerankPricePerRequest)
 	}
 	if input.SearchPricePer1k != nil {
 		group.SearchPricePer1k = normalizePrice(input.SearchPricePer1k)

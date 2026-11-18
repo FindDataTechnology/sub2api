@@ -53,11 +53,11 @@ func TestUpdateOpenCodeGoUsageSnapshotWritesSnapshotOnly(t *testing.T) {
 	require.NoError(t, err)
 	mock.ExpectBegin()
 	mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
-		WithArgs("key", account.ID, account.Platform, account.Type, string(credentials), nil).
+		WithArgs(credentialAPIKeyHashHex("key"), account.ID, account.Platform, account.Type, nil, credentialHashOfRawJSON(string(credentials))).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "anchor_matches", "auto_refresh", "snapshot"}).
 			AddRow(account.ID, true, `true`, string(previousSnapshotJSON)))
 	mock.ExpectExec(`(?s)`+regexp.QuoteMeta("UPDATE accounts")).
-		WithArgs(string(expectedPayload), "key", sqlmock.AnyArg()).
+		WithArgs(string(expectedPayload), credentialAPIKeyHashHex("key"), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	repo := newAccountRepositoryWithSQL(client, nil, nil)
@@ -187,7 +187,7 @@ func TestLockAndMergeAccountProbeExtraPreservesOpenCodeGoManagedState(t *testing
 			credentials, err := json.Marshal(normalizeJSONMap(tt.account.Credentials))
 			require.NoError(t, err)
 			mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
-				WithArgs(tt.account.ID, tt.account.Platform, tt.account.Type, string(credentials), nil).
+				WithArgs(tt.account.ID, tt.account.Platform, tt.account.Type, string(credentials), nil, credentialAPIKeyHashArg(tt.account.Credentials), credentialHashHex(tt.account.Credentials)).
 				WillReturnRows(sqlmock.NewRows(openCodeGoMergeMockColumns()).
 					AddRow(false, false, tt.proxyUnchanged, nil, nil, nil, nil, nil, nil, tt.groupUnchanged, tt.databaseAuto, tt.databaseSnapshot, nil, nil))
 
@@ -218,13 +218,16 @@ func TestUpdateCredentialsOpenCodeGoIdentityChangeClearsManagedExtra(t *testing.
 	// opencode 清理分支必须文本上先于 ollama 分支出现，否则 opencode 行的
 	// api_key/base_url 变化会被先求值的 Ollama 分支遮蔽。
 	mock.ExpectExec(`(?s)UPDATE accounts.*- 'opencode_go_usage_auto_refresh'.*- 'opencode_go_usage_snapshot'.*- 'ollama_cloud_usage_session'`).
-		WithArgs(`{"api_key":"new-key","base_url":"https://opencode.ai/zen/go/v1"}`, int64(17)).
+		WithArgs(`{"api_key":"new-key","base_url":"https://opencode.ai/zen/go/v1"}`, int64(17), credentialAPIKeyHashHex("new-key"),
+			credentialHashOfJSONString(`{"api_key":"new-key","base_url":"https://opencode.ai/zen/go/v1"}`),
+			`{"base_url":"https://opencode.ai/zen/go/v1","has_refresh_token":false}`,
+			sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(17), nil, nil, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	repo := newAccountRepositoryWithSQL(client, nil, nil)
+	repo := newAccountRepositoryWithSQLCrypto(client, nil, nil, credentialTestEncryptor(t))
 
 	err := repo.UpdateCredentials(context.Background(), 17, map[string]any{
 		"api_key": "new-key", "base_url": "https://opencode.ai/zen/go/v1",
@@ -239,13 +242,16 @@ func TestUpdateCredentialsOpenCodeGoToOllamaCrossOverClearsManagedExtra(t *testi
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*opencode_go_usage_auto_refresh.*opencode_go_usage_snapshot`).
-		WithArgs(`{"api_key":"same-key","base_url":"https://ollama.com/v1"}`, int64(17)).
+		WithArgs(`{"api_key":"same-key","base_url":"https://ollama.com/v1"}`, int64(17), credentialAPIKeyHashHex("same-key"),
+			credentialHashOfJSONString(`{"api_key":"same-key","base_url":"https://ollama.com/v1"}`),
+			`{"base_url":"https://ollama.com/v1","has_refresh_token":false}`,
+			sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(17), nil, nil, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	repo := newAccountRepositoryWithSQL(client, nil, nil)
+	repo := newAccountRepositoryWithSQLCrypto(client, nil, nil, credentialTestEncryptor(t))
 
 	err := repo.UpdateCredentials(context.Background(), 17, map[string]any{
 		"api_key": "same-key", "base_url": "https://ollama.com/v1",
@@ -259,14 +265,17 @@ func TestUpdateCredentialsOpenCodeGoToOllamaCrossOverClearsManagedExtra(t *testi
 func TestUpdateCredentialsOpenCodeGoCleanupRequiresChangedCredentials(t *testing.T) {
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)UPDATE accounts.*CASE.*AND credentials IS DISTINCT FROM \$1::jsonb`).
-		WithArgs(`{"api_key":"same-key","base_url":"https://relay.example.com/v1"}`, int64(17)).
+	mock.ExpectExec(`(?s)UPDATE accounts.*CASE.*AND credentials_hash IS DISTINCT FROM \$4`).
+		WithArgs(`{"api_key":"same-key","base_url":"https://relay.example.com/v1"}`, int64(17), credentialAPIKeyHashHex("same-key"),
+			credentialHashOfJSONString(`{"api_key":"same-key","base_url":"https://relay.example.com/v1"}`),
+			`{"base_url":"https://relay.example.com/v1","has_refresh_token":false}`,
+			sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(17), nil, nil, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	repo := newAccountRepositoryWithSQL(client, nil, nil)
+	repo := newAccountRepositoryWithSQLCrypto(client, nil, nil, credentialTestEncryptor(t))
 
 	err := repo.UpdateCredentials(context.Background(), 17, map[string]any{
 		"api_key": "same-key", "base_url": "https://relay.example.com/v1",
@@ -278,7 +287,8 @@ func TestUpdateCredentialsOpenCodeGoCleanupRequiresChangedCredentials(t *testing
 
 func TestBulkUpdateOpenCodeGoIdentityCleanupIsValueConditional(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
-	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+	exec.queryRows = emptyCredentialQueryRows(t)
+	repo := newAccountRepositoryWithSQLCrypto(nil, exec, nil, credentialTestEncryptor(t))
 
 	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
 		Credentials: map[string]any{"api_key": "new-key"},
@@ -304,6 +314,7 @@ func TestBulkUpdateOpenCodeGoIdentityCleanupIsValueConditional(t *testing.T) {
 // 的 WHEN 携带 opencode 正则（与 Ollama 正则互斥），真实行为由 integration 测试覆盖。
 func TestBulkUpdateOpenCodeGoEligiblePredicateIncludesBaseURL(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	exec.queryRows = emptyCredentialQueryRows(t)
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	proxyID := int64(9)
@@ -326,7 +337,9 @@ func TestBulkUpdateOpenCodeGoEligiblePredicateIncludesBaseURL(t *testing.T) {
 	// 覆盖 opencode_go 平台与挂载白名单的 opencode 基址，使 Ollama 行无法命中。
 	require.Contains(t, firstWhen, "platform = 'opencode_go'")
 	require.Contains(t, firstWhen, "[oO][pP][eE][nN][cC][oO][dD][eE]")
-	require.Contains(t, firstWhen, "credentials ->> 'base_url'")
+	// 2.3：base_url 改从 credentials_meta 取（语义等价由真 PG 差分保证）
+	require.NotContains(t, firstWhen, "credentials ->> 'base_url'")
+	require.Contains(t, firstWhen, "credentials_meta ->> 'base_url'")
 	require.NotContains(t, firstWhen, "[oO][lL][lL][aA][mM][aA]")
 }
 
@@ -335,7 +348,8 @@ func TestBulkUpdateOpenCodeGoEligiblePredicateIncludesBaseURL(t *testing.T) {
 // OpenCode 状态；IS NOT TRUE 把 NULL 视为不匹配。
 func TestBulkUpdateOpenCodeGoBaseURLClauseIsNullSafe(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
-	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+	exec.queryRows = emptyCredentialQueryRows(t)
+	repo := newAccountRepositoryWithSQLCrypto(nil, exec, nil, credentialTestEncryptor(t))
 
 	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
 		Credentials: map[string]any{"base_url": nil},
@@ -345,7 +359,7 @@ func TestBulkUpdateOpenCodeGoBaseURLClauseIsNullSafe(t *testing.T) {
 	require.NotEmpty(t, exec.execQueries)
 	query := normalizeSQLWhitespace(exec.execQueries[0])
 	require.Contains(t, query, "IS NOT TRUE")
-	require.NotContains(t, query, "AND NOT btrim(credentials ->> 'base_url')")
+	require.NotContains(t, query, "AND NOT btrim(credentials_meta ->> 'base_url')")
 }
 
 // F6 回归：SQL 正则与 service.isOpenCodeGoBaseURL 对齐，接受显式默认端口 :443 与
@@ -420,6 +434,7 @@ func TestOpenCodeGoUsagePlatformWhitelistMatchesServicePredicate(t *testing.T) {
 
 func TestBulkUpdateOpenCodeGoProxyChangeClearsSnapshotOnly(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	exec.queryRows = emptyCredentialQueryRows(t)
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	proxyID := int64(9)
@@ -460,13 +475,16 @@ func TestUpdateCredentialsOpenCodeBranchPrecedesOllamaBranch(t *testing.T) {
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)UPDATE accounts.*platform = 'opencode_go'.*\[oO\]\[lL\]\[lL\]\[aA\]\[mM\]\[aA\]`).
-		WithArgs(`{"api_key":"new-key","base_url":"https://opencode.ai/zen/go/v1"}`, int64(17)).
+		WithArgs(`{"api_key":"new-key","base_url":"https://opencode.ai/zen/go/v1"}`, int64(17), credentialAPIKeyHashHex("new-key"),
+			credentialHashOfJSONString(`{"api_key":"new-key","base_url":"https://opencode.ai/zen/go/v1"}`),
+			`{"base_url":"https://opencode.ai/zen/go/v1","has_refresh_token":false}`,
+			sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(17), nil, nil, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	repo := newAccountRepositoryWithSQL(client, nil, nil)
+	repo := newAccountRepositoryWithSQLCrypto(client, nil, nil, credentialTestEncryptor(t))
 
 	err := repo.UpdateCredentials(context.Background(), 17, map[string]any{
 		"api_key": "new-key", "base_url": "https://opencode.ai/zen/go/v1",
@@ -484,7 +502,7 @@ func TestUpdateCredentialsOpenCodeBranchPrecedesOllamaBranch(t *testing.T) {
 // unit 通道此前完全拦不住，这里以文本形态钉死该 COALESCE 表达式。
 func TestOpenCodeGoUsageEligibleSQLDefaultsMissingAccountModeToGo(t *testing.T) {
 	require.Contains(t, opencodeGoUsageEligibleSQL,
-		"COALESCE(btrim(credentials ->> 'account_mode') <> 'zen', true)")
+		"COALESCE(btrim(credentials_meta ->> 'account_mode') <> 'zen', true)")
 }
 
 // Go 侧「默认 Go」契约的表驱动钉死：account_mode 只有 trim 后恰好等于 "zen" 才是

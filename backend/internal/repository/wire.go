@@ -67,7 +67,8 @@ func ProvideSchedulerCache(rdb *redis.Client, cfg *config.Config) service.Schedu
 var ProviderSet = wire.NewSet(
 	NewUserRepository,
 	NewMCPOAuthRepository,
-	NewAPIKeyRepository,
+	// 用 Crypto 版：明文列已在迁移 251 drop，API key 只能解密密文列。
+	NewAPIKeyRepositoryCrypto,
 	NewGroupRepository,
 	NewAdminGroupRepository,
 	NewCompositeModelRouteRepository,
@@ -80,7 +81,9 @@ var ProviderSet = wire.NewSet(
 	NewPromoCodeRepository,
 	NewAnnouncementRepository,
 	NewAnnouncementReadRepository,
-	NewUsageLogRepository,
+	// 用 Crypto 版：用量日志附带 APIKey 供展示，drop 明文列后明文只能从密文解。
+	// 换这里而不是只手改 wire_gen —— 否则下一次 `wire` 会把它覆盖回旧构造。
+	NewUsageLogRepositoryCrypto,
 	NewUsageBillingRepository,
 	NewBatchImageRepository,
 	NewGeminiCachedContentRepository,

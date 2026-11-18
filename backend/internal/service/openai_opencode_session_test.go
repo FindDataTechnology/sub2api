@@ -532,3 +532,5 @@ func TestOpenCodeSessionIsNotForwardedToOtherUpstreams(t *testing.T) {
 		})
 	}
 }
+
+func (u *openCodeSessionHTTPUpstream) RecordAIMDResult(accountID int64, statusCode int) {}

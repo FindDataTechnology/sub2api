@@ -38,8 +38,8 @@ func (s *ProxyExpirySuite) mkProxy(name, mode string, expiresAt *time.Time, back
 func (s *ProxyExpirySuite) mkAccountWithProxy(proxyID int64) int64 {
 	var id int64
 	err := scanSingleRow(s.ctx, s.tx, `
-		INSERT INTO accounts (name, platform, type, credentials, extra, status, proxy_id, created_at, updated_at)
-		VALUES ($1,'claude','api','{}','{}','active',$2,NOW(),NOW()) RETURNING id`,
+		INSERT INTO accounts (name, platform, type, credentials_meta, extra, status, proxy_id, created_at, updated_at)
+		VALUES ($1,'claude','api','{}'::jsonb,'{}','active',$2,NOW(),NOW()) RETURNING id`,
 		[]any{"acc-" + time.Now().Format("150405.000000"), proxyID}, &id)
 	s.Require().NoError(err)
 	return id

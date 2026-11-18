@@ -14,7 +14,22 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 28 // v28: group force_openai_ultrafast (OpenAI gateway reads it from ctx)
+// v26: merge-upstream-v0-2-19 —— 双侧曾在各自 v25 各加一字段，合并体快照形状=两字段并集，
+// 必须再升一版：v25(fork)=group rerank_price_per_request（ciyuan lanes, tasks 3.1；v24 旧快照 rerank 价 nil 计零），
+// v25(upstream)=group image_count_billing 开关（image 端点按张计费）。
+// 线上现存 v25 快照（仅 rerank 价）按版本不符拒绝重建，防止 image_count_billing 读 nil。
+//
+// v27: add-key-capacity-contract —— APIKeyAuthSnapshot 新增 key 容量契约四字段
+// （concurrency_request / concurrency_limit / rpm_limit / effective_at）。
+// 不升这一版的后果是**静默失效**：线上存量 v26 快照按旧形状反序列化，新字段零值参与准入，
+// 于是「限了 5 并发」的 key 表现为不限——与 v25 撞号那次同型，故必须升。
+//
+// v29: merge-upstream-v0-2-23 —— 又一次双侧同号不同义：fork v27 加的是 key 容量契约四字段，
+// 上游 v27=group require_privacy_set、v28=group force_openai_ultrafast。合并体快照形状=
+// 「容量四字段 ∪ 隐私门 ∪ Ultrafast 门」，故在双方之上再升一版（v28 已被上游占用）。
+// 不升的后果同 v25/v27 两例：线上存量 v28 快照按旧形状反序列化，
+// force_openai_ultrafast 与容量四字段各自读零值——Ultrafast 门静默失效、并发上限静默失效。
+const apiKeyAuthSnapshotVersion = 29
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -350,6 +365,12 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 		RateLimit5h: apiKey.RateLimit5h,
 		RateLimit1d: apiKey.RateLimit1d,
 		RateLimit7d: apiKey.RateLimit7d,
+
+		ConcurrencyRequest: apiKey.ConcurrencyRequest,
+		ConcurrencyLimit:   apiKey.ConcurrencyLimit,
+		RPMLimit:           apiKey.RPMLimit,
+		EffectiveAt:        apiKey.EffectiveAt,
+
 		User: APIKeyAuthUserSnapshot{
 			ID:                         apiKey.User.ID,
 			Status:                     apiKey.User.Status,
@@ -405,6 +426,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			VideoPrice1080P:                 apiKey.Group.VideoPrice1080P,
 			VideoModelPrices:                NormalizeVideoModelPrices(apiKey.Group.VideoModelPrices),
 			WebSearchPricePerCall:           apiKey.Group.WebSearchPricePerCall,
+			RerankPricePerRequest:           apiKey.Group.RerankPricePerRequest,
 			SearchPricePer1k:                apiKey.Group.SearchPricePer1k,
 			AudioRealtimePricePerMin:        apiKey.Group.AudioRealtimePricePerMin,
 			AudioTTSPricePerMillionChars:    apiKey.Group.AudioTTSPricePerMillionChars,
@@ -463,6 +485,12 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 		RateLimit5h: snapshot.RateLimit5h,
 		RateLimit1d: snapshot.RateLimit1d,
 		RateLimit7d: snapshot.RateLimit7d,
+
+		ConcurrencyRequest: snapshot.ConcurrencyRequest,
+		ConcurrencyLimit:   snapshot.ConcurrencyLimit,
+		RPMLimit:           snapshot.RPMLimit,
+		EffectiveAt:        snapshot.EffectiveAt,
+
 		User: &User{
 			ID:                          snapshot.User.ID,
 			Status:                      snapshot.User.Status,
@@ -511,6 +539,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			VideoPrice1080P:                 snapshot.Group.VideoPrice1080P,
 			VideoModelPrices:                NormalizeVideoModelPrices(snapshot.Group.VideoModelPrices),
 			WebSearchPricePerCall:           snapshot.Group.WebSearchPricePerCall,
+			RerankPricePerRequest:           snapshot.Group.RerankPricePerRequest,
 			SearchPricePer1k:                snapshot.Group.SearchPricePer1k,
 			AudioRealtimePricePerMin:        snapshot.Group.AudioRealtimePricePerMin,
 			AudioTTSPricePerMillionChars:    snapshot.Group.AudioTTSPricePerMillionChars,

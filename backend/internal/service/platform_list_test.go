@@ -17,17 +17,36 @@ var (
 		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
 		PlatformCommandCode,
 		PlatformCline,
+		// 词元车道平台（fork 登记，Gateway=lane）：进全量/快照/组合匹配清单，
+		// 不入多协议供应商。
+		domain.PlatformSiliconFlow,
+		domain.PlatformSerpAPI,
+		domain.PlatformOpenAINext,
+		domain.PlatformDoubao,
+		domain.PlatformTencent,
 	}
 	legacySchedulerSnapshotPlatforms = []string{
 		PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok,
 		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
 		PlatformCommandCode,
 		PlatformCline,
+		// 词元车道平台（Gateway=lane）不进调度快照（空桶白耗内存，fork 排除）。
 	}
-	legacyCompositeMatchingPlatforms = legacySchedulerSnapshotPlatforms
-	legacyMultiProtocolProviders     = []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformCommandCode, PlatformCline}
-	platformProbeValues              = append(append([]string{}, legacyAllPlatforms...), PlatformComposite, "", "moonshot", "Kimi", "openai ", "glm", "bogus")
-	platformProbeAccountTypes        = []string{AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken, AccountTypeUpstream, ""}
+	// composite 匹配仍含车道平台（定价/映射回退遍历，CompositePrecedencePlatformIDs 全量）。
+	legacyCompositeMatchingPlatforms = []string{
+		PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok,
+		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
+		PlatformCommandCode,
+		PlatformCline,
+		domain.PlatformSiliconFlow,
+		domain.PlatformSerpAPI,
+		domain.PlatformOpenAINext,
+		domain.PlatformDoubao,
+		domain.PlatformTencent,
+	}
+	legacyMultiProtocolProviders = []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformCommandCode, PlatformCline}
+	platformProbeValues          = append(append([]string{}, legacyAllPlatforms...), PlatformComposite, "", "moonshot", "Kimi", "openai ", "glm", "bogus")
+	platformProbeAccountTypes    = []string{AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken, AccountTypeUpstream, ""}
 )
 
 func legacyIsCNProvider(platform string) bool {

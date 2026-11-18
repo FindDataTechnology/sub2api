@@ -2371,6 +2371,28 @@ func (s *BillingService) CalculateWebSearchCost(callCount int, groupPrice *float
 	}
 }
 
+// CalculateRerankCost 词元 rerank 车道按请求计费（fork 缝点，台账§二
+// 「分组价目」）。groupPrice: 分组配置的每请求价格；nil=未配置→按 0 计费
+// （调用方负责告警，开放车道前须配置）；0=显式免费。倍率口径同 web search。
+func (s *BillingService) CalculateRerankCost(requestCount int, groupPrice *float64, rateMultiplier float64) *CostBreakdown {
+	if requestCount <= 0 {
+		return &CostBreakdown{}
+	}
+	unitPrice := 0.0
+	if groupPrice != nil && *groupPrice > 0 {
+		unitPrice = *groupPrice
+	}
+	totalCost := unitPrice * float64(requestCount)
+	if rateMultiplier < 0 {
+		rateMultiplier = 0
+	}
+	return &CostBreakdown{
+		TotalCost:   totalCost,
+		ActualCost:  totalCost * rateMultiplier,
+		BillingMode: string(BillingModePerRequest),
+	}
+}
+
 // CalculateSearchCost bills search/tool invocations (e.g. web_search) per 1k calls.
 // groupPricePer1k: nil → defaultSearchPricePer1k; explicit 0 → free; >0 → that rate.
 func (s *BillingService) CalculateSearchCost(numCalls int, groupPricePer1k *float64, rateMultiplier float64) *CostBreakdown {

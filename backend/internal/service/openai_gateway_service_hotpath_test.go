@@ -1103,3 +1103,4 @@ func TestSanitizeEmptyBase64InputImagesInOpenAIBody(t *testing.T) {
 		]
 	}`, string(body))
 }
+

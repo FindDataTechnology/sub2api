@@ -155,3 +155,51 @@ func TestSchedulerMetadataAccountDropsInvalidUpstreamBillingProbe(t *testing.T) 
 		require.NotContains(t, metadata.Extra, service.UpstreamBillingProbeExtraKey)
 	}
 }
+
+// 调度投影必须保留 OpenAI 端点能力集（openai_capabilities）。
+//
+// 候选过滤 isAccountRequestCompatibleReason 用 SupportsOpenAIEndpointCapability
+// 判定能力（capability_mismatch），该判定读 credentials["openai_capabilities"]，
+// 且缺键时对「显式配置过能力集的账号」返回 false。投影裁掉该键会让 Seedance
+// 视频账号在候选阶段被恒久排除（生产实证 2026-10-15：sched:acc 全量快照带
+// seedance、sched:meta 投影为空 → 每次请求 503 seedance_no_eligible_account）。
+func TestFilterSchedulerCredentialsKeepsOpenAIEndpointCapabilities(t *testing.T) {
+	filtered := filterSchedulerCredentials(map[string]any{
+		"api_key":  "k",
+		"base_url": "https://api.openai-next.com/seedance",
+		service.OpenAIEndpointCapabilitiesCredentialKey: []any{"seedance"},
+		// 投影仍不得携带任何未登记键。
+		"service_account_json": "secret",
+	})
+
+	require.Equal(t, []any{"seedance"}, filtered[service.OpenAIEndpointCapabilitiesCredentialKey],
+		"投影裁掉能力集会让显式配置能力的账号被误判 capability_mismatch")
+	require.NotContains(t, filtered, "service_account_json")
+}
+
+// 走完整序列化路径复证：投影往返后账号仍应被判定支持 seedance。
+func TestBuildSchedulerMetadataAccount_KeepsSeedanceCapability(t *testing.T) {
+	account := service.Account{
+		ID:       4401,
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "k",
+			"base_url": "https://api.openai-next.com/seedance",
+			service.OpenAIEndpointCapabilitiesCredentialKey: []any{"seedance"},
+		},
+	}
+	require.True(t, account.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilitySeedance),
+		"前置条件：源账号声明了 seedance 能力")
+
+	// 走一遍真实的序列化/反序列化路径（写入 sched:meta 再由 decodeCachedAccount 读回）。
+	payload, err := json.Marshal(buildSchedulerMetadataAccount(account))
+	require.NoError(t, err)
+	var restored service.Account
+	require.NoError(t, json.Unmarshal(payload, &restored))
+
+	require.True(t, restored.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilitySeedance),
+		"投影裁掉能力集会让 Seedance 账号在候选过滤阶段被恒久排除")
+	// 能力集是白名单语义：未声明的能力仍应被拒（防止把视频账号调度去接 chat）。
+	require.False(t, restored.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityChatCompletions))
+}

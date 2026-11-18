@@ -72,17 +72,43 @@ func (_u *APIKeyUpdate) SetNillableUserID(v *int64) *APIKeyUpdate {
 	return _u
 }
 
-// SetKey sets the "key" field.
-func (_u *APIKeyUpdate) SetKey(v string) *APIKeyUpdate {
-	_u.mutation.SetKey(v)
+// SetKeyHash sets the "key_hash" field.
+func (_u *APIKeyUpdate) SetKeyHash(v string) *APIKeyUpdate {
+	_u.mutation.SetKeyHash(v)
 	return _u
 }
 
-// SetNillableKey sets the "key" field if the given value is not nil.
-func (_u *APIKeyUpdate) SetNillableKey(v *string) *APIKeyUpdate {
+// SetNillableKeyHash sets the "key_hash" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableKeyHash(v *string) *APIKeyUpdate {
 	if v != nil {
-		_u.SetKey(*v)
+		_u.SetKeyHash(*v)
 	}
+	return _u
+}
+
+// ClearKeyHash clears the value of the "key_hash" field.
+func (_u *APIKeyUpdate) ClearKeyHash() *APIKeyUpdate {
+	_u.mutation.ClearKeyHash()
+	return _u
+}
+
+// SetKeyEncrypted sets the "key_encrypted" field.
+func (_u *APIKeyUpdate) SetKeyEncrypted(v string) *APIKeyUpdate {
+	_u.mutation.SetKeyEncrypted(v)
+	return _u
+}
+
+// SetNillableKeyEncrypted sets the "key_encrypted" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableKeyEncrypted(v *string) *APIKeyUpdate {
+	if v != nil {
+		_u.SetKeyEncrypted(*v)
+	}
+	return _u
+}
+
+// ClearKeyEncrypted clears the value of the "key_encrypted" field.
+func (_u *APIKeyUpdate) ClearKeyEncrypted() *APIKeyUpdate {
+	_u.mutation.ClearKeyEncrypted()
 	return _u
 }
 
@@ -249,6 +275,89 @@ func (_u *APIKeyUpdate) SetNillableExpiresAt(v *time.Time) *APIKeyUpdate {
 // ClearExpiresAt clears the value of the "expires_at" field.
 func (_u *APIKeyUpdate) ClearExpiresAt() *APIKeyUpdate {
 	_u.mutation.ClearExpiresAt()
+	return _u
+}
+
+// SetConcurrencyRequest sets the "concurrency_request" field.
+func (_u *APIKeyUpdate) SetConcurrencyRequest(v int) *APIKeyUpdate {
+	_u.mutation.ResetConcurrencyRequest()
+	_u.mutation.SetConcurrencyRequest(v)
+	return _u
+}
+
+// SetNillableConcurrencyRequest sets the "concurrency_request" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableConcurrencyRequest(v *int) *APIKeyUpdate {
+	if v != nil {
+		_u.SetConcurrencyRequest(*v)
+	}
+	return _u
+}
+
+// AddConcurrencyRequest adds value to the "concurrency_request" field.
+func (_u *APIKeyUpdate) AddConcurrencyRequest(v int) *APIKeyUpdate {
+	_u.mutation.AddConcurrencyRequest(v)
+	return _u
+}
+
+// SetConcurrencyLimit sets the "concurrency_limit" field.
+func (_u *APIKeyUpdate) SetConcurrencyLimit(v int) *APIKeyUpdate {
+	_u.mutation.ResetConcurrencyLimit()
+	_u.mutation.SetConcurrencyLimit(v)
+	return _u
+}
+
+// SetNillableConcurrencyLimit sets the "concurrency_limit" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableConcurrencyLimit(v *int) *APIKeyUpdate {
+	if v != nil {
+		_u.SetConcurrencyLimit(*v)
+	}
+	return _u
+}
+
+// AddConcurrencyLimit adds value to the "concurrency_limit" field.
+func (_u *APIKeyUpdate) AddConcurrencyLimit(v int) *APIKeyUpdate {
+	_u.mutation.AddConcurrencyLimit(v)
+	return _u
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (_u *APIKeyUpdate) SetRpmLimit(v int) *APIKeyUpdate {
+	_u.mutation.ResetRpmLimit()
+	_u.mutation.SetRpmLimit(v)
+	return _u
+}
+
+// SetNillableRpmLimit sets the "rpm_limit" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableRpmLimit(v *int) *APIKeyUpdate {
+	if v != nil {
+		_u.SetRpmLimit(*v)
+	}
+	return _u
+}
+
+// AddRpmLimit adds value to the "rpm_limit" field.
+func (_u *APIKeyUpdate) AddRpmLimit(v int) *APIKeyUpdate {
+	_u.mutation.AddRpmLimit(v)
+	return _u
+}
+
+// SetEffectiveAt sets the "effective_at" field.
+func (_u *APIKeyUpdate) SetEffectiveAt(v time.Time) *APIKeyUpdate {
+	_u.mutation.SetEffectiveAt(v)
+	return _u
+}
+
+// SetNillableEffectiveAt sets the "effective_at" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableEffectiveAt(v *time.Time) *APIKeyUpdate {
+	if v != nil {
+		_u.SetEffectiveAt(*v)
+	}
+	return _u
+}
+
+// ClearEffectiveAt clears the value of the "effective_at" field.
+func (_u *APIKeyUpdate) ClearEffectiveAt() *APIKeyUpdate {
+	_u.mutation.ClearEffectiveAt()
 	return _u
 }
 
@@ -545,9 +654,9 @@ func (_u *APIKeyUpdate) defaults() error {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *APIKeyUpdate) check() error {
-	if v, ok := _u.mutation.Key(); ok {
-		if err := apikey.KeyValidator(v); err != nil {
-			return &ValidationError{Name: "key", err: fmt.Errorf(`ent: validator failed for field "APIKey.key": %w`, err)}
+	if v, ok := _u.mutation.KeyHash(); ok {
+		if err := apikey.KeyHashValidator(v); err != nil {
+			return &ValidationError{Name: "key_hash", err: fmt.Errorf(`ent: validator failed for field "APIKey.key_hash": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.Name(); ok {
@@ -587,8 +696,17 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.DeletedAtCleared() {
 		_spec.ClearField(apikey.FieldDeletedAt, field.TypeTime)
 	}
-	if value, ok := _u.mutation.Key(); ok {
-		_spec.SetField(apikey.FieldKey, field.TypeString, value)
+	if value, ok := _u.mutation.KeyHash(); ok {
+		_spec.SetField(apikey.FieldKeyHash, field.TypeString, value)
+	}
+	if _u.mutation.KeyHashCleared() {
+		_spec.ClearField(apikey.FieldKeyHash, field.TypeString)
+	}
+	if value, ok := _u.mutation.KeyEncrypted(); ok {
+		_spec.SetField(apikey.FieldKeyEncrypted, field.TypeString, value)
+	}
+	if _u.mutation.KeyEncryptedCleared() {
+		_spec.ClearField(apikey.FieldKeyEncrypted, field.TypeString)
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
@@ -641,6 +759,30 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.ExpiresAtCleared() {
 		_spec.ClearField(apikey.FieldExpiresAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.ConcurrencyRequest(); ok {
+		_spec.SetField(apikey.FieldConcurrencyRequest, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedConcurrencyRequest(); ok {
+		_spec.AddField(apikey.FieldConcurrencyRequest, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ConcurrencyLimit(); ok {
+		_spec.SetField(apikey.FieldConcurrencyLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedConcurrencyLimit(); ok {
+		_spec.AddField(apikey.FieldConcurrencyLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.RpmLimit(); ok {
+		_spec.SetField(apikey.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRpmLimit(); ok {
+		_spec.AddField(apikey.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.EffectiveAt(); ok {
+		_spec.SetField(apikey.FieldEffectiveAt, field.TypeTime, value)
+	}
+	if _u.mutation.EffectiveAtCleared() {
+		_spec.ClearField(apikey.FieldEffectiveAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.RateLimit5h(); ok {
 		_spec.SetField(apikey.FieldRateLimit5h, field.TypeFloat64, value)
@@ -859,17 +1001,43 @@ func (_u *APIKeyUpdateOne) SetNillableUserID(v *int64) *APIKeyUpdateOne {
 	return _u
 }
 
-// SetKey sets the "key" field.
-func (_u *APIKeyUpdateOne) SetKey(v string) *APIKeyUpdateOne {
-	_u.mutation.SetKey(v)
+// SetKeyHash sets the "key_hash" field.
+func (_u *APIKeyUpdateOne) SetKeyHash(v string) *APIKeyUpdateOne {
+	_u.mutation.SetKeyHash(v)
 	return _u
 }
 
-// SetNillableKey sets the "key" field if the given value is not nil.
-func (_u *APIKeyUpdateOne) SetNillableKey(v *string) *APIKeyUpdateOne {
+// SetNillableKeyHash sets the "key_hash" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableKeyHash(v *string) *APIKeyUpdateOne {
 	if v != nil {
-		_u.SetKey(*v)
+		_u.SetKeyHash(*v)
 	}
+	return _u
+}
+
+// ClearKeyHash clears the value of the "key_hash" field.
+func (_u *APIKeyUpdateOne) ClearKeyHash() *APIKeyUpdateOne {
+	_u.mutation.ClearKeyHash()
+	return _u
+}
+
+// SetKeyEncrypted sets the "key_encrypted" field.
+func (_u *APIKeyUpdateOne) SetKeyEncrypted(v string) *APIKeyUpdateOne {
+	_u.mutation.SetKeyEncrypted(v)
+	return _u
+}
+
+// SetNillableKeyEncrypted sets the "key_encrypted" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableKeyEncrypted(v *string) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetKeyEncrypted(*v)
+	}
+	return _u
+}
+
+// ClearKeyEncrypted clears the value of the "key_encrypted" field.
+func (_u *APIKeyUpdateOne) ClearKeyEncrypted() *APIKeyUpdateOne {
+	_u.mutation.ClearKeyEncrypted()
 	return _u
 }
 
@@ -1036,6 +1204,89 @@ func (_u *APIKeyUpdateOne) SetNillableExpiresAt(v *time.Time) *APIKeyUpdateOne {
 // ClearExpiresAt clears the value of the "expires_at" field.
 func (_u *APIKeyUpdateOne) ClearExpiresAt() *APIKeyUpdateOne {
 	_u.mutation.ClearExpiresAt()
+	return _u
+}
+
+// SetConcurrencyRequest sets the "concurrency_request" field.
+func (_u *APIKeyUpdateOne) SetConcurrencyRequest(v int) *APIKeyUpdateOne {
+	_u.mutation.ResetConcurrencyRequest()
+	_u.mutation.SetConcurrencyRequest(v)
+	return _u
+}
+
+// SetNillableConcurrencyRequest sets the "concurrency_request" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableConcurrencyRequest(v *int) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetConcurrencyRequest(*v)
+	}
+	return _u
+}
+
+// AddConcurrencyRequest adds value to the "concurrency_request" field.
+func (_u *APIKeyUpdateOne) AddConcurrencyRequest(v int) *APIKeyUpdateOne {
+	_u.mutation.AddConcurrencyRequest(v)
+	return _u
+}
+
+// SetConcurrencyLimit sets the "concurrency_limit" field.
+func (_u *APIKeyUpdateOne) SetConcurrencyLimit(v int) *APIKeyUpdateOne {
+	_u.mutation.ResetConcurrencyLimit()
+	_u.mutation.SetConcurrencyLimit(v)
+	return _u
+}
+
+// SetNillableConcurrencyLimit sets the "concurrency_limit" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableConcurrencyLimit(v *int) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetConcurrencyLimit(*v)
+	}
+	return _u
+}
+
+// AddConcurrencyLimit adds value to the "concurrency_limit" field.
+func (_u *APIKeyUpdateOne) AddConcurrencyLimit(v int) *APIKeyUpdateOne {
+	_u.mutation.AddConcurrencyLimit(v)
+	return _u
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (_u *APIKeyUpdateOne) SetRpmLimit(v int) *APIKeyUpdateOne {
+	_u.mutation.ResetRpmLimit()
+	_u.mutation.SetRpmLimit(v)
+	return _u
+}
+
+// SetNillableRpmLimit sets the "rpm_limit" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableRpmLimit(v *int) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetRpmLimit(*v)
+	}
+	return _u
+}
+
+// AddRpmLimit adds value to the "rpm_limit" field.
+func (_u *APIKeyUpdateOne) AddRpmLimit(v int) *APIKeyUpdateOne {
+	_u.mutation.AddRpmLimit(v)
+	return _u
+}
+
+// SetEffectiveAt sets the "effective_at" field.
+func (_u *APIKeyUpdateOne) SetEffectiveAt(v time.Time) *APIKeyUpdateOne {
+	_u.mutation.SetEffectiveAt(v)
+	return _u
+}
+
+// SetNillableEffectiveAt sets the "effective_at" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableEffectiveAt(v *time.Time) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetEffectiveAt(*v)
+	}
+	return _u
+}
+
+// ClearEffectiveAt clears the value of the "effective_at" field.
+func (_u *APIKeyUpdateOne) ClearEffectiveAt() *APIKeyUpdateOne {
+	_u.mutation.ClearEffectiveAt()
 	return _u
 }
 
@@ -1345,9 +1596,9 @@ func (_u *APIKeyUpdateOne) defaults() error {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *APIKeyUpdateOne) check() error {
-	if v, ok := _u.mutation.Key(); ok {
-		if err := apikey.KeyValidator(v); err != nil {
-			return &ValidationError{Name: "key", err: fmt.Errorf(`ent: validator failed for field "APIKey.key": %w`, err)}
+	if v, ok := _u.mutation.KeyHash(); ok {
+		if err := apikey.KeyHashValidator(v); err != nil {
+			return &ValidationError{Name: "key_hash", err: fmt.Errorf(`ent: validator failed for field "APIKey.key_hash": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.Name(); ok {
@@ -1404,8 +1655,17 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	if _u.mutation.DeletedAtCleared() {
 		_spec.ClearField(apikey.FieldDeletedAt, field.TypeTime)
 	}
-	if value, ok := _u.mutation.Key(); ok {
-		_spec.SetField(apikey.FieldKey, field.TypeString, value)
+	if value, ok := _u.mutation.KeyHash(); ok {
+		_spec.SetField(apikey.FieldKeyHash, field.TypeString, value)
+	}
+	if _u.mutation.KeyHashCleared() {
+		_spec.ClearField(apikey.FieldKeyHash, field.TypeString)
+	}
+	if value, ok := _u.mutation.KeyEncrypted(); ok {
+		_spec.SetField(apikey.FieldKeyEncrypted, field.TypeString, value)
+	}
+	if _u.mutation.KeyEncryptedCleared() {
+		_spec.ClearField(apikey.FieldKeyEncrypted, field.TypeString)
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
@@ -1458,6 +1718,30 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if _u.mutation.ExpiresAtCleared() {
 		_spec.ClearField(apikey.FieldExpiresAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.ConcurrencyRequest(); ok {
+		_spec.SetField(apikey.FieldConcurrencyRequest, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedConcurrencyRequest(); ok {
+		_spec.AddField(apikey.FieldConcurrencyRequest, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.ConcurrencyLimit(); ok {
+		_spec.SetField(apikey.FieldConcurrencyLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedConcurrencyLimit(); ok {
+		_spec.AddField(apikey.FieldConcurrencyLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.RpmLimit(); ok {
+		_spec.SetField(apikey.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedRpmLimit(); ok {
+		_spec.AddField(apikey.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.EffectiveAt(); ok {
+		_spec.SetField(apikey.FieldEffectiveAt, field.TypeTime, value)
+	}
+	if _u.mutation.EffectiveAtCleared() {
+		_spec.ClearField(apikey.FieldEffectiveAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.RateLimit5h(); ok {
 		_spec.SetField(apikey.FieldRateLimit5h, field.TypeFloat64, value)

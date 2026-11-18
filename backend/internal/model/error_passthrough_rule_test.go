@@ -21,5 +21,10 @@ func TestAllPlatformsIncludesEveryConcretePlatform(t *testing.T) {
 		"typesafe",
 		"command_code",
 		"cline",
+		"siliconflow",
+		"serpapi",
+		"openainext",
+		"doubao",
+		"tencent",
 	}, AllPlatforms())
 }

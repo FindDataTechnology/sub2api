@@ -182,3 +182,4 @@ func assertGrokUpstreamKeepsOtherToolAndDropsViewImage(t *testing.T, body []byte
 	require.False(t, gjson.GetBytes(body, strings.Replace(pathTemplate, "%s", "view_image", 1)).Exists(), string(body))
 	require.True(t, gjson.GetBytes(body, strings.Replace(pathTemplate, "%s", "shell_command", 1)).Exists(), string(body))
 }
+

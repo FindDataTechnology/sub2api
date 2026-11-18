@@ -455,3 +455,4 @@ func TestHandleGrokAccountUpstreamError403ConfiguredUnmatchedKeepsDefaultCooldow
 	require.Equal(t, "grok access or entitlement denied", repo.lastTempUnschedReason)
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
+

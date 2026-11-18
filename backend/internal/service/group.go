@@ -64,6 +64,8 @@ type Group struct {
 	// Codex alpha/search 网页搜索单次价格（USD/次，仅 openai 平台使用）；
 	// nil 表示使用默认价 defaultWebSearchPricePerCall（官方 $10/1000 次）。
 	WebSearchPricePerCall *float64
+	// 词元 rerank 车道每请求价格（USD/次）；nil=未配置按 0 计费并告警。
+	RerankPricePerRequest *float64
 
 	// 搜索工具显式定价（per 1k calls）。
 	SearchPricePer1k *float64

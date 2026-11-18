@@ -91,6 +91,10 @@ type geminiMixedModelsUpstream struct {
 	body   string
 }
 
+// RecordAIMDResult: HTTPUpstream 新增的 AIMD 喂点。嵌入的 nil 接口会把该方法
+// 提升进方法集，生产代码一调即 nil panic——必须显式覆写为 no-op。
+func (u *geminiMixedModelsUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *geminiMixedModelsUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	return &http.Response{StatusCode: u.status, Header: http.Header{"Content-Type": {"application/json"}, "X-Request-Id": {"native-id"}}, Body: io.NopCloser(strings.NewReader(u.body))}, nil
 }

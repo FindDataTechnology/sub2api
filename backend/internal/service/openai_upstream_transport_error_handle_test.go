@@ -175,6 +175,9 @@ func (u *failingOpenAIHTTPUpstream) DoWithTLS(_ *http.Request, proxyURL string, 
 	return nil, u.err
 }
 
+// RecordAIMDResult: HTTPUpstream 口新增的 AIMD 喂点（2.2），本 fake 无状态 no-op。
+func (u *failingOpenAIHTTPUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 // A durable proxy/credential failure must (a) temporarily unschedule the account
 // so it stops being hammered, and (b) return a failover error so the handler
 // switches to a healthy account instead of writing a hard 502 itself.

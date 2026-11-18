@@ -797,3 +797,5 @@ func TestOpenAINativeFirstOutputFailoverKeepsAttemptHeadersPrivateAfterKeepalive
 		t.Fatal("first account writer did not exit after timeout")
 	}
 }
+
+func (u *blockingOpenAIResponseHeaderUpstream) RecordAIMDResult(accountID int64, statusCode int) {}

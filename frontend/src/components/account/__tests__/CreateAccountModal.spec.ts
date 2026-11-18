@@ -701,6 +701,82 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(labels('platform-row-aggregators')).toEqual(['OpenCode', 'Command Code', 'Cline'])
   })
 
+  it('groups the lane upstream platforms on their own row below the aggregators', () => {
+    const wrapper = mountModal()
+    const labels = (testid: string) =>
+      wrapper.get(`[data-testid="${testid}"]`).findAll('button').map(button => button.text().trim())
+    expect(labels('platform-row-lanes')).toEqual([
+      'SiliconFlow 硅基流动',
+      'SerpAPI 搜索',
+      'OpenAI-Next 聚合',
+      '豆包语音 火山引擎',
+      '腾讯云语音',
+    ])
+  })
+
+  it('creates a Tencent Cloud audio lane account with SecretId/SecretKey (no api_key)', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="platform-button-tencent"]').trigger('click')
+
+    // 腾讯云不渲染通用 API Key 输入，而是 SecretId/SecretKey/Region 三项
+    expect(wrapper.find('[data-testid="lane-tencent-secret-id"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="lane-tencent-secret-key"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="lane-tencent-region"]').exists()).toBe(true)
+
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('tencent audio')
+    await wrapper.get('[data-testid="lane-tencent-secret-id"]').setValue('AKIDtest')
+    await wrapper.get('[data-testid="lane-tencent-secret-key"]').setValue('k'.repeat(32))
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    const payload = createAccountMock.mock.calls[0]?.[0]
+    expect(payload?.platform).toBe('tencent')
+    expect(payload?.type).toBe('apikey')
+    expect(payload?.credentials).toEqual({
+      audio_protocol: 'tencent',
+      secret_id: 'AKIDtest',
+      secret_key: 'k'.repeat(32),
+      region: 'ap-guangzhou',
+    })
+  })
+
+  it('creates a lane account with only the API key and no base_url', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="platform-button-serpapi"]').trigger('click')
+    // 车道平台：base_url 留空 = 车道内置端点，输入框为空且无占位 URL。
+    const baseUrlInput = wrapper.get('[data-testid="api-key-base-url"]')
+    expect((baseUrlInput.element as HTMLInputElement).value).toBe('')
+    expect((baseUrlInput.element as HTMLInputElement).placeholder).toBe('')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('serpapi pool')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-serp')
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    const payload = createAccountMock.mock.calls[0]?.[0]
+    expect(payload?.platform).toBe('serpapi')
+    expect(payload?.type).toBe('apikey')
+    expect(payload?.credentials).toEqual({ api_key: 'sk-serp' })
+  })
+
+  it('creates a lane account with an explicit base_url override', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="platform-button-openainext"]').trigger('click')
+    await wrapper.get('[data-testid="api-key-base-url"]').setValue('https://api.openai-next.com')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('audio lane')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-audio')
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toEqual({
+      api_key: 'sk-audio',
+      base_url: 'https://api.openai-next.com',
+    })
+  })
+
   it('creates a Cline account without an account type and with only the Chat Completions endpoint', async () => {
     const wrapper = mountModal()
     await wrapper.get('[data-testid="platform-button-cline"]').trigger('click')

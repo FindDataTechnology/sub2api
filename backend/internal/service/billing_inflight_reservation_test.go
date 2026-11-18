@@ -493,7 +493,10 @@ func TestInflightEstimate_AccountMappingNoDBAndBoundedMemory(t *testing.T) {
 	runtime.KeepAlive(apiKey)
 	require.Zero(t, repo.dbCalls.Load(), "no direct DB query on the request path")
 	require.Equal(t, int64(n), snap.reads.Load(), "unpriced lookups read the scheduler snapshot only")
-	require.Less(t, int64(after.HeapAlloc)-int64(before.HeapAlloc), int64(8<<20), "no per-model cache growth")
+	// 8MB→9MB（fork，tasks 3.1）：车道平台登记+分组价目字段的合法增重让每模型
+	// 缓存基线上移 ~2.4%（CI 1.27.0 实测 8587240 越线）；守护本意=防每模型无界
+	// 增长，9MB 仍能捕获失控（ quadratic/泄漏级别）。
+	require.Less(t, int64(after.HeapAlloc)-int64(before.HeapAlloc), int64(9<<20), "no per-model cache growth")
 }
 
 // 无分组 API Key：使用调度器的未分组账号池，估算与计费回退的账号映射模型同口径。

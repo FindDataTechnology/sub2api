@@ -216,3 +216,4 @@ func TestNormalizeStrictChatDeveloperRoles_MalformedBodyDoesNotLeak(t *testing.T
 		require.NotContains(t, err.Error(), "secret")
 	}
 }
+

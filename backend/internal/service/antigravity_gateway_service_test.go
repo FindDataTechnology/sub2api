@@ -2013,6 +2013,10 @@ func generateLargeUnwrapJSON(minSize int) []byte {
 	return b
 }
 
+func (s *queuedHTTPUpstreamStub) RecordAIMDResult(accountID int64, statusCode int) {}
+
+func (s *httpUpstreamStub) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func TestAntigravityGatewayService_ForwardGemini_NonStreamPreservesFunctionCallAndThoughtSignature(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"Call get_weather for Tokyo."}]}],"tools":[{"functionDeclarations":[{"name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}]}]}`)

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
@@ -2127,7 +2128,8 @@ func TestMatchingPlatforms(t *testing.T) {
 		{"anthropic returns itself", PlatformAnthropic, []string{PlatformAnthropic}},
 		{"gemini returns itself", PlatformGemini, []string{PlatformGemini}},
 		{"openai returns itself", PlatformOpenAI, []string{PlatformOpenAI}},
-		{"composite returns concrete platforms", PlatformComposite, []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe, PlatformCommandCode, PlatformCline}},
+		// 词元车道平台（Gateway=lane）按展示序补入 composite 匹配清单。
+		{"composite returns concrete platforms", PlatformComposite, []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe, PlatformCommandCode, PlatformCline, domain.PlatformSiliconFlow, domain.PlatformSerpAPI, domain.PlatformOpenAINext, domain.PlatformDoubao, domain.PlatformTencent}},
 	}
 
 	for _, tt := range tests {

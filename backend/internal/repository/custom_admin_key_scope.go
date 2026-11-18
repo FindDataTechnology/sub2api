@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -14,6 +13,7 @@ import (
 	dbaccountgroup "github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	dbpredicate "github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -41,10 +41,18 @@ func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.Pa
 		matches := []dbpredicate.Account{dbaccount.NameContainsFold(search)}
 		identityScope := scopedAdminAccountPredicates(principal.Policy, "accounts.identity.read")
 		if len(identityScope) > 0 {
+			// 上游 v0.2.23 起支持「按邮箱搜索」，原实现查两处：
+			// `credentials->>'email'` 与 `extra->>'email'`。
+			// **前一处在迁移 251 后不存在**（明文列已 drop），SQL 直接表达不出；
+			// 后一处仍然可用（extra 未加密），故保留 —— 它不是降级，是唯一可 SQL 化的那一半。
+			//
+			// 想按凭据里的邮箱搜，只能先解密再筛，而那是分页后的行、不是全表；
+			// 强行做会把「按 id 分页」变成「解全部候选再分页」。真有此需求时按
+			// `credentials_meta` 白名单扩键（见 account_credentials_crypto.go 的
+			// credentialMetaWhitelist 与其"必须保持极窄"的约束）再谈，不在这里偷偷加解密路径。
 			email := dbpredicate.Account(func(s *entsql.Selector) {
 				s.Where(entsql.P(func(b *entsql.Builder) {
-					b.WriteString("(lower(" + s.C(dbaccount.FieldCredentials) + "->>'email') = ").Arg(strings.ToLower(search))
-					b.WriteString(" OR lower(" + s.C(dbaccount.FieldExtra) + "->>'email') = ").Arg(strings.ToLower(search)).WriteString(")")
+					b.WriteString("lower(" + s.C(dbaccount.FieldExtra) + "->>'email') = ").Arg(strings.ToLower(search))
 				}))
 			})
 			matches = append(matches, dbaccount.And(dbaccount.Or(identityScope...), email))
@@ -55,52 +63,55 @@ func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.Pa
 	if err != nil {
 		return nil, 0, err
 	}
-	// SQL 只投影模型映射子字段，不加载 Token、API Key、接入地址或其他凭证。
-	var rows []struct {
-		ID                     int64
-		Name                   string
-		Notes                  *string
-		Platform               string
-		Type                   string
-		Status                 string
-		Schedulable            bool
-		Concurrency            int
-		Priority               int
-		ExpiresAt              *time.Time      `json:"expires_at"`
-		RateLimitResetAt       *time.Time      `json:"rate_limit_reset_at"`
-		OverloadUntil          *time.Time      `json:"overload_until"`
-		TempUnschedulableUntil *time.Time      `json:"temp_unschedulable_until"`
-		ModelMapping           json.RawMessage `json:"model_mapping"`
-	}
-	err = q.Offset(p.Offset()).Limit(p.Limit()).Order(dbaccount.ByID()).
-		Select(dbaccount.FieldID, dbaccount.FieldName, dbaccount.FieldNotes, dbaccount.FieldPlatform, dbaccount.FieldType, dbaccount.FieldStatus, dbaccount.FieldSchedulable, dbaccount.FieldConcurrency, dbaccount.FieldPriority, dbaccount.FieldExpiresAt, dbaccount.FieldRateLimitResetAt, dbaccount.FieldOverloadUntil, dbaccount.FieldTempUnschedulableUntil).
-		Aggregate(func(s *entsql.Selector) string {
-			return s.C(dbaccount.FieldCredentials) + "->'model_mapping' AS model_mapping"
-		}).Scan(ctx, &rows)
+	// model_mapping 原先用 SQL 聚合 `credentials->'model_mapping'` 直接投影。
+	// drop 明文列之后那条聚合会运行期报错，所以改成**解密后取值**。
+	// **只选密文列，明文列一次都不碰** —— 上游守卫的原意是"这个面不读凭据"，
+	// 而读整份明文的成本/风险都高于读密文（后者 drop 之后也仍然存在）。
+	//
+	// 时间类字段（expires_at / rate_limit_reset_at / overload_until /
+	// temp_unschedulable_until）是上游 v0.2.23 新增到本列表的展示字段：它们是
+	// 独立列、不是凭据子键，直接 SELECT 即可，无需解密。
+	models, err := q.Offset(p.Offset()).Limit(p.Limit()).Order(dbaccount.ByID()).
+		Select(dbaccount.FieldID, dbaccount.FieldName, dbaccount.FieldNotes,
+			dbaccount.FieldPlatform, dbaccount.FieldType, dbaccount.FieldStatus,
+			dbaccount.FieldSchedulable, dbaccount.FieldConcurrency, dbaccount.FieldPriority,
+			dbaccount.FieldExpiresAt, dbaccount.FieldRateLimitResetAt,
+			dbaccount.FieldOverloadUntil, dbaccount.FieldTempUnschedulableUntil,
+			dbaccount.FieldCredentialsEncrypted).
+		All(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
-	accounts := make([]service.Account, 0, len(rows))
-	for _, row := range rows {
-		groups, e := r.loadAccountGroupIDs(ctx, row.ID)
+	accounts := make([]service.Account, 0, len(models))
+	for _, m := range models {
+		groups, e := r.loadAccountGroupIDs(ctx, m.ID)
 		if e != nil {
 			return nil, 0, e
 		}
-		var rawMapping map[string]any
 		mapping := map[string]string{}
-		if json.Unmarshal(row.ModelMapping, &rawMapping) == nil {
-			for source, target := range rawMapping {
+		creds, credErr := r.credentialsFromEntity(m)
+		if credErr != nil {
+			// 这一列只用于展示：解不开就让该行映射为空，别把整页列表打成 500。
+			// 但必须留痕，否则"管理端看不到路由配置"会变成查不出原因的现象。
+			logger.LegacyPrintf("repository.scopedadmin",
+				"[ScopedAdminList] cannot resolve credentials for account=%d: %v; returning empty model_mapping", m.ID, credErr)
+		} else if raw, ok := creds["model_mapping"].(map[string]any); ok {
+			for source, target := range raw {
 				if value, ok := target.(string); ok {
 					mapping[source] = value
 				}
 			}
 		}
-		var credentials map[string]any
+		var outCredentials map[string]any
 		if len(mapping) > 0 {
-			credentials = map[string]any{"model_mapping": mapping}
+			outCredentials = map[string]any{"model_mapping": mapping}
 		}
-		a := service.Account{ID: row.ID, Name: row.Name, Notes: row.Notes, Platform: row.Platform, Type: row.Type, Status: row.Status, Schedulable: row.Schedulable, Concurrency: row.Concurrency, Priority: row.Priority, GroupIDs: groups, Credentials: credentials, ExpiresAt: row.ExpiresAt, RateLimitResetAt: row.RateLimitResetAt, OverloadUntil: row.OverloadUntil, TempUnschedulableUntil: row.TempUnschedulableUntil}
-		accounts = append(accounts, a)
+		accounts = append(accounts, service.Account{ID: m.ID, Name: m.Name, Notes: m.Notes,
+			Platform: m.Platform, Type: m.Type, Status: m.Status, Schedulable: m.Schedulable,
+			Concurrency: m.Concurrency, Priority: m.Priority, GroupIDs: groups,
+			Credentials: outCredentials, ExpiresAt: m.ExpiresAt,
+			RateLimitResetAt: m.RateLimitResetAt, OverloadUntil: m.OverloadUntil,
+			TempUnschedulableUntil: m.TempUnschedulableUntil})
 	}
 	// 身份字段只为本页逐行鉴权通过的账户批量投影，不加载完整凭证或 extra。
 	identityIDs := make([]int64, 0, len(accounts))
@@ -113,30 +124,50 @@ func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.Pa
 		}
 	}
 	if len(identityIDs) > 0 {
-		var identities []struct {
-			ID          int64           `json:"id"`
-			CreatedAt   time.Time       `json:"created_at"`
-			Credentials json.RawMessage `json:"credentials"`
-			Extra       json.RawMessage `json:"extra"`
-		}
-		err := r.client.Account.Query().Where(dbaccount.IDIn(identityIDs...)).Select(dbaccount.FieldID, dbaccount.FieldCreatedAt).
-			Aggregate(func(s *entsql.Selector) string {
-				return "jsonb_build_object('email', " + s.C(dbaccount.FieldCredentials) + "->'email', 'plan_type', " + s.C(dbaccount.FieldCredentials) + "->'plan_type', 'subscription_expires_at', " + s.C(dbaccount.FieldCredentials) + "->'subscription_expires_at') AS credentials"
-			}, func(s *entsql.Selector) string {
-				return "jsonb_build_object('email', " + s.C(dbaccount.FieldExtra) + "->'email') AS extra"
-			}).Scan(ctx, &identities)
+		// 身份三字段（email / plan_type / subscription_expires_at）都在凭据密文里，
+		// 明文列已在迁移 251 drop —— 原先的 SQL 聚合 `credentials->'email'` 取不到，
+		// 改为**解密后按白名单取键**。只取这三把，其余凭据子键
+		//（access_token / refresh_token / api_key …）不进返回值：本投影存在的理由
+		// 就是「给邮箱不给令牌」。
+		//
+		// extra 列未加密，仍按上游原样取（它只放 UI 展示用的邮箱副本）。
+		identRows, err := r.client.Account.Query().Where(dbaccount.IDIn(identityIDs...)).
+			Select(dbaccount.FieldID, dbaccount.FieldCreatedAt, dbaccount.FieldExtra,
+				dbaccount.FieldCredentialsEncrypted).
+			All(ctx)
 		if err != nil {
 			return nil, 0, err
 		}
-		for _, identity := range identities {
-			a := identityAccounts[identity.ID]
-			if err := json.Unmarshal(identity.Credentials, &a.Credentials); err != nil {
-				return nil, 0, err
+		for _, row := range identRows {
+			a := identityAccounts[row.ID]
+			if a == nil {
+				continue
 			}
-			if err := json.Unmarshal(identity.Extra, &a.Extra); err != nil {
-				return nil, 0, err
+			creds, perr := r.credentialsFromEntity(row)
+			if perr != nil {
+				// 解不开时该行不给身份字段，但留痕——否则「管理端看不到邮箱」
+				// 会变成查不出原因的现象（与上面 model_mapping 同口径）。
+				logger.LegacyPrintf("repository.scopedadmin",
+					"[ScopedAdminList] cannot resolve identity for account=%d: %v", row.ID, perr)
+			} else {
+				for _, key := range []string{"email", "plan_type", "subscription_expires_at"} {
+					v, ok := creds[key]
+					if !ok {
+						continue
+					}
+					if a.Credentials == nil {
+						a.Credentials = make(map[string]any, 3)
+					}
+					a.Credentials[key] = v
+				}
 			}
-			a.CreatedAt = identity.CreatedAt
+			if email, ok := row.Extra["email"]; ok {
+				if a.Extra == nil {
+					a.Extra = make(map[string]any, 1)
+				}
+				a.Extra["email"] = email
+			}
+			a.CreatedAt = row.CreatedAt
 		}
 	}
 	// 仅为本页已获额度权限的账户批量加载三个周额度快照字段。
@@ -255,6 +286,14 @@ func scopedAdminAccountPredicates(policy adminaccess.Policy, permission string) 
 
 // ScopedAdminCodexCandidates 按导入身份逐级匹配，最多返回一个候选的身份字段。
 // 不向应用加载其他账户的凭证；真正合并凭证仍在写事务锁内进行。
+//
+// 匹配在 **Go 侧**完成（design.md A4 选项 C）：原实现把身份谓词拼成 SQL
+// （`"accounts"."credentials"->'key'`），drop 明文列之后整族失效。现在只把
+// **权限范围**（scope）+ platform/type 留在 SQL 里，身份匹配改在解密后的凭据上做。
+// 顺序语义不变：先命中者胜，同一谓词内取 id 最大者（与原来的 ORDER BY id DESC LIMIT 1 等价）。
+//
+// 等价性由 TestScopedCodexIdentityPredicates_SQLAndGoAgree 守着（每条谓词 × 每行）；
+// 反向实验证明 trim / 大小写 / 数字归一化 / 顺序任一处漂移都会让它变红。
 func (r *accountRepository) ScopedAdminCodexCandidates(ctx context.Context, identity service.ScopedCodexIdentity) ([]service.Account, error) {
 	principal := adminaccess.FromContext(ctx)
 	if principal == nil {
@@ -264,29 +303,68 @@ func (r *accountRepository) ScopedAdminCodexCandidates(ctx context.Context, iden
 	if len(scope) == 0 {
 		return []service.Account{}, nil
 	}
-	for _, match := range scopedCodexIdentityPredicates(identity) {
-		var rows []struct {
-			ID          int64
-			Credentials json.RawMessage
-		}
-		err := r.accountListFilteredQuery(service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "").
-			Where(dbaccount.Or(scope...), match).Order(dbaccount.ByID(entsql.OrderDesc())).Limit(1).
-			Select(dbaccount.FieldID).Aggregate(func(s *entsql.Selector) string {
-			c := s.C(dbaccount.FieldCredentials)
-			return "jsonb_build_object('chatgpt_account_id', " + c + "->'chatgpt_account_id', 'chatgpt_user_id', " + c + "->'chatgpt_user_id', 'email', " + c + "->'email', 'access_token', " + c + "->'access_token') AS credentials"
-		}).Scan(ctx, &rows)
-		if err != nil {
-			return nil, err
-		}
-		if len(rows) != 0 {
-			var credentials map[string]any
-			if err := json.Unmarshal(rows[0].Credentials, &credentials); err != nil {
-				return nil, err
-			}
-			return []service.Account{{ID: rows[0].ID, Credentials: credentials}}, nil
-		}
+	if len(scopedCodexIdentityMatchers(identity)) == 0 {
+		// 身份字段一个都没给：原实现此时不生成任何谓词，直接空结果。
+		return []service.Account{}, nil
 	}
-	return []service.Account{}, nil
+
+	// 一次取候选再在 Go 里筛。代价是这条路径要解密**全部**候选行 —— 它是人工触发的
+	// 低频导入，不是请求热路径（A4 选项 C 的取舍）。
+	//
+	// **为什么明确不加 LIMIT**：加了就把"按 id 降序第一个命中"变成"前 N 行里第一个命中"，
+	// 语义变了 —— 会把更早的合法账号判成"不存在"，于是导入出一条重复账号。
+	// 上游曾要求"SQL 里按身份筛选 + LIMIT"，那条契约在 drop 明文列之后无法成立
+	// （身份只存在于明文 JSON 里）；契约已改为"不得读明文列 + 必须带权限范围谓词"，
+	// 见 TestScopedAdminCodexCandidatesQueryIsBounded。
+	//
+	// **只读密文列**：明文列一次都不碰（drop 之后它也不存在）。
+	rows, err := r.accountListFilteredQuery(service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "").
+		Where(dbaccount.Or(scope...)).
+		Order(dbaccount.ByID(entsql.OrderDesc())).
+		Select(dbaccount.FieldID, dbaccount.FieldCredentialsEncrypted).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// 成本可观测：候选数就是这一跳要解密的行数。超过阈值打一条 WARN，
+	// 免得"导入越来越慢"变成一个查不出原因的现象（账号规模长起来时它会说话）。
+	const candidateWarnThreshold = 500
+	if len(rows) > candidateWarnThreshold {
+		logger.LegacyPrintf("repository.scopedadmin",
+			"[ScopedCodexIdentity] scanned %d candidates for identity match (>%d): this path decrypts every candidate; consider a derived identity column if it grows",
+			len(rows), candidateWarnThreshold)
+	}
+
+	resolved := make(map[int64]map[string]any, len(rows))
+	picked := scopedCodexIdentityPick(rows, func(m *dbent.Account) map[string]any {
+		creds, err := r.credentialsFromEntity(m)
+		if err != nil {
+			// 解密失败就跳过这一行，但必须留痕：静默跳过会让"导入时找不到已有账号"
+			// 变成一个查不出原因的现象。注意返回 nil 不会误命中任何谓词
+			// ——每条谓词都在与一个非空值比较。
+			logger.LegacyPrintf("repository.scopedadmin",
+				"[ScopedCodexIdentity] cannot resolve credentials for account=%d: %v; skipping candidate", m.ID, err)
+			return nil
+		}
+		resolved[m.ID] = creds
+		return creds
+	}, identity)
+	if picked == nil {
+		return []service.Account{}, nil
+	}
+
+	// 只回传这四个身份字段（与原 SQL 的 jsonb_build_object 投影一致），
+	// 不把整份凭据交给调用方。
+	creds := resolved[picked.ID]
+	return []service.Account{{
+		ID: picked.ID,
+		Credentials: map[string]any{
+			"chatgpt_account_id": creds["chatgpt_account_id"],
+			"chatgpt_user_id":    creds["chatgpt_user_id"],
+			"email":              creds["email"],
+			"access_token":       creds["access_token"],
+		},
+	}}, nil
 }
 
 // 与导入器的 account_user / user / email / access / account 优先级保持一致。

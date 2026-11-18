@@ -9,7 +9,7 @@ import builtinCatalog from './platformCatalog.builtin.json'
  * 生成并校验与后端一致；前端随后端一同构建发布，无需运行时拉取。
  */
 
-export type PlatformGateway = 'anthropic' | 'openai' | 'gemini' | 'antigravity'
+export type PlatformGateway = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'lane'
 export type ProviderRouting = 'by_inbound' | 'by_model'
 export type ProviderNativeProtocol = 'chat_completions' | 'anthropic' | 'responses'
 
@@ -108,6 +108,11 @@ export function compositePrecedencePlatformIds(): string[] {
 
 export function platformUsesGateway(platform: string | null | undefined, gateway: PlatformGateway): boolean {
   return getPlatformSpec(platform)?.gateway === gateway
+}
+
+/** 车道上游平台（siliconflow/serpapi/openainext，Gateway=lane）：凭据=api_key 必填、base_url 可选覆盖。 */
+export function isLanePlatform(platform: string | null | undefined): boolean {
+  return platformUsesGateway(platform, 'lane')
 }
 
 export function getProviderProfile(platform: string | null | undefined): ProviderProfileInfo | undefined {

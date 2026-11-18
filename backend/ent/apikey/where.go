@@ -75,9 +75,14 @@ func UserID(v int64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldUserID, v))
 }
 
-// Key applies equality check predicate on the "key" field. It's identical to KeyEQ.
-func Key(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldEQ(FieldKey, v))
+// KeyHash applies equality check predicate on the "key_hash" field. It's identical to KeyHashEQ.
+func KeyHash(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldKeyHash, v))
+}
+
+// KeyEncrypted applies equality check predicate on the "key_encrypted" field. It's identical to KeyEncryptedEQ.
+func KeyEncrypted(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldKeyEncrypted, v))
 }
 
 // Name applies equality check predicate on the "name" field. It's identical to NameEQ.
@@ -113,6 +118,26 @@ func QuotaUsed(v float64) predicate.APIKey {
 // ExpiresAt applies equality check predicate on the "expires_at" field. It's identical to ExpiresAtEQ.
 func ExpiresAt(v time.Time) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldExpiresAt, v))
+}
+
+// ConcurrencyRequest applies equality check predicate on the "concurrency_request" field. It's identical to ConcurrencyRequestEQ.
+func ConcurrencyRequest(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyLimit applies equality check predicate on the "concurrency_limit" field. It's identical to ConcurrencyLimitEQ.
+func ConcurrencyLimit(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldConcurrencyLimit, v))
+}
+
+// RpmLimit applies equality check predicate on the "rpm_limit" field. It's identical to RpmLimitEQ.
+func RpmLimit(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldRpmLimit, v))
+}
+
+// EffectiveAt applies equality check predicate on the "effective_at" field. It's identical to EffectiveAtEQ.
+func EffectiveAt(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldEffectiveAt, v))
 }
 
 // RateLimit5h applies equality check predicate on the "rate_limit_5h" field. It's identical to RateLimit5hEQ.
@@ -310,69 +335,154 @@ func UserIDNotIn(vs ...int64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldNotIn(FieldUserID, vs...))
 }
 
-// KeyEQ applies the EQ predicate on the "key" field.
-func KeyEQ(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldEQ(FieldKey, v))
+// KeyHashEQ applies the EQ predicate on the "key_hash" field.
+func KeyHashEQ(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldKeyHash, v))
 }
 
-// KeyNEQ applies the NEQ predicate on the "key" field.
-func KeyNEQ(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldNEQ(FieldKey, v))
+// KeyHashNEQ applies the NEQ predicate on the "key_hash" field.
+func KeyHashNEQ(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldKeyHash, v))
 }
 
-// KeyIn applies the In predicate on the "key" field.
-func KeyIn(vs ...string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldIn(FieldKey, vs...))
+// KeyHashIn applies the In predicate on the "key_hash" field.
+func KeyHashIn(vs ...string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldKeyHash, vs...))
 }
 
-// KeyNotIn applies the NotIn predicate on the "key" field.
-func KeyNotIn(vs ...string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldNotIn(FieldKey, vs...))
+// KeyHashNotIn applies the NotIn predicate on the "key_hash" field.
+func KeyHashNotIn(vs ...string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldKeyHash, vs...))
 }
 
-// KeyGT applies the GT predicate on the "key" field.
-func KeyGT(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldGT(FieldKey, v))
+// KeyHashGT applies the GT predicate on the "key_hash" field.
+func KeyHashGT(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldKeyHash, v))
 }
 
-// KeyGTE applies the GTE predicate on the "key" field.
-func KeyGTE(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldGTE(FieldKey, v))
+// KeyHashGTE applies the GTE predicate on the "key_hash" field.
+func KeyHashGTE(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldKeyHash, v))
 }
 
-// KeyLT applies the LT predicate on the "key" field.
-func KeyLT(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldLT(FieldKey, v))
+// KeyHashLT applies the LT predicate on the "key_hash" field.
+func KeyHashLT(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldKeyHash, v))
 }
 
-// KeyLTE applies the LTE predicate on the "key" field.
-func KeyLTE(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldLTE(FieldKey, v))
+// KeyHashLTE applies the LTE predicate on the "key_hash" field.
+func KeyHashLTE(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldKeyHash, v))
 }
 
-// KeyContains applies the Contains predicate on the "key" field.
-func KeyContains(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldContains(FieldKey, v))
+// KeyHashContains applies the Contains predicate on the "key_hash" field.
+func KeyHashContains(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldContains(FieldKeyHash, v))
 }
 
-// KeyHasPrefix applies the HasPrefix predicate on the "key" field.
-func KeyHasPrefix(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldHasPrefix(FieldKey, v))
+// KeyHashHasPrefix applies the HasPrefix predicate on the "key_hash" field.
+func KeyHashHasPrefix(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldHasPrefix(FieldKeyHash, v))
 }
 
-// KeyHasSuffix applies the HasSuffix predicate on the "key" field.
-func KeyHasSuffix(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldHasSuffix(FieldKey, v))
+// KeyHashHasSuffix applies the HasSuffix predicate on the "key_hash" field.
+func KeyHashHasSuffix(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldHasSuffix(FieldKeyHash, v))
 }
 
-// KeyEqualFold applies the EqualFold predicate on the "key" field.
-func KeyEqualFold(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldEqualFold(FieldKey, v))
+// KeyHashIsNil applies the IsNil predicate on the "key_hash" field.
+func KeyHashIsNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldIsNull(FieldKeyHash))
 }
 
-// KeyContainsFold applies the ContainsFold predicate on the "key" field.
-func KeyContainsFold(v string) predicate.APIKey {
-	return predicate.APIKey(sql.FieldContainsFold(FieldKey, v))
+// KeyHashNotNil applies the NotNil predicate on the "key_hash" field.
+func KeyHashNotNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotNull(FieldKeyHash))
+}
+
+// KeyHashEqualFold applies the EqualFold predicate on the "key_hash" field.
+func KeyHashEqualFold(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEqualFold(FieldKeyHash, v))
+}
+
+// KeyHashContainsFold applies the ContainsFold predicate on the "key_hash" field.
+func KeyHashContainsFold(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldContainsFold(FieldKeyHash, v))
+}
+
+// KeyEncryptedEQ applies the EQ predicate on the "key_encrypted" field.
+func KeyEncryptedEQ(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldKeyEncrypted, v))
+}
+
+// KeyEncryptedNEQ applies the NEQ predicate on the "key_encrypted" field.
+func KeyEncryptedNEQ(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldKeyEncrypted, v))
+}
+
+// KeyEncryptedIn applies the In predicate on the "key_encrypted" field.
+func KeyEncryptedIn(vs ...string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldKeyEncrypted, vs...))
+}
+
+// KeyEncryptedNotIn applies the NotIn predicate on the "key_encrypted" field.
+func KeyEncryptedNotIn(vs ...string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldKeyEncrypted, vs...))
+}
+
+// KeyEncryptedGT applies the GT predicate on the "key_encrypted" field.
+func KeyEncryptedGT(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldKeyEncrypted, v))
+}
+
+// KeyEncryptedGTE applies the GTE predicate on the "key_encrypted" field.
+func KeyEncryptedGTE(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldKeyEncrypted, v))
+}
+
+// KeyEncryptedLT applies the LT predicate on the "key_encrypted" field.
+func KeyEncryptedLT(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldKeyEncrypted, v))
+}
+
+// KeyEncryptedLTE applies the LTE predicate on the "key_encrypted" field.
+func KeyEncryptedLTE(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldKeyEncrypted, v))
+}
+
+// KeyEncryptedContains applies the Contains predicate on the "key_encrypted" field.
+func KeyEncryptedContains(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldContains(FieldKeyEncrypted, v))
+}
+
+// KeyEncryptedHasPrefix applies the HasPrefix predicate on the "key_encrypted" field.
+func KeyEncryptedHasPrefix(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldHasPrefix(FieldKeyEncrypted, v))
+}
+
+// KeyEncryptedHasSuffix applies the HasSuffix predicate on the "key_encrypted" field.
+func KeyEncryptedHasSuffix(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldHasSuffix(FieldKeyEncrypted, v))
+}
+
+// KeyEncryptedIsNil applies the IsNil predicate on the "key_encrypted" field.
+func KeyEncryptedIsNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldIsNull(FieldKeyEncrypted))
+}
+
+// KeyEncryptedNotNil applies the NotNil predicate on the "key_encrypted" field.
+func KeyEncryptedNotNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotNull(FieldKeyEncrypted))
+}
+
+// KeyEncryptedEqualFold applies the EqualFold predicate on the "key_encrypted" field.
+func KeyEncryptedEqualFold(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEqualFold(FieldKeyEncrypted, v))
+}
+
+// KeyEncryptedContainsFold applies the ContainsFold predicate on the "key_encrypted" field.
+func KeyEncryptedContainsFold(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldContainsFold(FieldKeyEncrypted, v))
 }
 
 // NameEQ applies the EQ predicate on the "name" field.
@@ -733,6 +843,176 @@ func ExpiresAtIsNil() predicate.APIKey {
 // ExpiresAtNotNil applies the NotNil predicate on the "expires_at" field.
 func ExpiresAtNotNil() predicate.APIKey {
 	return predicate.APIKey(sql.FieldNotNull(FieldExpiresAt))
+}
+
+// ConcurrencyRequestEQ applies the EQ predicate on the "concurrency_request" field.
+func ConcurrencyRequestEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyRequestNEQ applies the NEQ predicate on the "concurrency_request" field.
+func ConcurrencyRequestNEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyRequestIn applies the In predicate on the "concurrency_request" field.
+func ConcurrencyRequestIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldConcurrencyRequest, vs...))
+}
+
+// ConcurrencyRequestNotIn applies the NotIn predicate on the "concurrency_request" field.
+func ConcurrencyRequestNotIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldConcurrencyRequest, vs...))
+}
+
+// ConcurrencyRequestGT applies the GT predicate on the "concurrency_request" field.
+func ConcurrencyRequestGT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyRequestGTE applies the GTE predicate on the "concurrency_request" field.
+func ConcurrencyRequestGTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyRequestLT applies the LT predicate on the "concurrency_request" field.
+func ConcurrencyRequestLT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyRequestLTE applies the LTE predicate on the "concurrency_request" field.
+func ConcurrencyRequestLTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldConcurrencyRequest, v))
+}
+
+// ConcurrencyLimitEQ applies the EQ predicate on the "concurrency_limit" field.
+func ConcurrencyLimitEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldConcurrencyLimit, v))
+}
+
+// ConcurrencyLimitNEQ applies the NEQ predicate on the "concurrency_limit" field.
+func ConcurrencyLimitNEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldConcurrencyLimit, v))
+}
+
+// ConcurrencyLimitIn applies the In predicate on the "concurrency_limit" field.
+func ConcurrencyLimitIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldConcurrencyLimit, vs...))
+}
+
+// ConcurrencyLimitNotIn applies the NotIn predicate on the "concurrency_limit" field.
+func ConcurrencyLimitNotIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldConcurrencyLimit, vs...))
+}
+
+// ConcurrencyLimitGT applies the GT predicate on the "concurrency_limit" field.
+func ConcurrencyLimitGT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldConcurrencyLimit, v))
+}
+
+// ConcurrencyLimitGTE applies the GTE predicate on the "concurrency_limit" field.
+func ConcurrencyLimitGTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldConcurrencyLimit, v))
+}
+
+// ConcurrencyLimitLT applies the LT predicate on the "concurrency_limit" field.
+func ConcurrencyLimitLT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldConcurrencyLimit, v))
+}
+
+// ConcurrencyLimitLTE applies the LTE predicate on the "concurrency_limit" field.
+func ConcurrencyLimitLTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldConcurrencyLimit, v))
+}
+
+// RpmLimitEQ applies the EQ predicate on the "rpm_limit" field.
+func RpmLimitEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldRpmLimit, v))
+}
+
+// RpmLimitNEQ applies the NEQ predicate on the "rpm_limit" field.
+func RpmLimitNEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldRpmLimit, v))
+}
+
+// RpmLimitIn applies the In predicate on the "rpm_limit" field.
+func RpmLimitIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldRpmLimit, vs...))
+}
+
+// RpmLimitNotIn applies the NotIn predicate on the "rpm_limit" field.
+func RpmLimitNotIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldRpmLimit, vs...))
+}
+
+// RpmLimitGT applies the GT predicate on the "rpm_limit" field.
+func RpmLimitGT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldRpmLimit, v))
+}
+
+// RpmLimitGTE applies the GTE predicate on the "rpm_limit" field.
+func RpmLimitGTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldRpmLimit, v))
+}
+
+// RpmLimitLT applies the LT predicate on the "rpm_limit" field.
+func RpmLimitLT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldRpmLimit, v))
+}
+
+// RpmLimitLTE applies the LTE predicate on the "rpm_limit" field.
+func RpmLimitLTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldRpmLimit, v))
+}
+
+// EffectiveAtEQ applies the EQ predicate on the "effective_at" field.
+func EffectiveAtEQ(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldEffectiveAt, v))
+}
+
+// EffectiveAtNEQ applies the NEQ predicate on the "effective_at" field.
+func EffectiveAtNEQ(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldEffectiveAt, v))
+}
+
+// EffectiveAtIn applies the In predicate on the "effective_at" field.
+func EffectiveAtIn(vs ...time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldEffectiveAt, vs...))
+}
+
+// EffectiveAtNotIn applies the NotIn predicate on the "effective_at" field.
+func EffectiveAtNotIn(vs ...time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldEffectiveAt, vs...))
+}
+
+// EffectiveAtGT applies the GT predicate on the "effective_at" field.
+func EffectiveAtGT(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldEffectiveAt, v))
+}
+
+// EffectiveAtGTE applies the GTE predicate on the "effective_at" field.
+func EffectiveAtGTE(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldEffectiveAt, v))
+}
+
+// EffectiveAtLT applies the LT predicate on the "effective_at" field.
+func EffectiveAtLT(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldEffectiveAt, v))
+}
+
+// EffectiveAtLTE applies the LTE predicate on the "effective_at" field.
+func EffectiveAtLTE(v time.Time) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldEffectiveAt, v))
+}
+
+// EffectiveAtIsNil applies the IsNil predicate on the "effective_at" field.
+func EffectiveAtIsNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldIsNull(FieldEffectiveAt))
+}
+
+// EffectiveAtNotNil applies the NotNil predicate on the "effective_at" field.
+func EffectiveAtNotNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotNull(FieldEffectiveAt))
 }
 
 // RateLimit5hEQ applies the EQ predicate on the "rate_limit_5h" field.

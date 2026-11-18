@@ -110,7 +110,11 @@ const (
 	OpenAIEndpointCapabilityResponses OpenAIEndpointCapability = "responses"
 )
 
-const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
+// OpenAIEndpointCapabilitiesCredentialKey 是账号凭据里声明端点能力集的键
+// （chat_completions / embeddings / seedance）。候选过滤按该集合排除能力不符的
+// 账号，因此调度投影必须保留它（见 repository.filterSchedulerCredentials）——
+// 投影裁掉该键会让显式配置过能力集的账号在候选阶段被误判为 capability_mismatch。
+const OpenAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
 
 // GrokMediaEligibleExtraKey is an optional per-account override stored in
 // accounts.extra. true forces media routing on, false disables it, and an
@@ -2054,7 +2058,7 @@ func (a *Account) openAIEndpointCapabilitySet() (map[string]bool, bool) {
 	if a == nil || a.Credentials == nil {
 		return nil, false
 	}
-	raw, found := a.Credentials[openAIEndpointCapabilitiesCredentialKey]
+	raw, found := a.Credentials[OpenAIEndpointCapabilitiesCredentialKey]
 	if !found || raw == nil {
 		return nil, false
 	}

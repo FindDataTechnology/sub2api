@@ -136,7 +136,7 @@ func TestLockAndMergeAccountProbeExtraKeepsLatestGrokManagedKeys(t *testing.T) {
 			credentials, err := json.Marshal(normalizeJSONMap(tt.credentials))
 			require.NoError(t, err)
 			mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
-				WithArgs(int64(41), service.PlatformGrok, tt.accountType, string(credentials), nil).
+				WithArgs(int64(41), service.PlatformGrok, tt.accountType, string(credentials), nil, credentialAPIKeyHashArg(tt.credentials), credentialHashHex(tt.credentials)).
 				WillReturnRows(sqlmock.NewRows([]string{
 					"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged",
 					"enabled", "rate_sync_enabled", "snapshot",

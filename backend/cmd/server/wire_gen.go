@@ -45,6 +45,10 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 任务车道存储（add-ciyuan-task-lane）：DB 只在这一层可得，故与
+	// service.SetOpenAIGatewayService 同一惯例用包级 setter 注入。
+	// 未注入时任务端点返回 503，不假装执行（「没跑」必须可分）。
+	service.SetLanesTaskStore(service.NewLanesTaskStore(db))
 	userRepository := repository.NewUserRepository(client, db)
 	redeemCodeRepository := repository.NewRedeemCodeRepository(client)
 	redisClient := repository.ProvideRedis(configConfig)
@@ -66,7 +70,11 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	promoCodeRepository := repository.NewPromoCodeRepository(client)
 	billingCache := repository.NewBillingCache(redisClient)
 	userSubscriptionRepository := repository.NewUserSubscriptionRepository(client)
-	apiKeyRepository := repository.NewAPIKeyRepository(client, db)
+	secretEncryptor, err := repository.NewAESEncryptor(configConfig)
+	if err != nil {
+		return nil, err
+	}
+	apiKeyRepository := repository.NewAPIKeyRepositoryCrypto(client, db, secretEncryptor)
 	userRPMCache := repository.NewUserRPMCache(redisClient)
 	userGroupRateRepository := repository.NewUserGroupRateRepository(db)
 	userPlatformQuotaRepository := repository.NewUserPlatformQuotaRepository(client)
@@ -75,7 +83,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	apiKeyCache := repository.NewAPIKeyCache(redisClient)
 	concurrencyCache := repository.ProvideConcurrencyCache(redisClient, configConfig)
 	schedulerCache := repository.ProvideSchedulerCache(redisClient, configConfig)
-	accountRepository := repository.NewAccountRepository(client, db, schedulerCache)
+	accountRepository := repository.NewAccountRepository(client, db, schedulerCache, secretEncryptor)
 	concurrencyService := service.ProvideConcurrencyService(concurrencyCache, accountRepository, configConfig)
 	apiKeyService := service.ProvideAPIKeyService(apiKeyRepository, userRepository, groupRepository, userSubscriptionRepository, userGroupRateRepository, apiKeyCache, configConfig, billingCacheService, concurrencyService)
 	apiKeyAuthCacheInvalidator := service.ProvideAPIKeyAuthCacheInvalidator(apiKeyService)
@@ -89,10 +97,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	userService := service.NewUserService(userRepository, settingRepository, apiKeyAuthCacheInvalidator, billingCache)
 	redeemCache := repository.NewRedeemCache(redisClient)
 	redeemService := service.NewRedeemService(redeemCodeRepository, userRepository, subscriptionService, redeemCache, billingCacheService, client, apiKeyAuthCacheInvalidator, affiliateService)
-	secretEncryptor, err := repository.NewAESEncryptor(configConfig)
-	if err != nil {
-		return nil, err
-	}
 	totpCache := repository.NewTotpCache(redisClient)
 	totpService := service.NewTotpService(userRepository, secretEncryptor, totpCache, settingService, emailService, emailQueueService)
 	userAttributeDefinitionRepository := repository.NewUserAttributeDefinitionRepository(client)
@@ -102,7 +106,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	userHandler := handler.NewUserHandler(userService, authService, emailService, emailCache, affiliateService, serviceUserPlatformQuotaRepository)
 	mcpoAuthHandler := handler.NewMCPOAuthHandler(mcpoAuthService, totpService, userService, settingService, configConfig)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
-	usageLogRepository := repository.NewUsageLogRepository(client, db)
+	usageLogRepository := repository.NewUsageLogRepositoryCrypto(client, db, secretEncryptor)
 	usageService := service.NewUsageService(usageLogRepository, userRepository, client, apiKeyAuthCacheInvalidator)
 	opsRepository := repository.NewOpsRepository(db)
 	usageBillingBatchRepository := repository.NewUsageBillingRepository(client, db)
@@ -194,7 +198,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	dashboardAggregationService := service.ProvideDashboardAggregationService(dashboardAggregationRepository, timingWheelService, leaderLockCache, db, configConfig, settingRepository)
 	dashboardHandler := admin.NewDashboardHandler(dashboardService, dashboardAggregationService)
 	adminGroupRepository := repository.NewAdminGroupRepository(client, db)
-	adminAccountRepository := repository.NewAdminAccountRepository(client, db, schedulerCache)
+	adminAccountRepository := repository.NewAdminAccountRepository(client, db, schedulerCache, secretEncryptor)
 	proxyExitInfoProber := repository.NewProxyExitInfoProber(configConfig)
 	proxyLatencyCache := repository.NewProxyLatencyCache(redisClient)
 	adminService := service.NewAdminService(configConfig, userRepository, adminGroupRepository, adminAccountRepository, proxyRepository, apiKeyRepository, redeemCodeRepository, userGroupRateRepository, userRPMCache, billingCacheService, proxyExitInfoProber, proxyLatencyCache, apiKeyAuthCacheInvalidator, client, settingService, subscriptionService, userSubscriptionRepository, privacyClientFactory, openAIGatewayService, affiliateService, compositeModelRouteRepository, compositeRouteResolver, channelService)

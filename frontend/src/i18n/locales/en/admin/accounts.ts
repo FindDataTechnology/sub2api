@@ -626,6 +626,21 @@ export default {
       setupTokenLongLived: 'Setup Token (Long-lived)',
       baseUrl: 'Base URL',
       baseUrlHint: 'Leave default for official Anthropic API',
+      laneProviders: {
+        hint: 'Lane upstream platforms serve model-lane endpoints only (rerank / search / audio): only an API key is required; leave Base URL empty to use the built-in upstream endpoint.',
+        baseUrlHint: 'Leave empty to use the lane built-in endpoint; fill in to override the platform default upstream.',
+        apiKeyHint: 'API key issued by this lane upstream provider',
+        tencent: {
+          secretId: 'SecretId',
+          secretIdHint: 'SecretId from Tencent Cloud console → CAM → API key management (starts with AKID)',
+          secretKey: 'SecretKey',
+          secretKeyHint: 'SecretKey paired with the SecretId; standard 32 characters. Copy it in full — a truncated tail makes signature validation fail',
+          secretIdRequired: 'Tencent Cloud SecretId is required',
+          secretKeyRequired: 'Tencent Cloud SecretKey is required',
+          region: 'Region',
+          regionHint: 'Speech synthesis supports ap-beijing / ap-chengdu / ap-chongqing / ap-guangzhou / ap-nanjing / ap-shanghai; defaults to ap-guangzhou'
+        }
+      },
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',
       apiKeyHint: 'Your Claude Console API Key',
@@ -696,7 +711,7 @@ export default {
         imageSizeTiersAtLeastOne: 'Keep at least one tier',
         endpointCapabilities: 'Endpoint capabilities',
         endpointCapabilitiesDesc:
-          'Used by account routing. The text endpoint follows the Responses API support setting above and is shown as Responses, Chat Completions, or auto mode; Embeddings independently controls /v1/embeddings.',
+          'Used by account routing. The text endpoint follows the Responses API support setting above and is shown as Responses, Chat Completions, or auto mode; Embeddings independently controls /v1/embeddings. Checking Seedance requires a video upstream endpoint in the Base URL above (e.g. https://api.openai-next.com/seedance); routing then filters candidates strictly by this capability set.',
         capabilityResponses: 'Responses',
         capabilityTextAuto: 'Responses / Chat Completions (Auto)',
         capabilityResponsesAuto: 'Responses (auto probe)',
@@ -827,6 +842,13 @@ export default {
       },
       modelRestriction: 'Model Restriction (Optional)',
       modelWhitelist: 'Model Whitelist',
+      embeddingProviderOnly: 'Embedding provider (pin)',
+      embeddingProviderUnset: 'Not pinned (follows aggregator routing — not recommended)',
+      embeddingProviderOnlyHint:
+        'One embedding model is served by several upstream providers behind an aggregator. ' +
+        'Each provider quantizes differently, so their vector spaces are NOT interchangeable. ' +
+        'Switching providers switches the vector space and silently corrupts recall. ' +
+        'Pick one and keep it stable; re-embed history after any change.',
       modelMapping: 'Model Mapping',
       fromModel: 'Request model',
       toModel: 'Target model',

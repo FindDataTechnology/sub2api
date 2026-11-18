@@ -57,15 +57,7 @@ func TestForwardEmbeddings_APIKeyPassthroughRecordsUsageAndBatchInput(t *testing
 			"Content-Type": []string{"application/json"},
 			"X-Request-Id": []string{"emb-rid"},
 		},
-		Body: io.NopCloser(strings.NewReader(`{
-			"object":"list",
-			"data":[
-				{"object":"embedding","index":0,"embedding":[0.1,0.2]},
-				{"object":"embedding","index":1,"embedding":[0.3,0.4]}
-			],
-			"model":"jina-embeddings-v5-text-small",
-			"usage":{"prompt_tokens":13,"total_tokens":13}
-		}`)),
+		Body: io.NopCloser(strings.NewReader(embeddingsResponseWithDim(256))),
 	}}
 	svc := &OpenAIGatewayService{
 		cfg:          &config.Config{},
@@ -185,4 +177,81 @@ func TestForwardEmbeddings_NonAccessFailoverKeepsLegacyShape(t *testing.T) {
 	require.Empty(t, failoverErr.ClientMessage)
 	require.Nil(t, failoverErr.ResponseHeaders)
 	require.False(t, c.Writer.Written())
+}
+
+// embeddingsResponseWithDim builds a two-item OpenAI embeddings response whose
+// vectors all have n values. The passthrough test declares dimensions=256, so
+// the fixture must honour it now that the gateway validates the response.
+func embeddingsResponseWithDim(n int) string {
+	vec := make([]string, n)
+	for i := range vec {
+		vec[i] = "0.1"
+	}
+	joined := strings.Join(vec, ",")
+	return `{"object":"list","data":[` +
+		`{"object":"embedding","index":0,"embedding":[` + joined + `]},` +
+		`{"object":"embedding","index":1,"embedding":[` + joined + `]}` +
+		`],"model":"jina-embeddings-v5-text-small","usage":{"prompt_tokens":13,"total_tokens":13}}`
+}
+
+func TestValidateOpenAIEmbeddingsResponseDimensions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		req     string
+		resp    string
+		wantErr string
+	}{
+		{"declared dimension matches", `{"model":"m","dimensions":256}`, embeddingsResponseWithDim(256), ""},
+		{"no declared dimension accepts native", `{"model":"m"}`, embeddingsResponseWithDim(4096), ""},
+		{"declared dimension mismatch", `{"model":"m","dimensions":256}`, embeddingsResponseWithDim(1024), "does not match requested dimensions=256"},
+		{"mixed batch rejected", `{"model":"m"}`, `{"data":[{"embedding":[0.1,0.2]},{"embedding":[0.1,0.2,0.3]}]}`, "mix vector dimensions"},
+		{"base64 encoding skipped", `{"model":"m","dimensions":256}`, `{"data":[{"embedding":"AQID"}]}`, ""},
+		{"no data array is not ours to judge", `{"model":"m","dimensions":256}`, `{"error":{"message":"upstream"}}`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateOpenAIEmbeddingsResponseDimensions([]byte(tt.req), []byte(tt.resp))
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestForwardEmbeddings_RejectsDimensionDriftWithoutWritingOrBilling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	reqBody := []byte(`{"model":"m","input":["hello"],"dimensions":256}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(reqBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(embeddingsResponseWithDim(1024))),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          43,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.example.com"},
+	}
+
+	result, err := svc.ForwardEmbeddings(context.Background(), c, account, reqBody, "")
+
+	require.ErrorContains(t, err, "validate embeddings dimensions")
+	require.Nil(t, result)
+	// The handler writes the 502; the service must not leak the bad vectors.
+	require.Empty(t, rec.Body.String())
 }

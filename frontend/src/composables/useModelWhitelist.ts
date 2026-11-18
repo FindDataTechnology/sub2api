@@ -1,4 +1,4 @@
-import { getProviderProfile } from '@/constants/platformCatalog'
+import { getProviderProfile, isLanePlatform } from '@/constants/platformCatalog'
 
 // =====================
 // 模型列表（硬编码，与 new-api 一致）
@@ -22,7 +22,12 @@ const openaiModels = [
   'gpt-4o-audio-preview', 'gpt-4o-realtime-preview',
   // GPT Image 系列
   'gpt-image-1', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst',
-  'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'
+  // 上游 v0.2.23 新增的 GPT Image 2.6 图片模型族。
+  'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst',
+  // Embedding 系列（fork 补丁 ciyuan-v0.2.16-16）：聚合渠道的 /v1/models 不列
+  // embedding 模型，若不在本清单里，管理台的模型下拉与分组白名单候选都选不到它，
+  // 纯 embedding 账号因而无法在后台配置。与后端 embedding_model_catalog.go 保持同步。
+  'Qwen/Qwen3-Embedding-8B', 'text-embedding-3-large', 'text-embedding-3-small', 'text-embedding-ada-002'
 ]
 
 // Anthropic Claude
@@ -558,7 +563,8 @@ export function getModelsByPlatform(platform: string): string[] {
     default:
       // 平台清单中没有内置模型列表的多协议供应商（多为多模型聚合平台，模型多且常变）
       // 默认不预填白名单：预填 Claude 模型会让新账号只接受这些模型。
-      return getProviderProfile(platform) ? [] : claudeModels
+      // 车道上游平台同理（模型由车道端点侧决定，账号不该预填 Claude 白名单）。
+      return getProviderProfile(platform) || isLanePlatform(platform) ? [] : claudeModels
   }
 }
 

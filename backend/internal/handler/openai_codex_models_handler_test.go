@@ -69,6 +69,10 @@ type codexModelsFailoverHTTPUpstream struct {
 	statuses    map[int64]int
 }
 
+// RecordAIMDResult: HTTPUpstream 新增的 AIMD 喂点。嵌入的 nil 接口会把该方法
+// 提升进方法集，生产代码一调即 nil panic——必须显式覆写为 no-op。
+func (u *codexModelsFailoverHTTPUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *codexModelsFailoverHTTPUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.mu.Lock()
 	u.accountIDs = append(u.accountIDs, accountID)
@@ -699,6 +703,10 @@ type codexModelsPinnedHTTPUpstream struct {
 	bodies   map[int64]string
 	statuses map[int64]int
 }
+
+// RecordAIMDResult: HTTPUpstream 新增的 AIMD 喂点。嵌入的 nil 接口会把该方法
+// 提升进方法集，生产代码一调即 nil panic——必须显式覆写为 no-op。
+func (u *codexModelsPinnedHTTPUpstream) RecordAIMDResult(accountID int64, statusCode int) {}
 
 func (u *codexModelsPinnedHTTPUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.mu.Lock()

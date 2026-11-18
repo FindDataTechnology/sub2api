@@ -519,3 +519,4 @@ func TestOpenAIPassthroughCompactFallbackSecondStreamFailureUsesStandardErrorPat
 	require.Equal(t, proxy.URL(), upstream.lastProxyURL)
 	requireCompactEventsAttributedTo(t, events, proxy)
 }
+

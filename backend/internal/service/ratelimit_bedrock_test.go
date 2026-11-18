@@ -52,6 +52,10 @@ func (u *bedrockErrorUpstreamStub) Do(req *http.Request, proxyURL string, accoun
 	return u.DoWithTLS(req, proxyURL, accountID, accountConcurrency, nil)
 }
 
+// RecordAIMDResult：fork 的 HTTPUpstream port 追加的 AIMD 喂点（ciyuan 有界排队），
+// 上游新增的测试桩没有它 —— 补齐 no-op 即可，本用例不关心 AIMD 记账。
+func (u *bedrockErrorUpstreamStub) RecordAIMDResult(accountID int64, statusCode int) {}
+
 func (u *bedrockErrorUpstreamStub) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	u.calls++
 	u.lastURL = req.URL.String()

@@ -528,6 +528,18 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, billResult, billResult.Model, body, taskID)
 			}
 		} else if shouldRecordGrokMediaUsage(endpoint, requestModel, result) {
+			// 图片这半的「账面名 vs 实际承做方」：请求写 grok-imagine-image，上游实测自报
+			// hunyuan-image-alpha。定价不动（按客户买的那一档），但上游 credit 是按实际承做方
+			// 结算的，不记下来对账时这一环无从追溯。视频侧同款见 grok_media.video_billing_terms。
+			if result.ImageCount > 0 && strings.TrimSpace(result.ImageServingModel) != "" {
+				reqLog.Info("grok_media.image_billing_terms",
+					zap.String("billed_model", firstNonEmptyString(result.BillingModel, result.Model)),
+					zap.String("upstream_model", result.UpstreamModel),
+					zap.String("serving_model", result.ImageServingModel),
+					zap.Int("image_count", result.ImageCount),
+					zap.String("billed_size", result.ImageSize),
+				)
+			}
 			recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, result, requestModel, body, requestID)
 		}
 		reqLog.Debug("grok_media.request_completed",
@@ -601,9 +613,11 @@ func shouldRecordGrokMediaUsage(endpoint service.GrokMediaEndpoint, requestModel
 	return result.ImageCount > 0
 }
 
-// prepareGrokVideoCompletionBilling claims one-shot billing for official done+video.url
-// observations (status poll or content download). Duration/model prefer status body;
+// prepareGrokVideoCompletionBilling claims one-shot billing for a successful terminal
+// video finish (status poll or content download). Duration/model prefer status body;
 // resolution uses create-time request (status response does not document resolution).
+// The delivered-vs-requested resolution mismatch is recorded in the service extractor,
+// the only place that holds both the status body and the create-time snapshot.
 func prepareGrokVideoCompletionBilling(
 	ctx context.Context,
 	h *OpenAIGatewayHandler,
@@ -658,16 +672,20 @@ func prepareGrokVideoCompletionBilling(
 	// Re-merge with pending: resolution is request-only; model/duration fill gaps.
 	merged := *statusResult
 	if pending != nil {
-		if strings.TrimSpace(merged.Model) == "" {
-			merged.Model = firstNonEmptyString(pending.BillingModel, pending.Model, pending.OriginalModel)
-		}
-		if strings.TrimSpace(merged.BillingModel) == "" {
-			merged.BillingModel = firstNonEmptyString(pending.BillingModel, pending.Model, merged.Model)
+		// Billing identity MUST follow the create-time request, not the status body:
+		// the relay reports the *serving* model (observed "kling-video-v3" for a
+		// "grok-imagine-video" order) and pricing is keyed on what the customer bought.
+		// The serving model stays visible through UpstreamModel.
+		if bm := firstNonEmptyString(pending.BillingModel, pending.Model, pending.OriginalModel); bm != "" {
+			merged.BillingModel = bm
+			merged.Model = bm
 		}
 		if strings.TrimSpace(merged.UpstreamModel) == "" {
 			merged.UpstreamModel = pending.UpstreamModel
 		}
-		// Official status omits resolution — always prefer create request.
+		// Official status omits resolution — always prefer create request. Delivery may
+		// differ (2026-11-14/15 probe: asked 480p, got 720P); billing stays on the requested
+		// tier and is never repriced here.
 		if strings.TrimSpace(pending.VideoResolution) != "" {
 			merged.VideoResolution = pending.VideoResolution
 		}
@@ -693,6 +711,23 @@ func prepareGrokVideoCompletionBilling(
 	merged.ImageCount = 0
 	// Official default resolution is 480p when the create request omitted it.
 	merged.VideoResolution = service.NormalizeVideoBillingResolutionOrDefault(merged.VideoResolution)
+	// Delivery may not match the purchase, and only here do both sides exist: the billed
+	// tier comes from the create-time snapshot above, the delivered tier from the status
+	// body (`VideoResolutionDelivered`). Billing deliberately stays on the requested tier —
+	// that is what the customer bought — but a silent mismatch is how a lane ends up
+	// charging the wrong tier for months, so record it on every claimed completion.
+	if pending != nil {
+		reqLog.Info("grok_media.video_billing_terms",
+			zap.String("request_id", merged.RequestID),
+			zap.String("billed_model", merged.BillingModel),
+			zap.String("upstream_model", merged.UpstreamModel),
+			zap.String("serving_model", merged.VideoServingModel),
+			zap.String("billed_resolution", merged.VideoResolution),
+			zap.String("delivered_resolution", merged.VideoResolutionDelivered),
+			zap.Int("billed_duration_seconds", merged.VideoDurationSeconds),
+			zap.Bool("resolution_mismatch", service.VideoResolutionMismatch(merged.VideoResolution, merged.VideoResolutionDelivered)),
+		)
+	}
 	// Official default duration is 8s when neither status nor create provided it.
 	merged.VideoDurationSeconds = service.NormalizeVideoBillingDurationSecondsOrDefault(merged.VideoDurationSeconds)
 	// E2E latency for async video: create accept → this discovery of done+url.

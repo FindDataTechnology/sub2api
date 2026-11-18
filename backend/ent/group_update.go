@@ -700,6 +700,33 @@ func (_u *GroupUpdate) ClearWebSearchPricePerCall() *GroupUpdate {
 	return _u
 }
 
+// SetRerankPricePerRequest sets the "rerank_price_per_request" field.
+func (_u *GroupUpdate) SetRerankPricePerRequest(v float64) *GroupUpdate {
+	_u.mutation.ResetRerankPricePerRequest()
+	_u.mutation.SetRerankPricePerRequest(v)
+	return _u
+}
+
+// SetNillableRerankPricePerRequest sets the "rerank_price_per_request" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableRerankPricePerRequest(v *float64) *GroupUpdate {
+	if v != nil {
+		_u.SetRerankPricePerRequest(*v)
+	}
+	return _u
+}
+
+// AddRerankPricePerRequest adds value to the "rerank_price_per_request" field.
+func (_u *GroupUpdate) AddRerankPricePerRequest(v float64) *GroupUpdate {
+	_u.mutation.AddRerankPricePerRequest(v)
+	return _u
+}
+
+// ClearRerankPricePerRequest clears the value of the "rerank_price_per_request" field.
+func (_u *GroupUpdate) ClearRerankPricePerRequest() *GroupUpdate {
+	_u.mutation.ClearRerankPricePerRequest()
+	return _u
+}
+
 // SetSearchPricePer1k sets the "search_price_per_1k" field.
 func (_u *GroupUpdate) SetSearchPricePer1k(v float64) *GroupUpdate {
 	_u.mutation.ResetSearchPricePer1k()
@@ -1547,6 +1574,11 @@ func (_u *GroupUpdate) check() error {
 			return &ValidationError{Name: "subscription_type", err: fmt.Errorf(`ent: validator failed for field "Group.subscription_type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.RerankPricePerRequest(); ok {
+		if err := group.RerankPricePerRequestValidator(v); err != nil {
+			return &ValidationError{Name: "rerank_price_per_request", err: fmt.Errorf(`ent: validator failed for field "Group.rerank_price_per_request": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.SearchPricePer1k(); ok {
 		if err := group.SearchPricePer1kValidator(v); err != nil {
 			return &ValidationError{Name: "search_price_per_1k", err: fmt.Errorf(`ent: validator failed for field "Group.search_price_per_1k": %w`, err)}
@@ -1794,6 +1826,15 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.WebSearchPricePerCallCleared() {
 		_spec.ClearField(group.FieldWebSearchPricePerCall, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.RerankPricePerRequest(); ok {
+		_spec.SetField(group.FieldRerankPricePerRequest, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedRerankPricePerRequest(); ok {
+		_spec.AddField(group.FieldRerankPricePerRequest, field.TypeFloat64, value)
+	}
+	if _u.mutation.RerankPricePerRequestCleared() {
+		_spec.ClearField(group.FieldRerankPricePerRequest, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.SearchPricePer1k(); ok {
 		_spec.SetField(group.FieldSearchPricePer1k, field.TypeFloat64, value)
@@ -2937,6 +2978,33 @@ func (_u *GroupUpdateOne) ClearWebSearchPricePerCall() *GroupUpdateOne {
 	return _u
 }
 
+// SetRerankPricePerRequest sets the "rerank_price_per_request" field.
+func (_u *GroupUpdateOne) SetRerankPricePerRequest(v float64) *GroupUpdateOne {
+	_u.mutation.ResetRerankPricePerRequest()
+	_u.mutation.SetRerankPricePerRequest(v)
+	return _u
+}
+
+// SetNillableRerankPricePerRequest sets the "rerank_price_per_request" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableRerankPricePerRequest(v *float64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetRerankPricePerRequest(*v)
+	}
+	return _u
+}
+
+// AddRerankPricePerRequest adds value to the "rerank_price_per_request" field.
+func (_u *GroupUpdateOne) AddRerankPricePerRequest(v float64) *GroupUpdateOne {
+	_u.mutation.AddRerankPricePerRequest(v)
+	return _u
+}
+
+// ClearRerankPricePerRequest clears the value of the "rerank_price_per_request" field.
+func (_u *GroupUpdateOne) ClearRerankPricePerRequest() *GroupUpdateOne {
+	_u.mutation.ClearRerankPricePerRequest()
+	return _u
+}
+
 // SetSearchPricePer1k sets the "search_price_per_1k" field.
 func (_u *GroupUpdateOne) SetSearchPricePer1k(v float64) *GroupUpdateOne {
 	_u.mutation.ResetSearchPricePer1k()
@@ -3797,6 +3865,11 @@ func (_u *GroupUpdateOne) check() error {
 			return &ValidationError{Name: "subscription_type", err: fmt.Errorf(`ent: validator failed for field "Group.subscription_type": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.RerankPricePerRequest(); ok {
+		if err := group.RerankPricePerRequestValidator(v); err != nil {
+			return &ValidationError{Name: "rerank_price_per_request", err: fmt.Errorf(`ent: validator failed for field "Group.rerank_price_per_request": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.SearchPricePer1k(); ok {
 		if err := group.SearchPricePer1kValidator(v); err != nil {
 			return &ValidationError{Name: "search_price_per_1k", err: fmt.Errorf(`ent: validator failed for field "Group.search_price_per_1k": %w`, err)}
@@ -4061,6 +4134,15 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if _u.mutation.WebSearchPricePerCallCleared() {
 		_spec.ClearField(group.FieldWebSearchPricePerCall, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.RerankPricePerRequest(); ok {
+		_spec.SetField(group.FieldRerankPricePerRequest, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedRerankPricePerRequest(); ok {
+		_spec.AddField(group.FieldRerankPricePerRequest, field.TypeFloat64, value)
+	}
+	if _u.mutation.RerankPricePerRequestCleared() {
+		_spec.ClearField(group.FieldRerankPricePerRequest, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.SearchPricePer1k(); ok {
 		_spec.SetField(group.FieldSearchPricePer1k, field.TypeFloat64, value)

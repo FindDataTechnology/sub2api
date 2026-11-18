@@ -14,12 +14,24 @@ var (
 		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
 		PlatformCommandCode,
 		PlatformCline,
+		// 词元车道上游平台（fork 登记，Gateway=lane）：进全量/组合序，不入
+		// OpenAI 网关族与 CN 供应商清单。
+		PlatformSiliconFlow,
+		PlatformSerpAPI,
+		PlatformOpenAINext,
+		PlatformDoubao,
+		PlatformTencent,
 	}
 	legacyCompositePrecedence = []string{
 		PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok,
 		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
 		PlatformCommandCode,
 		PlatformCline,
+		PlatformSiliconFlow,
+		PlatformSerpAPI,
+		PlatformOpenAINext,
+		PlatformDoubao,
+		PlatformTencent,
 	}
 	legacyOpenAIGateway = []string{
 		PlatformOpenAI, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo,

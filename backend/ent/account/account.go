@@ -30,8 +30,14 @@ const (
 	FieldPlatform = "platform"
 	// FieldType holds the string denoting the type field in the database.
 	FieldType = "type"
-	// FieldCredentials holds the string denoting the credentials field in the database.
-	FieldCredentials = "credentials"
+	// FieldCredentialsMeta holds the string denoting the credentials_meta field in the database.
+	FieldCredentialsMeta = "credentials_meta"
+	// FieldCredentialsEncrypted holds the string denoting the credentials_encrypted field in the database.
+	FieldCredentialsEncrypted = "credentials_encrypted"
+	// FieldCredentialsHash holds the string denoting the credentials_hash field in the database.
+	FieldCredentialsHash = "credentials_hash"
+	// FieldCredentialsAPIKeyHash holds the string denoting the credentials_api_key_hash field in the database.
+	FieldCredentialsAPIKeyHash = "credentials_api_key_hash"
 	// FieldExtra holds the string denoting the extra field in the database.
 	FieldExtra = "extra"
 	// FieldProxyID holds the string denoting the proxy_id field in the database.
@@ -138,7 +144,10 @@ var Columns = []string{
 	FieldNotes,
 	FieldPlatform,
 	FieldType,
-	FieldCredentials,
+	FieldCredentialsMeta,
+	FieldCredentialsEncrypted,
+	FieldCredentialsHash,
+	FieldCredentialsAPIKeyHash,
 	FieldExtra,
 	FieldProxyID,
 	FieldProxyFallbackOriginID,
@@ -200,8 +209,12 @@ var (
 	PlatformValidator func(string) error
 	// TypeValidator is a validator for the "type" field. It is called by the builders before save.
 	TypeValidator func(string) error
-	// DefaultCredentials holds the default value on creation for the "credentials" field.
-	DefaultCredentials func() map[string]interface{}
+	// DefaultCredentialsMeta holds the default value on creation for the "credentials_meta" field.
+	DefaultCredentialsMeta func() map[string]interface{}
+	// CredentialsHashValidator is a validator for the "credentials_hash" field. It is called by the builders before save.
+	CredentialsHashValidator func(string) error
+	// CredentialsAPIKeyHashValidator is a validator for the "credentials_api_key_hash" field. It is called by the builders before save.
+	CredentialsAPIKeyHashValidator func(string) error
 	// DefaultExtra holds the default value on creation for the "extra" field.
 	DefaultExtra func() map[string]interface{}
 	// DefaultConcurrency holds the default value on creation for the "concurrency" field.
@@ -289,6 +302,21 @@ func ByPlatform(opts ...sql.OrderTermOption) OrderOption {
 // ByType orders the results by the type field.
 func ByType(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldType, opts...).ToFunc()
+}
+
+// ByCredentialsEncrypted orders the results by the credentials_encrypted field.
+func ByCredentialsEncrypted(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCredentialsEncrypted, opts...).ToFunc()
+}
+
+// ByCredentialsHash orders the results by the credentials_hash field.
+func ByCredentialsHash(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCredentialsHash, opts...).ToFunc()
+}
+
+// ByCredentialsAPIKeyHash orders the results by the credentials_api_key_hash field.
+func ByCredentialsAPIKeyHash(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCredentialsAPIKeyHash, opts...).ToFunc()
 }
 
 // ByProxyID orders the results by the proxy_id field.

@@ -34,10 +34,23 @@ func (APIKey) Mixin() []ent.Mixin {
 func (APIKey) Fields() []ent.Field {
 	return []ent.Field{
 		field.Int64("user_id"),
-		field.String("key").
-			MaxLen(128).
-			NotEmpty().
+		// ⚠️ 明文列 `key` 已在阶段 5.2 删除（迁移 251_credential_drop_plaintext_columns）。
+		// 明文只存在于 key_encrypted（权威副本，解密后使用），定位走 key_hash。
+		// 删字段必须先于 DDL：ent 的 SELECT 列出 schema 全部字段，列没了还留字段
+		// 会让所有 ent 查询 `column "key" does not exist`。
+		// key_hash: sha256(key) 的 hex，用于"拿 key 找行"而不必解密任何东西。
+		// 可空：迁移完成前为 NULL（Postgres 的唯一索引允许多个 NULL），
+		// 迁移完成后由应用层保证写入。
+		field.String("key_hash").
+			MaxLen(64).
+			Optional().
+			Nillable().
 			Unique(),
+		// key_encrypted: key 的 AES-256-GCM 密文。为空表示该行尚未迁移，
+		// 读路径回落到明文列 key 并打点计数。
+		field.String("key_encrypted").
+			Optional().
+			Nillable(),
 		field.String("name").
 			MaxLen(100).
 			NotEmpty(),
@@ -74,6 +87,33 @@ func (APIKey) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("Expiration time for this API key (null = never expires)"),
+
+		// ========== Capacity contract fields (add-key-capacity-contract) ==========
+		// 容量契约：user 是池（users.concurrency），key 是池内席位。
+		// 剩余额度只用「池容量 − Σrequest」查询聚合得出，不维护物化计数器
+		// （漏减一次即永久漂移，且无自证手段）。
+		//
+		// concurrency_request = 保底：该 key 保证拿到的并发额度，不被其它 key 申请占用。
+		//   只保证「额度保留」，**不保证**池饱和时的吞吐——要吞吐保证请让 limit = request。
+		// 全部活跃 key 的 request 之和 MUST <= 池容量（写路径事务内持锁校验）。
+		field.Int("concurrency_request").
+			Default(0).
+			Comment("Guaranteed concurrency share (0 = no reservation); sum across active keys must not exceed the user's pool"),
+		// concurrency_limit = 该 key 的硬顶（0 = 不额外限制，可借支到池上限）。
+		field.Int("concurrency_limit").
+			Default(0).
+			Comment("Hard concurrency ceiling for this key (0 = no extra ceiling; may borrow up to the user pool)"),
+		// rpm_limit = 每分钟请求数上限（0 = 不限）。速率不是池，故不做 Σkey.rpm <= user.rpm 校验，
+		// 只做运行时两级判定（key 超自己 / user 超全局）。
+		field.Int("rpm_limit").
+			Default(0).
+			Comment("Requests-per-minute ceiling for this key (0 = unlimited)"),
+		// effective_at = 生效时刻（null = 创建即生效）。到期语义仍由 expires_at 承担。
+		// 未到时刻鉴权通过但请求被拒（KEY_NOT_YET_EFFECTIVE），不用 401 —— 身份本身有效。
+		field.Time("effective_at").
+			Optional().
+			Nillable().
+			Comment("Key becomes usable at this instant (null = effective immediately)"),
 
 		// ========== Rate limit fields ==========
 		// Rate limit configuration (0 = unlimited)

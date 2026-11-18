@@ -241,3 +241,5 @@ func TestRequestTypeLive(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, RequestTypeLive, parsed)
 }
+
+func (s *liveHTTPUpstreamStub) RecordAIMDResult(accountID int64, statusCode int) {}

@@ -897,8 +897,18 @@ func (s *SchedulerSnapshotService) rebuildByAccount(ctx context.Context, account
 }
 
 // schedulerSnapshotPlatforms 返回需要维护调度快照的全部具体平台（平台清单）。
+// 词元车道平台（Gateway=lane，fork 缝点）排除：无 chat 账号可调度，空桶只白耗
+// 内存（inflight 8MB 界测试实证 +2 平台即越线）。
 func schedulerSnapshotPlatforms() []string {
-	return domain.CompositePrecedencePlatformIDs()
+	ids := domain.CompositePrecedencePlatformIDs()
+	out := ids[:0]
+	for _, id := range ids {
+		if spec, ok := domain.LookupPlatform(id); ok && spec.Gateway == domain.PlatformGatewayLane {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
 }
 
 // 生命周期辅助函数有意排除 group0；full rebuild 构造 group0 canonical 集时必须显式调用 canonical helper。

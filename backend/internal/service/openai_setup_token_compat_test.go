@@ -246,3 +246,4 @@ func openAISetupTokenCompatAccount(id int64) *Account {
 		},
 	}
 }
+

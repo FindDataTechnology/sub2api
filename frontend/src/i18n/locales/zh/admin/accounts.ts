@@ -754,6 +754,21 @@ export default {
       setupTokenLongLived: 'Setup Token（长期有效）',
       baseUrl: 'Base URL',
       baseUrlHint: '留空使用官方 Anthropic API',
+      laneProviders: {
+        hint: '车道上游平台仅供模型车道端点消费（重排 / 搜索 / 音频）：凭据只需 API Key，Base URL 留空即用内置上游端点。',
+        baseUrlHint: '留空使用车道内置上游端点；填写则覆盖该平台的默认上游地址。',
+        apiKeyHint: '该车道上游服务商签发的 API Key',
+        tencent: {
+          secretId: 'SecretId',
+          secretIdHint: '腾讯云控制台 → 访问管理 → API 密钥管理中的 SecretId（AKID 开头）',
+          secretKey: 'SecretKey',
+          secretKeyHint: '与 SecretId 配对的 SecretKey，标准 32 位字符；请完整复制，缺失末尾字符会导致签名校验失败',
+          secretIdRequired: '请填写腾讯云 SecretId',
+          secretKeyRequired: '请填写腾讯云 SecretKey',
+          region: '地域（Region）',
+          regionHint: '语音合成支持 ap-beijing / ap-chengdu / ap-chongqing / ap-guangzhou / ap-nanjing / ap-shanghai，默认 ap-guangzhou'
+        }
+      },
       apiKeyRequired: 'API Key *',
       apiKeyPlaceholder: 'sk-ant-api03-...',
       apiKeyHint: '您的 Claude Console API Key',
@@ -818,7 +833,7 @@ export default {
         imageSizeTiersAtLeastOne: '至少保留一个档位',
         endpointCapabilities: '端点能力',
         endpointCapabilitiesDesc:
-          '用于调度筛选。文本端点会跟随上方 Responses API 支持显示为 Responses、Chat Completions 或自动模式；Embeddings 独立控制 /v1/embeddings。',
+          '用于调度筛选。文本端点会跟随上方 Responses API 支持显示为 Responses、Chat Completions 或自动模式；Embeddings 独立控制 /v1/embeddings。勾选 Seedance 需在上方 Base URL 填视频上游端点（如 https://api.openai-next.com/seedance），调度即只按该能力集筛选候选账号。',
         capabilityResponses: 'Responses',
         capabilityTextAuto: 'Responses / Chat Completions（自动）',
         capabilityResponsesAuto: 'Responses（自动探测）',
@@ -945,6 +960,12 @@ export default {
       },
       modelRestriction: '模型限制（可选）',
       modelWhitelist: '模型白名单',
+      embeddingProviderOnly: 'Embedding 细分渠道（钉扎）',
+      embeddingProviderUnset: '未钉扎（跟随聚合渠道路由，不推荐）',
+      embeddingProviderOnlyHint:
+        '同一 embedding 模型在聚合渠道上挂多家上游，各家量化不同、向量空间互不通用。' +
+        '换渠道等于换向量空间，会让历史向量与新查询来自不同空间、检索静默漂移。' +
+        '请选定一家并长期保持不变；切换后必须重建历史向量。',
       modelMapping: '模型映射',
       fromModel: '请求模型',
       toModel: '目标模型',

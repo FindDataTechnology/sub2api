@@ -168,6 +168,15 @@ func (Group) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).
 			Comment("Codex alpha/search 网页搜索单次价格（USD/次）；nil 表示使用默认价 0.01（官方 $10/1000 次）"),
 
+		// 词元 rerank 车道显式定价（USD/请求）；nil 表示未配置=按 0 计费并告警
+		//（fork 缝点，台账§二「分组价目」；开放车道前必须在 admin 配置）。
+		field.Float("rerank_price_per_request").
+			Optional().
+			Nillable().
+			Min(0).
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).
+			Comment("词元 rerank 车道每请求价格（USD/次）；nil=未配置按 0 计费并告警"),
+
 		// 搜索/工具调用显式定价（per 1k calls），用于 Grok web_search 等。
 		field.Float("search_price_per_1k").
 			Optional().

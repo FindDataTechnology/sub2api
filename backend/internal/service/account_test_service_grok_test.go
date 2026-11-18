@@ -642,3 +642,4 @@ func TestAccountTestService_GrokRealtimeModeDialFailure(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"type":"error"`)
 	require.Contains(t, rec.Body.String(), "Realtime")
 }
+

@@ -4735,3 +4735,4 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_InvalidEncrypted
 	require.Equal(t, "rs_1", gjson.Get(secondUpstream, "input.0.id").String())
 	require.Equal(t, "again", gjson.Get(secondUpstream, "input.2.text").String())
 }
+

@@ -278,6 +278,36 @@
           }
         ]
       }
+    },
+    {
+      "id": "siliconflow",
+      "display_name": "SiliconFlow",
+      "gateway": "lane",
+      "cn_provider": false
+    },
+    {
+      "id": "serpapi",
+      "display_name": "SerpAPI",
+      "gateway": "lane",
+      "cn_provider": false
+    },
+    {
+      "id": "openainext",
+      "display_name": "OpenAI-Next",
+      "gateway": "lane",
+      "cn_provider": false
+    },
+    {
+      "id": "doubao",
+      "display_name": "Doubao Voice (Volcengine)",
+      "gateway": "lane",
+      "cn_provider": false
+    },
+    {
+      "id": "tencent",
+      "display_name": "Tencent Cloud Voice",
+      "gateway": "lane",
+      "cn_provider": false
     }
   ],
   "composite_precedence": [
@@ -293,6 +323,11 @@
     "opencode_go",
     "typesafe",
     "command_code",
-    "cline"
+    "cline",
+    "siliconflow",
+    "serpapi",
+    "openainext",
+    "doubao",
+    "tencent"
   ]
 }

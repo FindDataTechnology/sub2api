@@ -400,3 +400,5 @@ func TestTypeSafeModelsListCandidates(t *testing.T) {
 	require.Equal(t, []string{typesafe.JevLatestModel}, defaultModelsListCandidateIDs(PlatformTypeSafe))
 	require.NotContains(t, compositeDefaultModelsListCandidateIDs(), typesafe.JevLatestModel)
 }
+
+func (u *systemOneHTTPUpstream) RecordAIMDResult(accountID int64, statusCode int) {}

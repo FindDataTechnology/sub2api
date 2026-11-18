@@ -1986,3 +1986,5 @@ func TestSonnet55BedrockCCCompatTransformsBeforeValidation(t *testing.T) {
 		})
 	}
 }
+
+func (u *anthropicHTTPUpstreamRecorder) RecordAIMDResult(accountID int64, statusCode int) {}

@@ -293,13 +293,30 @@ type OpenAIForwardResult struct {
 	ImageOutputSizes   []string
 	ImageSizeSource    string
 	ImageSizeBreakdown map[string]int
-	VideoCount         int
-	VideoResolution    string
+	// ImageServingModel 是图片响应体自报的承做模型（实测请求 grok-imagine-image、
+	// 响应 `"model":"hunyuan-image-alpha"`）。与 UpstreamModel 的区别同 VideoServingModel：
+	// 前者是发出去的名字（参与定价），这个是上游说它实际用什么做的，只留痕与对账——
+	// 上游 credit 按实际承做方结算，台账若只记 grok，对账时这一环无从追溯。
+	ImageServingModel string
+	VideoCount        int
+	VideoResolution   string
+	// VideoResolutionDelivered 是上游终态自报的实际交付分辨率（原样，不归一化；常见
+	// `"resolution":"720P"`）。空表示这一种状态体没有这个字段（官方 xAI 终态就没有）。
+	// 计费永远按请求侧（客户买的那一档），这个值只用来留痕：实测上游会无视 480p 一律
+	// 交 720P，不记下来就等于「按 480p 收、交 720p」这件事无人可见。
+	VideoResolutionDelivered string
+	// VideoServingModel 是状态体自报的承做模型（实测 "kling-video-v3"）。与 UpstreamModel
+	// 是两回事：UpstreamModel 是「请求映射后发给上游的模型名」（客户买的那个），这个是
+	// 上游自己说它实际用什么做的。只用来留痕与排障，不参与定价。
+	VideoServingModel string
 	// VideoDurationSeconds 是提交时请求的生成时长（xAI 按输出秒数计费），已归一化到 1-15 秒。
 	VideoDurationSeconds int
 	// WebSearchCalls 是 Codex alpha/search 网页搜索调用次数（每次成功请求为 1）。
 	// 上游不返回 usage 字段，>0 时走按次计费（分组单价 × 次数 × 倍率）。
 	WebSearchCalls int
+	// RerankRequests 是词元 rerank 车道成功请求数（每次为 1；fork 缝点）。
+	// >0 时走按请求计费（分组 RerankPricePerRequest × 次数 × 倍率）。
+	RerankRequests int
 	// SearchCount is Grok-native web_search / tool search call count (per 1k pricing).
 	SearchCount int
 	// AudioUsage carries Voice billing units when present.
@@ -1289,4 +1306,10 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 	default:
 		return "", "", fmt.Errorf("unsupported account type: %s", account.Type)
 	}
+}
+
+// LanesAccountRepo 词元车道（internal/lanes）上游池取数访问器（缝点台账§二
+// 「service 账号仓储访问器」，只增）。
+func (s *OpenAIGatewayService) LanesAccountRepo() AccountRepository {
+	return s.accountRepo
 }

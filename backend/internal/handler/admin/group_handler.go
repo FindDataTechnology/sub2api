@@ -222,6 +222,7 @@ type CreateGroupRequest struct {
 	VideoPrice1080P                 *float64                      `json:"video_price_1080p"`
 	VideoModelPrices                map[string]map[string]float64 `json:"video_model_prices,omitempty"`
 	WebSearchPricePerCall           *float64                      `json:"web_search_price_per_call"`
+	RerankPricePerRequest           *float64                      `json:"rerank_price_per_request"`
 	SearchPricePer1k                *float64                      `json:"search_price_per_1k"`
 	AudioRealtimePricePerMin        *float64                      `json:"audio_realtime_price_per_min"`
 	AudioTtsPricePerMillionChars    *float64                      `json:"audio_tts_price_per_million_chars"`
@@ -300,6 +301,7 @@ type UpdateGroupRequest struct {
 	VideoPrice1080P                 *float64                      `json:"video_price_1080p"`
 	VideoModelPrices                map[string]map[string]float64 `json:"video_model_prices,omitempty"`
 	WebSearchPricePerCall           *float64                      `json:"web_search_price_per_call"`
+	RerankPricePerRequest           *float64                      `json:"rerank_price_per_request"`
 	SearchPricePer1k                *float64                      `json:"search_price_per_1k"`
 	AudioRealtimePricePerMin        *float64                      `json:"audio_realtime_price_per_min"`
 	AudioTtsPricePerMillionChars    *float64                      `json:"audio_tts_price_per_million_chars"`
@@ -707,6 +709,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		VideoPrice1080P:                 req.VideoPrice1080P,
 		VideoModelPrices:                req.VideoModelPrices,
 		WebSearchPricePerCall:           req.WebSearchPricePerCall,
+		RerankPricePerRequest:           req.RerankPricePerRequest,
 		SearchPricePer1k:                req.SearchPricePer1k,
 		AudioRealtimePricePerMin:        req.AudioRealtimePricePerMin,
 		AudioTTSPricePerMillionChars:    req.AudioTtsPricePerMillionChars,
@@ -856,6 +859,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		VideoPrice1080P:                 req.VideoPrice1080P,
 		VideoModelPrices:                req.VideoModelPrices,
 		WebSearchPricePerCall:           req.WebSearchPricePerCall,
+		RerankPricePerRequest:           req.RerankPricePerRequest,
 		SearchPricePer1k:                req.SearchPricePer1k,
 		AudioRealtimePricePerMin:        req.AudioRealtimePricePerMin,
 		AudioTTSPricePerMillionChars:    req.AudioTtsPricePerMillionChars,

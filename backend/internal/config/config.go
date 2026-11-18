@@ -404,6 +404,7 @@ type OIDCConnectConfig struct {
 	JWKSURL                 string `mapstructure:"jwks_url"`
 	Scopes                  string `mapstructure:"scopes"`                // 默认 "openid email profile"
 	RedirectURL             string `mapstructure:"redirect_url"`          // 后端回调地址（需在提供方后台登记）
+	RedirectURLAliases      string `mapstructure:"redirect_url_aliases"`  // 别名回调集合（逗号分隔的完整 URI；命中请求 Host 时按其派生回调，词元多宿主缝点）
 	FrontendRedirectURL     string `mapstructure:"frontend_redirect_url"` // 前端接收 token 的路由（默认：/auth/oidc/callback）
 	TokenAuthMethod         string `mapstructure:"token_auth_method"`     // client_secret_post / client_secret_basic / none
 	UsePKCE                 bool   `mapstructure:"use_pkce"`
@@ -2283,6 +2284,7 @@ func setDefaults() {
 	viper.SetDefault("oidc_connect.jwks_url", "")
 	viper.SetDefault("oidc_connect.scopes", "openid email profile")
 	viper.SetDefault("oidc_connect.redirect_url", "")
+	viper.SetDefault("oidc_connect.redirect_url_aliases", "")
 	viper.SetDefault("oidc_connect.frontend_redirect_url", "/auth/oidc/callback")
 	viper.SetDefault("oidc_connect.token_auth_method", "client_secret_post")
 	viper.SetDefault("oidc_connect.use_pkce", true)

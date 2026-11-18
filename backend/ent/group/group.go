@@ -90,6 +90,8 @@ const (
 	FieldVideoModelPrices = "video_model_prices"
 	// FieldWebSearchPricePerCall holds the string denoting the web_search_price_per_call field in the database.
 	FieldWebSearchPricePerCall = "web_search_price_per_call"
+	// FieldRerankPricePerRequest holds the string denoting the rerank_price_per_request field in the database.
+	FieldRerankPricePerRequest = "rerank_price_per_request"
 	// FieldSearchPricePer1k holds the string denoting the search_price_per_1k field in the database.
 	FieldSearchPricePer1k = "search_price_per_1k"
 	// FieldAudioRealtimePricePerMin holds the string denoting the audio_realtime_price_per_min field in the database.
@@ -266,6 +268,7 @@ var Columns = []string{
 	FieldVideoPrice1080p,
 	FieldVideoModelPrices,
 	FieldWebSearchPricePerCall,
+	FieldRerankPricePerRequest,
 	FieldSearchPricePer1k,
 	FieldAudioRealtimePricePerMin,
 	FieldAudioTtsPricePerMillionChars,
@@ -387,6 +390,8 @@ var (
 	DefaultVideoRateIndependent bool
 	// DefaultVideoRateMultiplier holds the default value on creation for the "video_rate_multiplier" field.
 	DefaultVideoRateMultiplier float64
+	// RerankPricePerRequestValidator is a validator for the "rerank_price_per_request" field. It is called by the builders before save.
+	RerankPricePerRequestValidator func(float64) error
 	// SearchPricePer1kValidator is a validator for the "search_price_per_1k" field. It is called by the builders before save.
 	SearchPricePer1kValidator func(float64) error
 	// AudioRealtimePricePerMinValidator is a validator for the "audio_realtime_price_per_min" field. It is called by the builders before save.
@@ -632,6 +637,11 @@ func ByVideoPrice1080p(opts ...sql.OrderTermOption) OrderOption {
 // ByWebSearchPricePerCall orders the results by the web_search_price_per_call field.
 func ByWebSearchPricePerCall(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldWebSearchPricePerCall, opts...).ToFunc()
+}
+
+// ByRerankPricePerRequest orders the results by the rerank_price_per_request field.
+func ByRerankPricePerRequest(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRerankPricePerRequest, opts...).ToFunc()
 }
 
 // BySearchPricePer1k orders the results by the search_price_per_1k field.

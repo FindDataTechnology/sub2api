@@ -230,6 +230,11 @@ func WebSearchPricePerCall(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldWebSearchPricePerCall, v))
 }
 
+// RerankPricePerRequest applies equality check predicate on the "rerank_price_per_request" field. It's identical to RerankPricePerRequestEQ.
+func RerankPricePerRequest(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldRerankPricePerRequest, v))
+}
+
 // SearchPricePer1k applies equality check predicate on the "search_price_per_1k" field. It's identical to SearchPricePer1kEQ.
 func SearchPricePer1k(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldSearchPricePer1k, v))
@@ -1883,6 +1888,56 @@ func WebSearchPricePerCallIsNil() predicate.Group {
 // WebSearchPricePerCallNotNil applies the NotNil predicate on the "web_search_price_per_call" field.
 func WebSearchPricePerCallNotNil() predicate.Group {
 	return predicate.Group(sql.FieldNotNull(FieldWebSearchPricePerCall))
+}
+
+// RerankPricePerRequestEQ applies the EQ predicate on the "rerank_price_per_request" field.
+func RerankPricePerRequestEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldRerankPricePerRequest, v))
+}
+
+// RerankPricePerRequestNEQ applies the NEQ predicate on the "rerank_price_per_request" field.
+func RerankPricePerRequestNEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldRerankPricePerRequest, v))
+}
+
+// RerankPricePerRequestIn applies the In predicate on the "rerank_price_per_request" field.
+func RerankPricePerRequestIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldRerankPricePerRequest, vs...))
+}
+
+// RerankPricePerRequestNotIn applies the NotIn predicate on the "rerank_price_per_request" field.
+func RerankPricePerRequestNotIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldRerankPricePerRequest, vs...))
+}
+
+// RerankPricePerRequestGT applies the GT predicate on the "rerank_price_per_request" field.
+func RerankPricePerRequestGT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldRerankPricePerRequest, v))
+}
+
+// RerankPricePerRequestGTE applies the GTE predicate on the "rerank_price_per_request" field.
+func RerankPricePerRequestGTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldRerankPricePerRequest, v))
+}
+
+// RerankPricePerRequestLT applies the LT predicate on the "rerank_price_per_request" field.
+func RerankPricePerRequestLT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldRerankPricePerRequest, v))
+}
+
+// RerankPricePerRequestLTE applies the LTE predicate on the "rerank_price_per_request" field.
+func RerankPricePerRequestLTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldRerankPricePerRequest, v))
+}
+
+// RerankPricePerRequestIsNil applies the IsNil predicate on the "rerank_price_per_request" field.
+func RerankPricePerRequestIsNil() predicate.Group {
+	return predicate.Group(sql.FieldIsNull(FieldRerankPricePerRequest))
+}
+
+// RerankPricePerRequestNotNil applies the NotNil predicate on the "rerank_price_per_request" field.
+func RerankPricePerRequestNotNil() predicate.Group {
+	return predicate.Group(sql.FieldNotNull(FieldRerankPricePerRequest))
 }
 
 // SearchPricePer1kEQ applies the EQ predicate on the "search_price_per_1k" field.

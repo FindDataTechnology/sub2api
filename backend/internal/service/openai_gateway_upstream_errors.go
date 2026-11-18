@@ -376,6 +376,17 @@ const OpenAIRequestBodyTooLargeClientMessage = "Request payload is too large"
 
 const openAIRequestBodyTooLargeReason = GatewayFailureReason("openai_request_body_too_large")
 
+// AccountQueueFastRejectReason: 有界队列快速拒（add-sub2api-fork-concurrency
+// 2.1）——本池自己发布的容量信号（ErrQueueFull/ErrAccountTripped），不是上游
+// 的限流 429。类型化 Reason 让 handler 渲染分支与真上游 429 分流。
+const AccountQueueFastRejectReason = GatewayFailureReason("account_queue_fast_reject")
+
+// IsAccountQueueFastReject: 该 failover 错误由账号有界队列快速拒产生（429 +
+// Retry-After，终止性——不再把压力推给下一个账号）。
+func (e *UpstreamFailoverError) IsAccountQueueFastReject() bool {
+	return e != nil && e.Reason == AccountQueueFastRejectReason
+}
+
 func isOpenAIRequestBodyTooLargeError(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
 	return statusCode == http.StatusRequestEntityTooLarge && !isOpenAIContextWindowError(upstreamMsg, upstreamBody)
 }

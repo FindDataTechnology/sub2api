@@ -603,12 +603,32 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	pricingAt time.Time,
 ) (*CostBreakdown, error) {
 	billingModel := firstUsageBillingModel(billingModels)
+	if result != nil && result.WebSearchCalls > 0 && strings.HasPrefix(result.UpstreamModel, "byok:") {
+		// 词元 websearch BYOK 笔（fork 缝点，台账§二「分组价目」；ciyuan-lane-pool-failover 4.2）：
+		// 用户自带 key 服务，平台零成本——计量保留归因（UpstreamModel=byok:<hash8>），
+		// 费率恒 0，不产生平台计费。零费形状同 pricing_missing 回退。
+		return &CostBreakdown{BillingMode: string(BillingModeToken)}, nil
+	}
 	if result != nil && result.WebSearchCalls > 0 {
 		// Codex alpha/search 网页搜索按次计费：上游不返回 usage/token 字段，单价只取
 		// 分组覆盖价（nil 时默认 0.01 = 官方 $10/1000 次），不参与渠道级模型定价。
 		// 倍率与 image/video 按次口径一致：使用不含高峰因子的基础倍率
 		//（用户专属 > 分组 rate_multiplier > 系统默认），与分组表单的价格预览承诺一致。
 		return s.billingService.CalculateWebSearchCost(result.WebSearchCalls, webSearchPricePerCallFromAPIKey(apiKey), webSearchMultiplier), nil
+	}
+	if result != nil && result.RerankRequests > 0 {
+		// 词元 rerank 车道按请求计费（fork 缝点，台账§二「分组价目」）：单价取
+		// 分组 rerank_price_per_request；nil=未配置→0 计费并告警（开放前须配置）。
+		// 倍率口径同 web search：基础倍率（用户专属 > 分组 > 默认），无高峰因子。
+		if price := rerankPricePerRequestFromAPIKey(apiKey); price == nil {
+			logger.L().With(
+				zap.String("component", "service.openai_gateway.rerank_lane"),
+				zap.String("model", billingModel),
+				zap.Int64("api_key_id", apiKey.ID),
+				zap.Any("group_id", apiKey.GroupID),
+			).Warn("rerank_lane.price_missing_bill_zero")
+		}
+		return s.billingService.CalculateRerankCost(result.RerankRequests, rerankPricePerRequestFromAPIKey(apiKey), webSearchMultiplier), nil
 	}
 	if isGrokVideoUsageResult(result, billingModels) {
 		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {

@@ -73,9 +73,31 @@ func (_c *APIKeyCreate) SetUserID(v int64) *APIKeyCreate {
 	return _c
 }
 
-// SetKey sets the "key" field.
-func (_c *APIKeyCreate) SetKey(v string) *APIKeyCreate {
-	_c.mutation.SetKey(v)
+// SetKeyHash sets the "key_hash" field.
+func (_c *APIKeyCreate) SetKeyHash(v string) *APIKeyCreate {
+	_c.mutation.SetKeyHash(v)
+	return _c
+}
+
+// SetNillableKeyHash sets the "key_hash" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableKeyHash(v *string) *APIKeyCreate {
+	if v != nil {
+		_c.SetKeyHash(*v)
+	}
+	return _c
+}
+
+// SetKeyEncrypted sets the "key_encrypted" field.
+func (_c *APIKeyCreate) SetKeyEncrypted(v string) *APIKeyCreate {
+	_c.mutation.SetKeyEncrypted(v)
+	return _c
+}
+
+// SetNillableKeyEncrypted sets the "key_encrypted" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableKeyEncrypted(v *string) *APIKeyCreate {
+	if v != nil {
+		_c.SetKeyEncrypted(*v)
+	}
 	return _c
 }
 
@@ -177,6 +199,62 @@ func (_c *APIKeyCreate) SetExpiresAt(v time.Time) *APIKeyCreate {
 func (_c *APIKeyCreate) SetNillableExpiresAt(v *time.Time) *APIKeyCreate {
 	if v != nil {
 		_c.SetExpiresAt(*v)
+	}
+	return _c
+}
+
+// SetConcurrencyRequest sets the "concurrency_request" field.
+func (_c *APIKeyCreate) SetConcurrencyRequest(v int) *APIKeyCreate {
+	_c.mutation.SetConcurrencyRequest(v)
+	return _c
+}
+
+// SetNillableConcurrencyRequest sets the "concurrency_request" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableConcurrencyRequest(v *int) *APIKeyCreate {
+	if v != nil {
+		_c.SetConcurrencyRequest(*v)
+	}
+	return _c
+}
+
+// SetConcurrencyLimit sets the "concurrency_limit" field.
+func (_c *APIKeyCreate) SetConcurrencyLimit(v int) *APIKeyCreate {
+	_c.mutation.SetConcurrencyLimit(v)
+	return _c
+}
+
+// SetNillableConcurrencyLimit sets the "concurrency_limit" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableConcurrencyLimit(v *int) *APIKeyCreate {
+	if v != nil {
+		_c.SetConcurrencyLimit(*v)
+	}
+	return _c
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (_c *APIKeyCreate) SetRpmLimit(v int) *APIKeyCreate {
+	_c.mutation.SetRpmLimit(v)
+	return _c
+}
+
+// SetNillableRpmLimit sets the "rpm_limit" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableRpmLimit(v *int) *APIKeyCreate {
+	if v != nil {
+		_c.SetRpmLimit(*v)
+	}
+	return _c
+}
+
+// SetEffectiveAt sets the "effective_at" field.
+func (_c *APIKeyCreate) SetEffectiveAt(v time.Time) *APIKeyCreate {
+	_c.mutation.SetEffectiveAt(v)
+	return _c
+}
+
+// SetNillableEffectiveAt sets the "effective_at" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableEffectiveAt(v *time.Time) *APIKeyCreate {
+	if v != nil {
+		_c.SetEffectiveAt(*v)
 	}
 	return _c
 }
@@ -395,6 +473,18 @@ func (_c *APIKeyCreate) defaults() error {
 		v := apikey.DefaultQuotaUsed
 		_c.mutation.SetQuotaUsed(v)
 	}
+	if _, ok := _c.mutation.ConcurrencyRequest(); !ok {
+		v := apikey.DefaultConcurrencyRequest
+		_c.mutation.SetConcurrencyRequest(v)
+	}
+	if _, ok := _c.mutation.ConcurrencyLimit(); !ok {
+		v := apikey.DefaultConcurrencyLimit
+		_c.mutation.SetConcurrencyLimit(v)
+	}
+	if _, ok := _c.mutation.RpmLimit(); !ok {
+		v := apikey.DefaultRpmLimit
+		_c.mutation.SetRpmLimit(v)
+	}
 	if _, ok := _c.mutation.RateLimit5h(); !ok {
 		v := apikey.DefaultRateLimit5h
 		_c.mutation.SetRateLimit5h(v)
@@ -433,12 +523,9 @@ func (_c *APIKeyCreate) check() error {
 	if _, ok := _c.mutation.UserID(); !ok {
 		return &ValidationError{Name: "user_id", err: errors.New(`ent: missing required field "APIKey.user_id"`)}
 	}
-	if _, ok := _c.mutation.Key(); !ok {
-		return &ValidationError{Name: "key", err: errors.New(`ent: missing required field "APIKey.key"`)}
-	}
-	if v, ok := _c.mutation.Key(); ok {
-		if err := apikey.KeyValidator(v); err != nil {
-			return &ValidationError{Name: "key", err: fmt.Errorf(`ent: validator failed for field "APIKey.key": %w`, err)}
+	if v, ok := _c.mutation.KeyHash(); ok {
+		if err := apikey.KeyHashValidator(v); err != nil {
+			return &ValidationError{Name: "key_hash", err: fmt.Errorf(`ent: validator failed for field "APIKey.key_hash": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.Name(); !ok {
@@ -462,6 +549,15 @@ func (_c *APIKeyCreate) check() error {
 	}
 	if _, ok := _c.mutation.QuotaUsed(); !ok {
 		return &ValidationError{Name: "quota_used", err: errors.New(`ent: missing required field "APIKey.quota_used"`)}
+	}
+	if _, ok := _c.mutation.ConcurrencyRequest(); !ok {
+		return &ValidationError{Name: "concurrency_request", err: errors.New(`ent: missing required field "APIKey.concurrency_request"`)}
+	}
+	if _, ok := _c.mutation.ConcurrencyLimit(); !ok {
+		return &ValidationError{Name: "concurrency_limit", err: errors.New(`ent: missing required field "APIKey.concurrency_limit"`)}
+	}
+	if _, ok := _c.mutation.RpmLimit(); !ok {
+		return &ValidationError{Name: "rpm_limit", err: errors.New(`ent: missing required field "APIKey.rpm_limit"`)}
 	}
 	if _, ok := _c.mutation.RateLimit5h(); !ok {
 		return &ValidationError{Name: "rate_limit_5h", err: errors.New(`ent: missing required field "APIKey.rate_limit_5h"`)}
@@ -523,9 +619,13 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 		_spec.SetField(apikey.FieldDeletedAt, field.TypeTime, value)
 		_node.DeletedAt = &value
 	}
-	if value, ok := _c.mutation.Key(); ok {
-		_spec.SetField(apikey.FieldKey, field.TypeString, value)
-		_node.Key = value
+	if value, ok := _c.mutation.KeyHash(); ok {
+		_spec.SetField(apikey.FieldKeyHash, field.TypeString, value)
+		_node.KeyHash = &value
+	}
+	if value, ok := _c.mutation.KeyEncrypted(); ok {
+		_spec.SetField(apikey.FieldKeyEncrypted, field.TypeString, value)
+		_node.KeyEncrypted = &value
 	}
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
@@ -558,6 +658,22 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ExpiresAt(); ok {
 		_spec.SetField(apikey.FieldExpiresAt, field.TypeTime, value)
 		_node.ExpiresAt = &value
+	}
+	if value, ok := _c.mutation.ConcurrencyRequest(); ok {
+		_spec.SetField(apikey.FieldConcurrencyRequest, field.TypeInt, value)
+		_node.ConcurrencyRequest = value
+	}
+	if value, ok := _c.mutation.ConcurrencyLimit(); ok {
+		_spec.SetField(apikey.FieldConcurrencyLimit, field.TypeInt, value)
+		_node.ConcurrencyLimit = value
+	}
+	if value, ok := _c.mutation.RpmLimit(); ok {
+		_spec.SetField(apikey.FieldRpmLimit, field.TypeInt, value)
+		_node.RpmLimit = value
+	}
+	if value, ok := _c.mutation.EffectiveAt(); ok {
+		_spec.SetField(apikey.FieldEffectiveAt, field.TypeTime, value)
+		_node.EffectiveAt = &value
 	}
 	if value, ok := _c.mutation.RateLimit5h(); ok {
 		_spec.SetField(apikey.FieldRateLimit5h, field.TypeFloat64, value)
@@ -739,15 +855,39 @@ func (u *APIKeyUpsert) UpdateUserID() *APIKeyUpsert {
 	return u
 }
 
-// SetKey sets the "key" field.
-func (u *APIKeyUpsert) SetKey(v string) *APIKeyUpsert {
-	u.Set(apikey.FieldKey, v)
+// SetKeyHash sets the "key_hash" field.
+func (u *APIKeyUpsert) SetKeyHash(v string) *APIKeyUpsert {
+	u.Set(apikey.FieldKeyHash, v)
 	return u
 }
 
-// UpdateKey sets the "key" field to the value that was provided on create.
-func (u *APIKeyUpsert) UpdateKey() *APIKeyUpsert {
-	u.SetExcluded(apikey.FieldKey)
+// UpdateKeyHash sets the "key_hash" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateKeyHash() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldKeyHash)
+	return u
+}
+
+// ClearKeyHash clears the value of the "key_hash" field.
+func (u *APIKeyUpsert) ClearKeyHash() *APIKeyUpsert {
+	u.SetNull(apikey.FieldKeyHash)
+	return u
+}
+
+// SetKeyEncrypted sets the "key_encrypted" field.
+func (u *APIKeyUpsert) SetKeyEncrypted(v string) *APIKeyUpsert {
+	u.Set(apikey.FieldKeyEncrypted, v)
+	return u
+}
+
+// UpdateKeyEncrypted sets the "key_encrypted" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateKeyEncrypted() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldKeyEncrypted)
+	return u
+}
+
+// ClearKeyEncrypted clears the value of the "key_encrypted" field.
+func (u *APIKeyUpsert) ClearKeyEncrypted() *APIKeyUpsert {
+	u.SetNull(apikey.FieldKeyEncrypted)
 	return u
 }
 
@@ -898,6 +1038,78 @@ func (u *APIKeyUpsert) UpdateExpiresAt() *APIKeyUpsert {
 // ClearExpiresAt clears the value of the "expires_at" field.
 func (u *APIKeyUpsert) ClearExpiresAt() *APIKeyUpsert {
 	u.SetNull(apikey.FieldExpiresAt)
+	return u
+}
+
+// SetConcurrencyRequest sets the "concurrency_request" field.
+func (u *APIKeyUpsert) SetConcurrencyRequest(v int) *APIKeyUpsert {
+	u.Set(apikey.FieldConcurrencyRequest, v)
+	return u
+}
+
+// UpdateConcurrencyRequest sets the "concurrency_request" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateConcurrencyRequest() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldConcurrencyRequest)
+	return u
+}
+
+// AddConcurrencyRequest adds v to the "concurrency_request" field.
+func (u *APIKeyUpsert) AddConcurrencyRequest(v int) *APIKeyUpsert {
+	u.Add(apikey.FieldConcurrencyRequest, v)
+	return u
+}
+
+// SetConcurrencyLimit sets the "concurrency_limit" field.
+func (u *APIKeyUpsert) SetConcurrencyLimit(v int) *APIKeyUpsert {
+	u.Set(apikey.FieldConcurrencyLimit, v)
+	return u
+}
+
+// UpdateConcurrencyLimit sets the "concurrency_limit" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateConcurrencyLimit() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldConcurrencyLimit)
+	return u
+}
+
+// AddConcurrencyLimit adds v to the "concurrency_limit" field.
+func (u *APIKeyUpsert) AddConcurrencyLimit(v int) *APIKeyUpsert {
+	u.Add(apikey.FieldConcurrencyLimit, v)
+	return u
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (u *APIKeyUpsert) SetRpmLimit(v int) *APIKeyUpsert {
+	u.Set(apikey.FieldRpmLimit, v)
+	return u
+}
+
+// UpdateRpmLimit sets the "rpm_limit" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateRpmLimit() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldRpmLimit)
+	return u
+}
+
+// AddRpmLimit adds v to the "rpm_limit" field.
+func (u *APIKeyUpsert) AddRpmLimit(v int) *APIKeyUpsert {
+	u.Add(apikey.FieldRpmLimit, v)
+	return u
+}
+
+// SetEffectiveAt sets the "effective_at" field.
+func (u *APIKeyUpsert) SetEffectiveAt(v time.Time) *APIKeyUpsert {
+	u.Set(apikey.FieldEffectiveAt, v)
+	return u
+}
+
+// UpdateEffectiveAt sets the "effective_at" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateEffectiveAt() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldEffectiveAt)
+	return u
+}
+
+// ClearEffectiveAt clears the value of the "effective_at" field.
+func (u *APIKeyUpsert) ClearEffectiveAt() *APIKeyUpsert {
+	u.SetNull(apikey.FieldEffectiveAt)
 	return u
 }
 
@@ -1157,17 +1369,45 @@ func (u *APIKeyUpsertOne) UpdateUserID() *APIKeyUpsertOne {
 	})
 }
 
-// SetKey sets the "key" field.
-func (u *APIKeyUpsertOne) SetKey(v string) *APIKeyUpsertOne {
+// SetKeyHash sets the "key_hash" field.
+func (u *APIKeyUpsertOne) SetKeyHash(v string) *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
-		s.SetKey(v)
+		s.SetKeyHash(v)
 	})
 }
 
-// UpdateKey sets the "key" field to the value that was provided on create.
-func (u *APIKeyUpsertOne) UpdateKey() *APIKeyUpsertOne {
+// UpdateKeyHash sets the "key_hash" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateKeyHash() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
-		s.UpdateKey()
+		s.UpdateKeyHash()
+	})
+}
+
+// ClearKeyHash clears the value of the "key_hash" field.
+func (u *APIKeyUpsertOne) ClearKeyHash() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearKeyHash()
+	})
+}
+
+// SetKeyEncrypted sets the "key_encrypted" field.
+func (u *APIKeyUpsertOne) SetKeyEncrypted(v string) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetKeyEncrypted(v)
+	})
+}
+
+// UpdateKeyEncrypted sets the "key_encrypted" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateKeyEncrypted() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateKeyEncrypted()
+	})
+}
+
+// ClearKeyEncrypted clears the value of the "key_encrypted" field.
+func (u *APIKeyUpsertOne) ClearKeyEncrypted() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearKeyEncrypted()
 	})
 }
 
@@ -1343,6 +1583,90 @@ func (u *APIKeyUpsertOne) UpdateExpiresAt() *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) ClearExpiresAt() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.ClearExpiresAt()
+	})
+}
+
+// SetConcurrencyRequest sets the "concurrency_request" field.
+func (u *APIKeyUpsertOne) SetConcurrencyRequest(v int) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetConcurrencyRequest(v)
+	})
+}
+
+// AddConcurrencyRequest adds v to the "concurrency_request" field.
+func (u *APIKeyUpsertOne) AddConcurrencyRequest(v int) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddConcurrencyRequest(v)
+	})
+}
+
+// UpdateConcurrencyRequest sets the "concurrency_request" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateConcurrencyRequest() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateConcurrencyRequest()
+	})
+}
+
+// SetConcurrencyLimit sets the "concurrency_limit" field.
+func (u *APIKeyUpsertOne) SetConcurrencyLimit(v int) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetConcurrencyLimit(v)
+	})
+}
+
+// AddConcurrencyLimit adds v to the "concurrency_limit" field.
+func (u *APIKeyUpsertOne) AddConcurrencyLimit(v int) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddConcurrencyLimit(v)
+	})
+}
+
+// UpdateConcurrencyLimit sets the "concurrency_limit" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateConcurrencyLimit() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateConcurrencyLimit()
+	})
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (u *APIKeyUpsertOne) SetRpmLimit(v int) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetRpmLimit(v)
+	})
+}
+
+// AddRpmLimit adds v to the "rpm_limit" field.
+func (u *APIKeyUpsertOne) AddRpmLimit(v int) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddRpmLimit(v)
+	})
+}
+
+// UpdateRpmLimit sets the "rpm_limit" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateRpmLimit() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateRpmLimit()
+	})
+}
+
+// SetEffectiveAt sets the "effective_at" field.
+func (u *APIKeyUpsertOne) SetEffectiveAt(v time.Time) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetEffectiveAt(v)
+	})
+}
+
+// UpdateEffectiveAt sets the "effective_at" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateEffectiveAt() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateEffectiveAt()
+	})
+}
+
+// ClearEffectiveAt clears the value of the "effective_at" field.
+func (u *APIKeyUpsertOne) ClearEffectiveAt() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearEffectiveAt()
 	})
 }
 
@@ -1795,17 +2119,45 @@ func (u *APIKeyUpsertBulk) UpdateUserID() *APIKeyUpsertBulk {
 	})
 }
 
-// SetKey sets the "key" field.
-func (u *APIKeyUpsertBulk) SetKey(v string) *APIKeyUpsertBulk {
+// SetKeyHash sets the "key_hash" field.
+func (u *APIKeyUpsertBulk) SetKeyHash(v string) *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
-		s.SetKey(v)
+		s.SetKeyHash(v)
 	})
 }
 
-// UpdateKey sets the "key" field to the value that was provided on create.
-func (u *APIKeyUpsertBulk) UpdateKey() *APIKeyUpsertBulk {
+// UpdateKeyHash sets the "key_hash" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateKeyHash() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
-		s.UpdateKey()
+		s.UpdateKeyHash()
+	})
+}
+
+// ClearKeyHash clears the value of the "key_hash" field.
+func (u *APIKeyUpsertBulk) ClearKeyHash() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearKeyHash()
+	})
+}
+
+// SetKeyEncrypted sets the "key_encrypted" field.
+func (u *APIKeyUpsertBulk) SetKeyEncrypted(v string) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetKeyEncrypted(v)
+	})
+}
+
+// UpdateKeyEncrypted sets the "key_encrypted" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateKeyEncrypted() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateKeyEncrypted()
+	})
+}
+
+// ClearKeyEncrypted clears the value of the "key_encrypted" field.
+func (u *APIKeyUpsertBulk) ClearKeyEncrypted() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearKeyEncrypted()
 	})
 }
 
@@ -1981,6 +2333,90 @@ func (u *APIKeyUpsertBulk) UpdateExpiresAt() *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) ClearExpiresAt() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.ClearExpiresAt()
+	})
+}
+
+// SetConcurrencyRequest sets the "concurrency_request" field.
+func (u *APIKeyUpsertBulk) SetConcurrencyRequest(v int) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetConcurrencyRequest(v)
+	})
+}
+
+// AddConcurrencyRequest adds v to the "concurrency_request" field.
+func (u *APIKeyUpsertBulk) AddConcurrencyRequest(v int) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddConcurrencyRequest(v)
+	})
+}
+
+// UpdateConcurrencyRequest sets the "concurrency_request" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateConcurrencyRequest() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateConcurrencyRequest()
+	})
+}
+
+// SetConcurrencyLimit sets the "concurrency_limit" field.
+func (u *APIKeyUpsertBulk) SetConcurrencyLimit(v int) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetConcurrencyLimit(v)
+	})
+}
+
+// AddConcurrencyLimit adds v to the "concurrency_limit" field.
+func (u *APIKeyUpsertBulk) AddConcurrencyLimit(v int) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddConcurrencyLimit(v)
+	})
+}
+
+// UpdateConcurrencyLimit sets the "concurrency_limit" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateConcurrencyLimit() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateConcurrencyLimit()
+	})
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (u *APIKeyUpsertBulk) SetRpmLimit(v int) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetRpmLimit(v)
+	})
+}
+
+// AddRpmLimit adds v to the "rpm_limit" field.
+func (u *APIKeyUpsertBulk) AddRpmLimit(v int) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddRpmLimit(v)
+	})
+}
+
+// UpdateRpmLimit sets the "rpm_limit" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateRpmLimit() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateRpmLimit()
+	})
+}
+
+// SetEffectiveAt sets the "effective_at" field.
+func (u *APIKeyUpsertBulk) SetEffectiveAt(v time.Time) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetEffectiveAt(v)
+	})
+}
+
+// UpdateEffectiveAt sets the "effective_at" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateEffectiveAt() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateEffectiveAt()
+	})
+}
+
+// ClearEffectiveAt clears the value of the "effective_at" field.
+func (u *APIKeyUpsertBulk) ClearEffectiveAt() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearEffectiveAt()
 	})
 }
 

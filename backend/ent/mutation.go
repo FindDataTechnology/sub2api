@@ -108,51 +108,59 @@ const (
 // APIKeyMutation represents an operation that mutates the APIKey nodes in the graph.
 type APIKeyMutation struct {
 	config
-	op                 Op
-	typ                string
-	id                 *int64
-	created_at         *time.Time
-	updated_at         *time.Time
-	deleted_at         *time.Time
-	key                *string
-	name               *string
-	status             *string
-	last_used_at       *time.Time
-	ip_whitelist       *[]string
-	appendip_whitelist []string
-	ip_blacklist       *[]string
-	appendip_blacklist []string
-	quota              *float64
-	addquota           *float64
-	quota_used         *float64
-	addquota_used      *float64
-	expires_at         *time.Time
-	rate_limit_5h      *float64
-	addrate_limit_5h   *float64
-	rate_limit_1d      *float64
-	addrate_limit_1d   *float64
-	rate_limit_7d      *float64
-	addrate_limit_7d   *float64
-	usage_5h           *float64
-	addusage_5h        *float64
-	usage_1d           *float64
-	addusage_1d        *float64
-	usage_7d           *float64
-	addusage_7d        *float64
-	window_5h_start    *time.Time
-	window_1d_start    *time.Time
-	window_7d_start    *time.Time
-	clearedFields      map[string]struct{}
-	user               *int64
-	cleareduser        bool
-	group              *int64
-	clearedgroup       bool
-	usage_logs         map[int64]struct{}
-	removedusage_logs  map[int64]struct{}
-	clearedusage_logs  bool
-	done               bool
-	oldValue           func(context.Context) (*APIKey, error)
-	predicates         []predicate.APIKey
+	op                     Op
+	typ                    string
+	id                     *int64
+	created_at             *time.Time
+	updated_at             *time.Time
+	deleted_at             *time.Time
+	key_hash               *string
+	key_encrypted          *string
+	name                   *string
+	status                 *string
+	last_used_at           *time.Time
+	ip_whitelist           *[]string
+	appendip_whitelist     []string
+	ip_blacklist           *[]string
+	appendip_blacklist     []string
+	quota                  *float64
+	addquota               *float64
+	quota_used             *float64
+	addquota_used          *float64
+	expires_at             *time.Time
+	concurrency_request    *int
+	addconcurrency_request *int
+	concurrency_limit      *int
+	addconcurrency_limit   *int
+	rpm_limit              *int
+	addrpm_limit           *int
+	effective_at           *time.Time
+	rate_limit_5h          *float64
+	addrate_limit_5h       *float64
+	rate_limit_1d          *float64
+	addrate_limit_1d       *float64
+	rate_limit_7d          *float64
+	addrate_limit_7d       *float64
+	usage_5h               *float64
+	addusage_5h            *float64
+	usage_1d               *float64
+	addusage_1d            *float64
+	usage_7d               *float64
+	addusage_7d            *float64
+	window_5h_start        *time.Time
+	window_1d_start        *time.Time
+	window_7d_start        *time.Time
+	clearedFields          map[string]struct{}
+	user                   *int64
+	cleareduser            bool
+	group                  *int64
+	clearedgroup           bool
+	usage_logs             map[int64]struct{}
+	removedusage_logs      map[int64]struct{}
+	clearedusage_logs      bool
+	done                   bool
+	oldValue               func(context.Context) (*APIKey, error)
+	predicates             []predicate.APIKey
 }
 
 var _ ent.Mutation = (*APIKeyMutation)(nil)
@@ -410,40 +418,102 @@ func (m *APIKeyMutation) ResetUserID() {
 	m.user = nil
 }
 
-// SetKey sets the "key" field.
-func (m *APIKeyMutation) SetKey(s string) {
-	m.key = &s
+// SetKeyHash sets the "key_hash" field.
+func (m *APIKeyMutation) SetKeyHash(s string) {
+	m.key_hash = &s
 }
 
-// Key returns the value of the "key" field in the mutation.
-func (m *APIKeyMutation) Key() (r string, exists bool) {
-	v := m.key
+// KeyHash returns the value of the "key_hash" field in the mutation.
+func (m *APIKeyMutation) KeyHash() (r string, exists bool) {
+	v := m.key_hash
 	if v == nil {
 		return
 	}
 	return *v, true
 }
 
-// OldKey returns the old "key" field's value of the APIKey entity.
+// OldKeyHash returns the old "key_hash" field's value of the APIKey entity.
 // If the APIKey object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *APIKeyMutation) OldKey(ctx context.Context) (v string, err error) {
+func (m *APIKeyMutation) OldKeyHash(ctx context.Context) (v *string, err error) {
 	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldKey is only allowed on UpdateOne operations")
+		return v, errors.New("OldKeyHash is only allowed on UpdateOne operations")
 	}
 	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldKey requires an ID field in the mutation")
+		return v, errors.New("OldKeyHash requires an ID field in the mutation")
 	}
 	oldValue, err := m.oldValue(ctx)
 	if err != nil {
-		return v, fmt.Errorf("querying old value for OldKey: %w", err)
+		return v, fmt.Errorf("querying old value for OldKeyHash: %w", err)
 	}
-	return oldValue.Key, nil
+	return oldValue.KeyHash, nil
 }
 
-// ResetKey resets all changes to the "key" field.
-func (m *APIKeyMutation) ResetKey() {
-	m.key = nil
+// ClearKeyHash clears the value of the "key_hash" field.
+func (m *APIKeyMutation) ClearKeyHash() {
+	m.key_hash = nil
+	m.clearedFields[apikey.FieldKeyHash] = struct{}{}
+}
+
+// KeyHashCleared returns if the "key_hash" field was cleared in this mutation.
+func (m *APIKeyMutation) KeyHashCleared() bool {
+	_, ok := m.clearedFields[apikey.FieldKeyHash]
+	return ok
+}
+
+// ResetKeyHash resets all changes to the "key_hash" field.
+func (m *APIKeyMutation) ResetKeyHash() {
+	m.key_hash = nil
+	delete(m.clearedFields, apikey.FieldKeyHash)
+}
+
+// SetKeyEncrypted sets the "key_encrypted" field.
+func (m *APIKeyMutation) SetKeyEncrypted(s string) {
+	m.key_encrypted = &s
+}
+
+// KeyEncrypted returns the value of the "key_encrypted" field in the mutation.
+func (m *APIKeyMutation) KeyEncrypted() (r string, exists bool) {
+	v := m.key_encrypted
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldKeyEncrypted returns the old "key_encrypted" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldKeyEncrypted(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldKeyEncrypted is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldKeyEncrypted requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldKeyEncrypted: %w", err)
+	}
+	return oldValue.KeyEncrypted, nil
+}
+
+// ClearKeyEncrypted clears the value of the "key_encrypted" field.
+func (m *APIKeyMutation) ClearKeyEncrypted() {
+	m.key_encrypted = nil
+	m.clearedFields[apikey.FieldKeyEncrypted] = struct{}{}
+}
+
+// KeyEncryptedCleared returns if the "key_encrypted" field was cleared in this mutation.
+func (m *APIKeyMutation) KeyEncryptedCleared() bool {
+	_, ok := m.clearedFields[apikey.FieldKeyEncrypted]
+	return ok
+}
+
+// ResetKeyEncrypted resets all changes to the "key_encrypted" field.
+func (m *APIKeyMutation) ResetKeyEncrypted() {
+	m.key_encrypted = nil
+	delete(m.clearedFields, apikey.FieldKeyEncrypted)
 }
 
 // SetName sets the "name" field.
@@ -905,6 +975,223 @@ func (m *APIKeyMutation) ExpiresAtCleared() bool {
 func (m *APIKeyMutation) ResetExpiresAt() {
 	m.expires_at = nil
 	delete(m.clearedFields, apikey.FieldExpiresAt)
+}
+
+// SetConcurrencyRequest sets the "concurrency_request" field.
+func (m *APIKeyMutation) SetConcurrencyRequest(i int) {
+	m.concurrency_request = &i
+	m.addconcurrency_request = nil
+}
+
+// ConcurrencyRequest returns the value of the "concurrency_request" field in the mutation.
+func (m *APIKeyMutation) ConcurrencyRequest() (r int, exists bool) {
+	v := m.concurrency_request
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldConcurrencyRequest returns the old "concurrency_request" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldConcurrencyRequest(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldConcurrencyRequest is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldConcurrencyRequest requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldConcurrencyRequest: %w", err)
+	}
+	return oldValue.ConcurrencyRequest, nil
+}
+
+// AddConcurrencyRequest adds i to the "concurrency_request" field.
+func (m *APIKeyMutation) AddConcurrencyRequest(i int) {
+	if m.addconcurrency_request != nil {
+		*m.addconcurrency_request += i
+	} else {
+		m.addconcurrency_request = &i
+	}
+}
+
+// AddedConcurrencyRequest returns the value that was added to the "concurrency_request" field in this mutation.
+func (m *APIKeyMutation) AddedConcurrencyRequest() (r int, exists bool) {
+	v := m.addconcurrency_request
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetConcurrencyRequest resets all changes to the "concurrency_request" field.
+func (m *APIKeyMutation) ResetConcurrencyRequest() {
+	m.concurrency_request = nil
+	m.addconcurrency_request = nil
+}
+
+// SetConcurrencyLimit sets the "concurrency_limit" field.
+func (m *APIKeyMutation) SetConcurrencyLimit(i int) {
+	m.concurrency_limit = &i
+	m.addconcurrency_limit = nil
+}
+
+// ConcurrencyLimit returns the value of the "concurrency_limit" field in the mutation.
+func (m *APIKeyMutation) ConcurrencyLimit() (r int, exists bool) {
+	v := m.concurrency_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldConcurrencyLimit returns the old "concurrency_limit" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldConcurrencyLimit(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldConcurrencyLimit is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldConcurrencyLimit requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldConcurrencyLimit: %w", err)
+	}
+	return oldValue.ConcurrencyLimit, nil
+}
+
+// AddConcurrencyLimit adds i to the "concurrency_limit" field.
+func (m *APIKeyMutation) AddConcurrencyLimit(i int) {
+	if m.addconcurrency_limit != nil {
+		*m.addconcurrency_limit += i
+	} else {
+		m.addconcurrency_limit = &i
+	}
+}
+
+// AddedConcurrencyLimit returns the value that was added to the "concurrency_limit" field in this mutation.
+func (m *APIKeyMutation) AddedConcurrencyLimit() (r int, exists bool) {
+	v := m.addconcurrency_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetConcurrencyLimit resets all changes to the "concurrency_limit" field.
+func (m *APIKeyMutation) ResetConcurrencyLimit() {
+	m.concurrency_limit = nil
+	m.addconcurrency_limit = nil
+}
+
+// SetRpmLimit sets the "rpm_limit" field.
+func (m *APIKeyMutation) SetRpmLimit(i int) {
+	m.rpm_limit = &i
+	m.addrpm_limit = nil
+}
+
+// RpmLimit returns the value of the "rpm_limit" field in the mutation.
+func (m *APIKeyMutation) RpmLimit() (r int, exists bool) {
+	v := m.rpm_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRpmLimit returns the old "rpm_limit" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldRpmLimit(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRpmLimit is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRpmLimit requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRpmLimit: %w", err)
+	}
+	return oldValue.RpmLimit, nil
+}
+
+// AddRpmLimit adds i to the "rpm_limit" field.
+func (m *APIKeyMutation) AddRpmLimit(i int) {
+	if m.addrpm_limit != nil {
+		*m.addrpm_limit += i
+	} else {
+		m.addrpm_limit = &i
+	}
+}
+
+// AddedRpmLimit returns the value that was added to the "rpm_limit" field in this mutation.
+func (m *APIKeyMutation) AddedRpmLimit() (r int, exists bool) {
+	v := m.addrpm_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetRpmLimit resets all changes to the "rpm_limit" field.
+func (m *APIKeyMutation) ResetRpmLimit() {
+	m.rpm_limit = nil
+	m.addrpm_limit = nil
+}
+
+// SetEffectiveAt sets the "effective_at" field.
+func (m *APIKeyMutation) SetEffectiveAt(t time.Time) {
+	m.effective_at = &t
+}
+
+// EffectiveAt returns the value of the "effective_at" field in the mutation.
+func (m *APIKeyMutation) EffectiveAt() (r time.Time, exists bool) {
+	v := m.effective_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEffectiveAt returns the old "effective_at" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldEffectiveAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEffectiveAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEffectiveAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEffectiveAt: %w", err)
+	}
+	return oldValue.EffectiveAt, nil
+}
+
+// ClearEffectiveAt clears the value of the "effective_at" field.
+func (m *APIKeyMutation) ClearEffectiveAt() {
+	m.effective_at = nil
+	m.clearedFields[apikey.FieldEffectiveAt] = struct{}{}
+}
+
+// EffectiveAtCleared returns if the "effective_at" field was cleared in this mutation.
+func (m *APIKeyMutation) EffectiveAtCleared() bool {
+	_, ok := m.clearedFields[apikey.FieldEffectiveAt]
+	return ok
+}
+
+// ResetEffectiveAt resets all changes to the "effective_at" field.
+func (m *APIKeyMutation) ResetEffectiveAt() {
+	m.effective_at = nil
+	delete(m.clearedFields, apikey.FieldEffectiveAt)
 }
 
 // SetRateLimit5h sets the "rate_limit_5h" field.
@@ -1532,7 +1819,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 23)
+	fields := make([]string, 0, 28)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1545,8 +1832,11 @@ func (m *APIKeyMutation) Fields() []string {
 	if m.user != nil {
 		fields = append(fields, apikey.FieldUserID)
 	}
-	if m.key != nil {
-		fields = append(fields, apikey.FieldKey)
+	if m.key_hash != nil {
+		fields = append(fields, apikey.FieldKeyHash)
+	}
+	if m.key_encrypted != nil {
+		fields = append(fields, apikey.FieldKeyEncrypted)
 	}
 	if m.name != nil {
 		fields = append(fields, apikey.FieldName)
@@ -1574,6 +1864,18 @@ func (m *APIKeyMutation) Fields() []string {
 	}
 	if m.expires_at != nil {
 		fields = append(fields, apikey.FieldExpiresAt)
+	}
+	if m.concurrency_request != nil {
+		fields = append(fields, apikey.FieldConcurrencyRequest)
+	}
+	if m.concurrency_limit != nil {
+		fields = append(fields, apikey.FieldConcurrencyLimit)
+	}
+	if m.rpm_limit != nil {
+		fields = append(fields, apikey.FieldRpmLimit)
+	}
+	if m.effective_at != nil {
+		fields = append(fields, apikey.FieldEffectiveAt)
 	}
 	if m.rate_limit_5h != nil {
 		fields = append(fields, apikey.FieldRateLimit5h)
@@ -1618,8 +1920,10 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.DeletedAt()
 	case apikey.FieldUserID:
 		return m.UserID()
-	case apikey.FieldKey:
-		return m.Key()
+	case apikey.FieldKeyHash:
+		return m.KeyHash()
+	case apikey.FieldKeyEncrypted:
+		return m.KeyEncrypted()
 	case apikey.FieldName:
 		return m.Name()
 	case apikey.FieldGroupID:
@@ -1638,6 +1942,14 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.QuotaUsed()
 	case apikey.FieldExpiresAt:
 		return m.ExpiresAt()
+	case apikey.FieldConcurrencyRequest:
+		return m.ConcurrencyRequest()
+	case apikey.FieldConcurrencyLimit:
+		return m.ConcurrencyLimit()
+	case apikey.FieldRpmLimit:
+		return m.RpmLimit()
+	case apikey.FieldEffectiveAt:
+		return m.EffectiveAt()
 	case apikey.FieldRateLimit5h:
 		return m.RateLimit5h()
 	case apikey.FieldRateLimit1d:
@@ -1673,8 +1985,10 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldDeletedAt(ctx)
 	case apikey.FieldUserID:
 		return m.OldUserID(ctx)
-	case apikey.FieldKey:
-		return m.OldKey(ctx)
+	case apikey.FieldKeyHash:
+		return m.OldKeyHash(ctx)
+	case apikey.FieldKeyEncrypted:
+		return m.OldKeyEncrypted(ctx)
 	case apikey.FieldName:
 		return m.OldName(ctx)
 	case apikey.FieldGroupID:
@@ -1693,6 +2007,14 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldQuotaUsed(ctx)
 	case apikey.FieldExpiresAt:
 		return m.OldExpiresAt(ctx)
+	case apikey.FieldConcurrencyRequest:
+		return m.OldConcurrencyRequest(ctx)
+	case apikey.FieldConcurrencyLimit:
+		return m.OldConcurrencyLimit(ctx)
+	case apikey.FieldRpmLimit:
+		return m.OldRpmLimit(ctx)
+	case apikey.FieldEffectiveAt:
+		return m.OldEffectiveAt(ctx)
 	case apikey.FieldRateLimit5h:
 		return m.OldRateLimit5h(ctx)
 	case apikey.FieldRateLimit1d:
@@ -1748,12 +2070,19 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetUserID(v)
 		return nil
-	case apikey.FieldKey:
+	case apikey.FieldKeyHash:
 		v, ok := value.(string)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
-		m.SetKey(v)
+		m.SetKeyHash(v)
+		return nil
+	case apikey.FieldKeyEncrypted:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetKeyEncrypted(v)
 		return nil
 	case apikey.FieldName:
 		v, ok := value.(string)
@@ -1817,6 +2146,34 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetExpiresAt(v)
+		return nil
+	case apikey.FieldConcurrencyRequest:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetConcurrencyRequest(v)
+		return nil
+	case apikey.FieldConcurrencyLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetConcurrencyLimit(v)
+		return nil
+	case apikey.FieldRpmLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRpmLimit(v)
+		return nil
+	case apikey.FieldEffectiveAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEffectiveAt(v)
 		return nil
 	case apikey.FieldRateLimit5h:
 		v, ok := value.(float64)
@@ -1895,6 +2252,15 @@ func (m *APIKeyMutation) AddedFields() []string {
 	if m.addquota_used != nil {
 		fields = append(fields, apikey.FieldQuotaUsed)
 	}
+	if m.addconcurrency_request != nil {
+		fields = append(fields, apikey.FieldConcurrencyRequest)
+	}
+	if m.addconcurrency_limit != nil {
+		fields = append(fields, apikey.FieldConcurrencyLimit)
+	}
+	if m.addrpm_limit != nil {
+		fields = append(fields, apikey.FieldRpmLimit)
+	}
 	if m.addrate_limit_5h != nil {
 		fields = append(fields, apikey.FieldRateLimit5h)
 	}
@@ -1925,6 +2291,12 @@ func (m *APIKeyMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedQuota()
 	case apikey.FieldQuotaUsed:
 		return m.AddedQuotaUsed()
+	case apikey.FieldConcurrencyRequest:
+		return m.AddedConcurrencyRequest()
+	case apikey.FieldConcurrencyLimit:
+		return m.AddedConcurrencyLimit()
+	case apikey.FieldRpmLimit:
+		return m.AddedRpmLimit()
 	case apikey.FieldRateLimit5h:
 		return m.AddedRateLimit5h()
 	case apikey.FieldRateLimit1d:
@@ -1959,6 +2331,27 @@ func (m *APIKeyMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddQuotaUsed(v)
+		return nil
+	case apikey.FieldConcurrencyRequest:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddConcurrencyRequest(v)
+		return nil
+	case apikey.FieldConcurrencyLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddConcurrencyLimit(v)
+		return nil
+	case apikey.FieldRpmLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRpmLimit(v)
 		return nil
 	case apikey.FieldRateLimit5h:
 		v, ok := value.(float64)
@@ -2013,6 +2406,12 @@ func (m *APIKeyMutation) ClearedFields() []string {
 	if m.FieldCleared(apikey.FieldDeletedAt) {
 		fields = append(fields, apikey.FieldDeletedAt)
 	}
+	if m.FieldCleared(apikey.FieldKeyHash) {
+		fields = append(fields, apikey.FieldKeyHash)
+	}
+	if m.FieldCleared(apikey.FieldKeyEncrypted) {
+		fields = append(fields, apikey.FieldKeyEncrypted)
+	}
 	if m.FieldCleared(apikey.FieldGroupID) {
 		fields = append(fields, apikey.FieldGroupID)
 	}
@@ -2027,6 +2426,9 @@ func (m *APIKeyMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(apikey.FieldExpiresAt) {
 		fields = append(fields, apikey.FieldExpiresAt)
+	}
+	if m.FieldCleared(apikey.FieldEffectiveAt) {
+		fields = append(fields, apikey.FieldEffectiveAt)
 	}
 	if m.FieldCleared(apikey.FieldWindow5hStart) {
 		fields = append(fields, apikey.FieldWindow5hStart)
@@ -2054,6 +2456,12 @@ func (m *APIKeyMutation) ClearField(name string) error {
 	case apikey.FieldDeletedAt:
 		m.ClearDeletedAt()
 		return nil
+	case apikey.FieldKeyHash:
+		m.ClearKeyHash()
+		return nil
+	case apikey.FieldKeyEncrypted:
+		m.ClearKeyEncrypted()
+		return nil
 	case apikey.FieldGroupID:
 		m.ClearGroupID()
 		return nil
@@ -2068,6 +2476,9 @@ func (m *APIKeyMutation) ClearField(name string) error {
 		return nil
 	case apikey.FieldExpiresAt:
 		m.ClearExpiresAt()
+		return nil
+	case apikey.FieldEffectiveAt:
+		m.ClearEffectiveAt()
 		return nil
 	case apikey.FieldWindow5hStart:
 		m.ClearWindow5hStart()
@@ -2098,8 +2509,11 @@ func (m *APIKeyMutation) ResetField(name string) error {
 	case apikey.FieldUserID:
 		m.ResetUserID()
 		return nil
-	case apikey.FieldKey:
-		m.ResetKey()
+	case apikey.FieldKeyHash:
+		m.ResetKeyHash()
+		return nil
+	case apikey.FieldKeyEncrypted:
+		m.ResetKeyEncrypted()
 		return nil
 	case apikey.FieldName:
 		m.ResetName()
@@ -2127,6 +2541,18 @@ func (m *APIKeyMutation) ResetField(name string) error {
 		return nil
 	case apikey.FieldExpiresAt:
 		m.ResetExpiresAt()
+		return nil
+	case apikey.FieldConcurrencyRequest:
+		m.ResetConcurrencyRequest()
+		return nil
+	case apikey.FieldConcurrencyLimit:
+		m.ResetConcurrencyLimit()
+		return nil
+	case apikey.FieldRpmLimit:
+		m.ResetRpmLimit()
+		return nil
+	case apikey.FieldEffectiveAt:
+		m.ResetEffectiveAt()
 		return nil
 	case apikey.FieldRateLimit5h:
 		m.ResetRateLimit5h()
@@ -2292,7 +2718,10 @@ type AccountMutation struct {
 	notes                       *string
 	platform                    *string
 	_type                       *string
-	credentials                 *map[string]interface{}
+	credentials_meta            *map[string]interface{}
+	credentials_encrypted       *string
+	credentials_hash            *string
+	credentials_api_key_hash    *string
 	extra                       *map[string]interface{}
 	proxy_fallback_origin_id    *int64
 	addproxy_fallback_origin_id *int64
@@ -2714,40 +3143,187 @@ func (m *AccountMutation) ResetType() {
 	m._type = nil
 }
 
-// SetCredentials sets the "credentials" field.
-func (m *AccountMutation) SetCredentials(value map[string]interface{}) {
-	m.credentials = &value
+// SetCredentialsMeta sets the "credentials_meta" field.
+func (m *AccountMutation) SetCredentialsMeta(value map[string]interface{}) {
+	m.credentials_meta = &value
 }
 
-// Credentials returns the value of the "credentials" field in the mutation.
-func (m *AccountMutation) Credentials() (r map[string]interface{}, exists bool) {
-	v := m.credentials
+// CredentialsMeta returns the value of the "credentials_meta" field in the mutation.
+func (m *AccountMutation) CredentialsMeta() (r map[string]interface{}, exists bool) {
+	v := m.credentials_meta
 	if v == nil {
 		return
 	}
 	return *v, true
 }
 
-// OldCredentials returns the old "credentials" field's value of the Account entity.
+// OldCredentialsMeta returns the old "credentials_meta" field's value of the Account entity.
 // If the Account object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *AccountMutation) OldCredentials(ctx context.Context) (v map[string]interface{}, err error) {
+func (m *AccountMutation) OldCredentialsMeta(ctx context.Context) (v map[string]interface{}, err error) {
 	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldCredentials is only allowed on UpdateOne operations")
+		return v, errors.New("OldCredentialsMeta is only allowed on UpdateOne operations")
 	}
 	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldCredentials requires an ID field in the mutation")
+		return v, errors.New("OldCredentialsMeta requires an ID field in the mutation")
 	}
 	oldValue, err := m.oldValue(ctx)
 	if err != nil {
-		return v, fmt.Errorf("querying old value for OldCredentials: %w", err)
+		return v, fmt.Errorf("querying old value for OldCredentialsMeta: %w", err)
 	}
-	return oldValue.Credentials, nil
+	return oldValue.CredentialsMeta, nil
 }
 
-// ResetCredentials resets all changes to the "credentials" field.
-func (m *AccountMutation) ResetCredentials() {
-	m.credentials = nil
+// ResetCredentialsMeta resets all changes to the "credentials_meta" field.
+func (m *AccountMutation) ResetCredentialsMeta() {
+	m.credentials_meta = nil
+}
+
+// SetCredentialsEncrypted sets the "credentials_encrypted" field.
+func (m *AccountMutation) SetCredentialsEncrypted(s string) {
+	m.credentials_encrypted = &s
+}
+
+// CredentialsEncrypted returns the value of the "credentials_encrypted" field in the mutation.
+func (m *AccountMutation) CredentialsEncrypted() (r string, exists bool) {
+	v := m.credentials_encrypted
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCredentialsEncrypted returns the old "credentials_encrypted" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldCredentialsEncrypted(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCredentialsEncrypted is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCredentialsEncrypted requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCredentialsEncrypted: %w", err)
+	}
+	return oldValue.CredentialsEncrypted, nil
+}
+
+// ClearCredentialsEncrypted clears the value of the "credentials_encrypted" field.
+func (m *AccountMutation) ClearCredentialsEncrypted() {
+	m.credentials_encrypted = nil
+	m.clearedFields[account.FieldCredentialsEncrypted] = struct{}{}
+}
+
+// CredentialsEncryptedCleared returns if the "credentials_encrypted" field was cleared in this mutation.
+func (m *AccountMutation) CredentialsEncryptedCleared() bool {
+	_, ok := m.clearedFields[account.FieldCredentialsEncrypted]
+	return ok
+}
+
+// ResetCredentialsEncrypted resets all changes to the "credentials_encrypted" field.
+func (m *AccountMutation) ResetCredentialsEncrypted() {
+	m.credentials_encrypted = nil
+	delete(m.clearedFields, account.FieldCredentialsEncrypted)
+}
+
+// SetCredentialsHash sets the "credentials_hash" field.
+func (m *AccountMutation) SetCredentialsHash(s string) {
+	m.credentials_hash = &s
+}
+
+// CredentialsHash returns the value of the "credentials_hash" field in the mutation.
+func (m *AccountMutation) CredentialsHash() (r string, exists bool) {
+	v := m.credentials_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCredentialsHash returns the old "credentials_hash" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldCredentialsHash(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCredentialsHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCredentialsHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCredentialsHash: %w", err)
+	}
+	return oldValue.CredentialsHash, nil
+}
+
+// ClearCredentialsHash clears the value of the "credentials_hash" field.
+func (m *AccountMutation) ClearCredentialsHash() {
+	m.credentials_hash = nil
+	m.clearedFields[account.FieldCredentialsHash] = struct{}{}
+}
+
+// CredentialsHashCleared returns if the "credentials_hash" field was cleared in this mutation.
+func (m *AccountMutation) CredentialsHashCleared() bool {
+	_, ok := m.clearedFields[account.FieldCredentialsHash]
+	return ok
+}
+
+// ResetCredentialsHash resets all changes to the "credentials_hash" field.
+func (m *AccountMutation) ResetCredentialsHash() {
+	m.credentials_hash = nil
+	delete(m.clearedFields, account.FieldCredentialsHash)
+}
+
+// SetCredentialsAPIKeyHash sets the "credentials_api_key_hash" field.
+func (m *AccountMutation) SetCredentialsAPIKeyHash(s string) {
+	m.credentials_api_key_hash = &s
+}
+
+// CredentialsAPIKeyHash returns the value of the "credentials_api_key_hash" field in the mutation.
+func (m *AccountMutation) CredentialsAPIKeyHash() (r string, exists bool) {
+	v := m.credentials_api_key_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCredentialsAPIKeyHash returns the old "credentials_api_key_hash" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldCredentialsAPIKeyHash(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCredentialsAPIKeyHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCredentialsAPIKeyHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCredentialsAPIKeyHash: %w", err)
+	}
+	return oldValue.CredentialsAPIKeyHash, nil
+}
+
+// ClearCredentialsAPIKeyHash clears the value of the "credentials_api_key_hash" field.
+func (m *AccountMutation) ClearCredentialsAPIKeyHash() {
+	m.credentials_api_key_hash = nil
+	m.clearedFields[account.FieldCredentialsAPIKeyHash] = struct{}{}
+}
+
+// CredentialsAPIKeyHashCleared returns if the "credentials_api_key_hash" field was cleared in this mutation.
+func (m *AccountMutation) CredentialsAPIKeyHashCleared() bool {
+	_, ok := m.clearedFields[account.FieldCredentialsAPIKeyHash]
+	return ok
+}
+
+// ResetCredentialsAPIKeyHash resets all changes to the "credentials_api_key_hash" field.
+func (m *AccountMutation) ResetCredentialsAPIKeyHash() {
+	m.credentials_api_key_hash = nil
+	delete(m.clearedFields, account.FieldCredentialsAPIKeyHash)
 }
 
 // SetExtra sets the "extra" field.
@@ -4138,7 +4714,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 31)
+	fields := make([]string, 0, 34)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -4160,8 +4736,17 @@ func (m *AccountMutation) Fields() []string {
 	if m._type != nil {
 		fields = append(fields, account.FieldType)
 	}
-	if m.credentials != nil {
-		fields = append(fields, account.FieldCredentials)
+	if m.credentials_meta != nil {
+		fields = append(fields, account.FieldCredentialsMeta)
+	}
+	if m.credentials_encrypted != nil {
+		fields = append(fields, account.FieldCredentialsEncrypted)
+	}
+	if m.credentials_hash != nil {
+		fields = append(fields, account.FieldCredentialsHash)
+	}
+	if m.credentials_api_key_hash != nil {
+		fields = append(fields, account.FieldCredentialsAPIKeyHash)
 	}
 	if m.extra != nil {
 		fields = append(fields, account.FieldExtra)
@@ -4254,8 +4839,14 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.Platform()
 	case account.FieldType:
 		return m.GetType()
-	case account.FieldCredentials:
-		return m.Credentials()
+	case account.FieldCredentialsMeta:
+		return m.CredentialsMeta()
+	case account.FieldCredentialsEncrypted:
+		return m.CredentialsEncrypted()
+	case account.FieldCredentialsHash:
+		return m.CredentialsHash()
+	case account.FieldCredentialsAPIKeyHash:
+		return m.CredentialsAPIKeyHash()
 	case account.FieldExtra:
 		return m.Extra()
 	case account.FieldProxyID:
@@ -4325,8 +4916,14 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldPlatform(ctx)
 	case account.FieldType:
 		return m.OldType(ctx)
-	case account.FieldCredentials:
-		return m.OldCredentials(ctx)
+	case account.FieldCredentialsMeta:
+		return m.OldCredentialsMeta(ctx)
+	case account.FieldCredentialsEncrypted:
+		return m.OldCredentialsEncrypted(ctx)
+	case account.FieldCredentialsHash:
+		return m.OldCredentialsHash(ctx)
+	case account.FieldCredentialsAPIKeyHash:
+		return m.OldCredentialsAPIKeyHash(ctx)
 	case account.FieldExtra:
 		return m.OldExtra(ctx)
 	case account.FieldProxyID:
@@ -4431,12 +5028,33 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetType(v)
 		return nil
-	case account.FieldCredentials:
+	case account.FieldCredentialsMeta:
 		v, ok := value.(map[string]interface{})
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
-		m.SetCredentials(v)
+		m.SetCredentialsMeta(v)
+		return nil
+	case account.FieldCredentialsEncrypted:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCredentialsEncrypted(v)
+		return nil
+	case account.FieldCredentialsHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCredentialsHash(v)
+		return nil
+	case account.FieldCredentialsAPIKeyHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCredentialsAPIKeyHash(v)
 		return nil
 	case account.FieldExtra:
 		v, ok := value.(map[string]interface{})
@@ -4698,6 +5316,15 @@ func (m *AccountMutation) ClearedFields() []string {
 	if m.FieldCleared(account.FieldNotes) {
 		fields = append(fields, account.FieldNotes)
 	}
+	if m.FieldCleared(account.FieldCredentialsEncrypted) {
+		fields = append(fields, account.FieldCredentialsEncrypted)
+	}
+	if m.FieldCleared(account.FieldCredentialsHash) {
+		fields = append(fields, account.FieldCredentialsHash)
+	}
+	if m.FieldCleared(account.FieldCredentialsAPIKeyHash) {
+		fields = append(fields, account.FieldCredentialsAPIKeyHash)
+	}
 	if m.FieldCleared(account.FieldProxyID) {
 		fields = append(fields, account.FieldProxyID)
 	}
@@ -4762,6 +5389,15 @@ func (m *AccountMutation) ClearField(name string) error {
 		return nil
 	case account.FieldNotes:
 		m.ClearNotes()
+		return nil
+	case account.FieldCredentialsEncrypted:
+		m.ClearCredentialsEncrypted()
+		return nil
+	case account.FieldCredentialsHash:
+		m.ClearCredentialsHash()
+		return nil
+	case account.FieldCredentialsAPIKeyHash:
+		m.ClearCredentialsAPIKeyHash()
 		return nil
 	case account.FieldProxyID:
 		m.ClearProxyID()
@@ -4837,8 +5473,17 @@ func (m *AccountMutation) ResetField(name string) error {
 	case account.FieldType:
 		m.ResetType()
 		return nil
-	case account.FieldCredentials:
-		m.ResetCredentials()
+	case account.FieldCredentialsMeta:
+		m.ResetCredentialsMeta()
+		return nil
+	case account.FieldCredentialsEncrypted:
+		m.ResetCredentialsEncrypted()
+		return nil
+	case account.FieldCredentialsHash:
+		m.ResetCredentialsHash()
+		return nil
+	case account.FieldCredentialsAPIKeyHash:
+		m.ResetCredentialsAPIKeyHash()
 		return nil
 	case account.FieldExtra:
 		m.ResetExtra()
@@ -22135,6 +22780,8 @@ type GroupMutation struct {
 	video_model_prices                      *map[string]map[string]float64
 	web_search_price_per_call               *float64
 	addweb_search_price_per_call            *float64
+	rerank_price_per_request                *float64
+	addrerank_price_per_request             *float64
 	search_price_per_1k                     *float64
 	addsearch_price_per_1k                  *float64
 	audio_realtime_price_per_min            *float64
@@ -24166,6 +24813,76 @@ func (m *GroupMutation) ResetWebSearchPricePerCall() {
 	delete(m.clearedFields, group.FieldWebSearchPricePerCall)
 }
 
+// SetRerankPricePerRequest sets the "rerank_price_per_request" field.
+func (m *GroupMutation) SetRerankPricePerRequest(f float64) {
+	m.rerank_price_per_request = &f
+	m.addrerank_price_per_request = nil
+}
+
+// RerankPricePerRequest returns the value of the "rerank_price_per_request" field in the mutation.
+func (m *GroupMutation) RerankPricePerRequest() (r float64, exists bool) {
+	v := m.rerank_price_per_request
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRerankPricePerRequest returns the old "rerank_price_per_request" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldRerankPricePerRequest(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRerankPricePerRequest is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRerankPricePerRequest requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRerankPricePerRequest: %w", err)
+	}
+	return oldValue.RerankPricePerRequest, nil
+}
+
+// AddRerankPricePerRequest adds f to the "rerank_price_per_request" field.
+func (m *GroupMutation) AddRerankPricePerRequest(f float64) {
+	if m.addrerank_price_per_request != nil {
+		*m.addrerank_price_per_request += f
+	} else {
+		m.addrerank_price_per_request = &f
+	}
+}
+
+// AddedRerankPricePerRequest returns the value that was added to the "rerank_price_per_request" field in this mutation.
+func (m *GroupMutation) AddedRerankPricePerRequest() (r float64, exists bool) {
+	v := m.addrerank_price_per_request
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearRerankPricePerRequest clears the value of the "rerank_price_per_request" field.
+func (m *GroupMutation) ClearRerankPricePerRequest() {
+	m.rerank_price_per_request = nil
+	m.addrerank_price_per_request = nil
+	m.clearedFields[group.FieldRerankPricePerRequest] = struct{}{}
+}
+
+// RerankPricePerRequestCleared returns if the "rerank_price_per_request" field was cleared in this mutation.
+func (m *GroupMutation) RerankPricePerRequestCleared() bool {
+	_, ok := m.clearedFields[group.FieldRerankPricePerRequest]
+	return ok
+}
+
+// ResetRerankPricePerRequest resets all changes to the "rerank_price_per_request" field.
+func (m *GroupMutation) ResetRerankPricePerRequest() {
+	m.rerank_price_per_request = nil
+	m.addrerank_price_per_request = nil
+	delete(m.clearedFields, group.FieldRerankPricePerRequest)
+}
+
 // SetSearchPricePer1k sets the "search_price_per_1k" field.
 func (m *GroupMutation) SetSearchPricePer1k(f float64) {
 	m.search_price_per_1k = &f
@@ -26032,7 +26749,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 69)
+	fields := make([]string, 0, 70)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26143,6 +26860,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.web_search_price_per_call != nil {
 		fields = append(fields, group.FieldWebSearchPricePerCall)
+	}
+	if m.rerank_price_per_request != nil {
+		fields = append(fields, group.FieldRerankPricePerRequest)
 	}
 	if m.search_price_per_1k != nil {
 		fields = append(fields, group.FieldSearchPricePer1k)
@@ -26322,6 +27042,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.VideoModelPrices()
 	case group.FieldWebSearchPricePerCall:
 		return m.WebSearchPricePerCall()
+	case group.FieldRerankPricePerRequest:
+		return m.RerankPricePerRequest()
 	case group.FieldSearchPricePer1k:
 		return m.SearchPricePer1k()
 	case group.FieldAudioRealtimePricePerMin:
@@ -26469,6 +27191,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldVideoModelPrices(ctx)
 	case group.FieldWebSearchPricePerCall:
 		return m.OldWebSearchPricePerCall(ctx)
+	case group.FieldRerankPricePerRequest:
+		return m.OldRerankPricePerRequest(ctx)
 	case group.FieldSearchPricePer1k:
 		return m.OldSearchPricePer1k(ctx)
 	case group.FieldAudioRealtimePricePerMin:
@@ -26801,6 +27525,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetWebSearchPricePerCall(v)
 		return nil
+	case group.FieldRerankPricePerRequest:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRerankPricePerRequest(v)
+		return nil
 	case group.FieldSearchPricePer1k:
 		v, ok := value.(float64)
 		if !ok {
@@ -27084,6 +27815,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addweb_search_price_per_call != nil {
 		fields = append(fields, group.FieldWebSearchPricePerCall)
 	}
+	if m.addrerank_price_per_request != nil {
+		fields = append(fields, group.FieldRerankPricePerRequest)
+	}
 	if m.addsearch_price_per_1k != nil {
 		fields = append(fields, group.FieldSearchPricePer1k)
 	}
@@ -27156,6 +27890,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedVideoPrice1080p()
 	case group.FieldWebSearchPricePerCall:
 		return m.AddedWebSearchPricePerCall()
+	case group.FieldRerankPricePerRequest:
+		return m.AddedRerankPricePerRequest()
 	case group.FieldSearchPricePer1k:
 		return m.AddedSearchPricePer1k()
 	case group.FieldAudioRealtimePricePerMin:
@@ -27304,6 +28040,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddWebSearchPricePerCall(v)
 		return nil
+	case group.FieldRerankPricePerRequest:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRerankPricePerRequest(v)
+		return nil
 	case group.FieldSearchPricePer1k:
 		v, ok := value.(float64)
 		if !ok {
@@ -27424,6 +28167,9 @@ func (m *GroupMutation) ClearedFields() []string {
 	if m.FieldCleared(group.FieldWebSearchPricePerCall) {
 		fields = append(fields, group.FieldWebSearchPricePerCall)
 	}
+	if m.FieldCleared(group.FieldRerankPricePerRequest) {
+		fields = append(fields, group.FieldRerankPricePerRequest)
+	}
 	if m.FieldCleared(group.FieldSearchPricePer1k) {
 		fields = append(fields, group.FieldSearchPricePer1k)
 	}
@@ -27503,6 +28249,9 @@ func (m *GroupMutation) ClearField(name string) error {
 		return nil
 	case group.FieldWebSearchPricePerCall:
 		m.ClearWebSearchPricePerCall()
+		return nil
+	case group.FieldRerankPricePerRequest:
+		m.ClearRerankPricePerRequest()
 		return nil
 	case group.FieldSearchPricePer1k:
 		m.ClearSearchPricePer1k()
@@ -27646,6 +28395,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldWebSearchPricePerCall:
 		m.ResetWebSearchPricePerCall()
+		return nil
+	case group.FieldRerankPricePerRequest:
+		m.ResetRerankPricePerRequest()
 		return nil
 	case group.FieldSearchPricePer1k:
 		m.ResetSearchPricePer1k()

@@ -177,3 +177,4 @@ func TestForwardResponses_NativeDeepSeekAliasesInputImageURL(t *testing.T) {
 	require.Equal(t, deepSeekInputImageDataURI, gjson.GetBytes(upstream.lastBody, "input.0.content.1.image_url").String())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "input.0.content.1.url").Exists())
 }
+

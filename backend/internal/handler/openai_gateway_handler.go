@@ -1655,6 +1655,19 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 	if failoverErr != nil {
 		copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
 	}
+	// 有界队列快速拒（add-sub2api-fork-concurrency 2.1）：与真上游限流 429 分流。
+	if failoverErr != nil && failoverErr.IsAccountQueueFastReject() {
+		status := failoverErr.ClientStatusCode
+		if status <= 0 {
+			status = http.StatusTooManyRequests
+		}
+		message := strings.TrimSpace(failoverErr.ClientMessage)
+		if message == "" {
+			message = "Upstream account queue full, please retry later"
+		}
+		h.anthropicStreamingAwareError(c, status, "rate_limit_error", message, streamStarted)
+		return
+	}
 	if failoverErr != nil && failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)
 		h.anthropicStreamingAwareError(c, status, "api_error", message, streamStarted)
@@ -3620,6 +3633,21 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		return
 	}
 	copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
+	// 有界队列快速拒（add-sub2api-fork-concurrency 2.1）：429 + Retry-After
+	// 原样透出，不进 mapUpstreamError（那里 429 是真上游限流语义，两者分流）。
+	if failoverErr.IsAccountQueueFastReject() {
+		status := failoverErr.ClientStatusCode
+		if status <= 0 {
+			status = http.StatusTooManyRequests
+		}
+		message := strings.TrimSpace(failoverErr.ClientMessage)
+		if message == "" {
+			message = "Upstream account queue full, please retry later"
+		}
+		service.SetOpsUpstreamError(c, status, message, "")
+		h.handleStreamingAwareError(c, status, "rate_limit_error", message, streamStarted)
+		return
+	}
 	if failoverErr.IsOpenAIRequestBodyTooLarge() {
 		// An operator-configured passthrough rule wins over the built-in body
 		// limit mapping below. Failover on 413 exists because different
@@ -4639,4 +4667,14 @@ func summarizeWSCloseErrorForLog(err error) (string, string) {
 		}
 	}
 	return closeStatus, closeReason
+}
+
+// ── 词元车道（internal/lanes）只读访问器（缝点台账§二「handler 服务访问器」，只增）──
+// 车道计量需要计费准入与原生账本写入；不走 wire 重排装配，由路由注册层取现成服务实例。
+func (h *OpenAIGatewayHandler) LanesBillingCacheService() *service.BillingCacheService {
+	return h.billingCacheService
+}
+
+func (h *OpenAIGatewayHandler) LanesGatewayService() *service.OpenAIGatewayService {
+	return h.gatewayService
 }

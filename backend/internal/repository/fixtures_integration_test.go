@@ -201,11 +201,18 @@ func mustCreateAccount(t *testing.T, client *dbent.Client, a *service.Account) *
 		a.Extra = map[string]any{}
 	}
 
+	// 阶段 5.2：明文列已删除，凭据只能以派生列落库 —— 与生产写路径一致
+	credCols, err := CredentialCryptoColumnsFor(a.Credentials, credentialTestEncryptor(t))
+	require.NoError(t, err)
+
 	create := client.Account.Create().
 		SetName(a.Name).
 		SetPlatform(a.Platform).
 		SetType(a.Type).
-		SetCredentials(a.Credentials).
+		SetCredentialsMeta(credCols.Meta).
+		SetNillableCredentialsEncrypted(credCols.Encrypted).
+		SetNillableCredentialsHash(credCols.Hash).
+		SetNillableCredentialsAPIKeyHash(credCols.APIKeyHash).
 		SetExtra(a.Extra).
 		SetConcurrency(a.Concurrency).
 		SetPriority(a.Priority).

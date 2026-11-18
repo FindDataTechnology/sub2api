@@ -379,3 +379,4 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyLeavesURLOnlyResponseWhenDisabl
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, upstreamBody, rec.Body.String())
 }
+

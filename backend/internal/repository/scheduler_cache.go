@@ -1491,7 +1491,13 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 		// Gemini 显式缓存的候选过滤（GeminiExplicitCacheExclusions）读本投影判定账号是否支持显式缓存：
 		// 官方地址、Vertex 认证方式与上游网关的显式缓存声明。缺这几个键时只能按类型粗筛，
 		// 不支持的账号要逐个选中后才被剔除。
-		"base_url", "auth_mode", service.GeminiExplicitCacheUpstreamCredentialKey, service.GeminiExplicitCacheUpstreamMaxTTLCredentialKey}
+		"base_url", "auth_mode", service.GeminiExplicitCacheUpstreamCredentialKey, service.GeminiExplicitCacheUpstreamMaxTTLCredentialKey,
+		// OpenAI 端点能力集（chat_completions / embeddings / seedance）：
+		// 候选过滤 isAccountRequestCompatibleReason 按它排除能力不符的账号（capability_mismatch），
+		// 且缺键时 SupportsOpenAIEndpointCapability 对显式配置过能力集的账号返回 false。
+		// 投影裁掉该键会让 Seedance 视频账号在候选阶段被恒久排除（生产实证 2026-10-15：
+		// sched:acc 全量快照有 seedance、sched:meta 投影为空 → seedance_no_eligible_account）。
+		service.OpenAIEndpointCapabilitiesCredentialKey}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {

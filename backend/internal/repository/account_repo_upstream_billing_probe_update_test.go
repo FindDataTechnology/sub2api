@@ -80,7 +80,7 @@ func TestLockAndMergeAccountProbeExtraUsesCurrentDatabaseSnapshot(t *testing.T) 
 			t.Cleanup(func() { _ = client.Close() })
 
 			mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
-				WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil).
+				WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil, credentialAPIKeyHashHex("sk-test"), credentialHashOfJSONString(`{"api_key":"sk-test"}`)).
 				WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot", "opencode_group_unchanged", "opencode_auto", "opencode_snapshot", "grok_observed_models", "upstream_model_metadata"}).
 					AddRow(tt.identityUnchanged, false, true, tt.databaseEnabled, nil, tt.databaseSnapshot, nil, nil, nil, false, nil, nil, nil, nil))
 
@@ -171,7 +171,7 @@ func TestLockAndMergeAccountProbeExtraNeverInfersProbeFromRateSync(t *testing.T)
 			t.Cleanup(func() { _ = client.Close() })
 
 			mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
-				WithArgs(int64(31), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil).
+				WithArgs(int64(31), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil, credentialAPIKeyHashHex("sk-test"), credentialHashOfJSONString(`{"api_key":"sk-test"}`)).
 				WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot", "opencode_group_unchanged", "opencode_auto", "opencode_snapshot", "grok_observed_models", "upstream_model_metadata"}).
 					AddRow(true, false, true, tt.databaseEnabled, tt.databaseRateSync, nil, nil, nil, nil, false, nil, nil, nil, nil))
 
@@ -210,7 +210,7 @@ func TestLockAndMergeAccountProbeExtraProtectsOllamaManagedFields(t *testing.T) 
 			t.Cleanup(func() { _ = client.Close() })
 
 			mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
-				WithArgs(int64(29), service.PlatformAnthropic, service.AccountTypeAPIKey, `{"api_key":"key","base_url":"https://ollama.com"}`, nil).
+				WithArgs(int64(29), service.PlatformAnthropic, service.AccountTypeAPIKey, `{"api_key":"key","base_url":"https://ollama.com"}`, nil, credentialAPIKeyHashHex("key"), credentialHashOfJSONString(`{"api_key":"key","base_url":"https://ollama.com"}`)).
 				WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot", "opencode_group_unchanged", "opencode_auto", "opencode_snapshot", "grok_observed_models", "upstream_model_metadata"}).
 					AddRow(identityUnchanged, identityUnchanged, true, nil, nil, nil, []byte(`"local-ciphertext"`), []byte(`true`), []byte(`{"status":"ok"}`), false, nil, nil, nil, nil))
 
@@ -346,14 +346,17 @@ func TestUpdateCredentialsAtomicallyClearsProbeForOpenAIAPIKeyIdentityChange(t *
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)UPDATE accounts.*credentials IS DISTINCT FROM \$1::jsonb.*- 'upstream_billing_probe'`).
-		WithArgs(`{"api_key":"sk-new"}`, int64(27)).
+	mock.ExpectExec(`(?s)UPDATE accounts.*credentials_hash IS DISTINCT FROM \$4.*- 'upstream_billing_probe'`).
+		WithArgs(`{"api_key":"sk-new"}`, int64(27), credentialAPIKeyHashHex("sk-new"),
+			credentialHashOfJSONString(`{"api_key":"sk-new"}`),
+			`{"has_refresh_token":false}`,
+			sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(27), nil, nil, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	repo := newAccountRepositoryWithSQL(client, db, nil)
+	repo := newAccountRepositoryWithSQLCrypto(client, db, nil, credentialTestEncryptor(t))
 
 	err = repo.UpdateCredentials(context.Background(), 27, map[string]any{"api_key": "sk-new"})
 
@@ -370,7 +373,7 @@ func TestUpdateWithAccountBillingSettingsRollsBackWhenOutboxFails(t *testing.T) 
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
-		WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil).
+		WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil, credentialAPIKeyHashHex("sk-test"), credentialHashOfJSONString(`{"api_key":"sk-test"}`)).
 		WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot", "opencode_group_unchanged", "opencode_auto", "opencode_snapshot", "grok_observed_models", "upstream_model_metadata"}).
 			AddRow(true, false, true, []byte(`true`), []byte(`true`), []byte(`{"status":"ok"}`), nil, nil, nil, false, nil, nil, nil, nil))
 	mock.ExpectExec(`(?s)UPDATE .*accounts.*SET.*WHERE .*id.*`).
@@ -436,13 +439,16 @@ func TestUpdateCredentialsRollsBackWhenOutboxFails(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)UPDATE accounts.*credentials IS DISTINCT FROM \$1::jsonb.*- 'upstream_billing_probe'`).
-		WithArgs(`{"api_key":"sk-new"}`, int64(27)).
+	mock.ExpectExec(`(?s)UPDATE accounts.*credentials_hash IS DISTINCT FROM \$4.*- 'upstream_billing_probe'`).
+		WithArgs(`{"api_key":"sk-new"}`, int64(27), credentialAPIKeyHashHex("sk-new"),
+			credentialHashOfJSONString(`{"api_key":"sk-new"}`),
+			`{"has_refresh_token":false}`,
+			sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).WillReturnError(errors.New("outbox failed"))
 	mock.ExpectRollback()
 
-	repo := newAccountRepositoryWithSQL(client, db, nil)
+	repo := newAccountRepositoryWithSQLCrypto(client, db, nil, credentialTestEncryptor(t))
 	err = repo.UpdateCredentials(context.Background(), 27, map[string]any{"api_key": "sk-new"})
 
 	require.EqualError(t, err, "outbox failed")
@@ -473,11 +479,45 @@ func TestBulkUpdateRollsBackWhenOutboxFails(t *testing.T) {
 }
 
 func updatedAccountRows(id int64, extra string) *sqlmock.Rows {
+	return updatedAccountRowsRow(id, extra, []byte(`{}`), nil, nil, nil)
+}
+
+// updatedAccountRowsEncrypted 与 updatedAccountRows 同形，但凭据派生列**按生产形状填满**
+// （密文/指纹/meta 都有）。
+//
+// 为什么必须有这一版（阶段 3.4）：删掉明文回落之后，"只有明文、没有密文"的行读出来是
+// **硬错误**（不是回落）。凡是让读路径真的去解凭据的用例，夹具就必须像回填后的生产库
+// 一样带密文；否则测的是一种线上不存在的状态，而且失败信息还会指向"回填没跑"。
+func updatedAccountRowsEncrypted(t *testing.T, id int64, extra string, cryptor service.SecretEncryptor) *sqlmock.Rows {
+	t.Helper()
+	creds := map[string]any{"api_key": "sk-test"}
+	cols, err := CredentialCryptoColumnsFor(creds, cryptor)
+	require.NoError(t, err)
+	require.NotNil(t, cols.Encrypted, "带加密器时必须产出密文")
+	require.NotNil(t, cols.Hash)
+	return updatedAccountRowsRow(id, extra, []byte(mustJSON(t, cols.Meta)), cols.Encrypted, cols.Hash, cols.APIKeyHash)
+}
+
+func updatedAccountRowsRow(id int64, extra string, meta []byte, encrypted, hash, apiKeyHash *string) *sqlmock.Rows {
 	now := time.Now()
+	// 列序必须与 ent 生成的 dbaccount.Columns 一致：明文 credentials 已在阶段 5.2 删除，
+	// 所以凭据段现在从 credentials_meta 开始（meta / encrypted / hash / api_key_hash），
+	// 其后是 extra。增删凭据列时这里要同步，否则 sqlmock 会报
+	// "Expected number of values to match number of columns"。
 	return sqlmock.NewRows(dbaccount.Columns).AddRow(
 		id, now, now, nil, "test", nil, service.PlatformOpenAI, service.AccountTypeAPIKey,
-		[]byte(`{"api_key":"sk-test"}`), []byte(extra), nil, nil, 1, nil, 1, 1.0,
+		// 阶段 5.2：明文列已删（dbaccount.Columns 少一列），行值同步少一个
+		meta, nullable(encrypted), nullable(hash), nullable(apiKeyHash),
+		[]byte(extra), nil, nil, 1, nil, 1, 1.0,
 		service.StatusActive, nil, nil, nil, false, true, nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, service.QuotaDimensionGlobal,
 	)
+}
+
+// nullable 把 *string 变成 sqlmock 能接受的 nil / 值（直接传 *string 会被当成**指针**扫进目标列）。
+func nullable(s *string) any {
+	if s == nil {
+		return nil
+	}
+	return *s
 }

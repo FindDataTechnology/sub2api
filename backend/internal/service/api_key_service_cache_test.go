@@ -4,6 +4,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
@@ -16,6 +18,12 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
+
+// sha256HexForTest 只在本文件的契约测试里用，避免依赖其它包的导出。
+func sha256HexForTest(v string) string {
+	sum := sha256.Sum256([]byte(v))
+	return hex.EncodeToString(sum[:])
+}
 
 type authRepoStub struct {
 	getByKeyForAuth   func(ctx context.Context, key string) (*APIKey, error)
@@ -701,4 +709,48 @@ func TestAPIKeyService_GetByKey_SingleflightCollapses(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.Equal(t, int32(1), atomic.LoadInt32(&calls))
+}
+
+// ── 阶段四 13b-cache 的「二次哈希」契约测试 ───────────────────────────────────
+//
+// 背景（RELEASE-CHECKLIST 13b-cache）：鉴权缓存的键就是 `sha256(明文 key)`，
+// **恰好等于** 新增的 `api_keys.key_hash`。所以阶段四把 `ListKeysByUserID/GroupID`
+// 改成返回 `key_hash` 之后，如果仍然把返回值交给 `authCacheKey()`，就会再哈希一次
+// 变成 `sha256(key_hash)` —— 与读路径的 `sha256(明文)` 不匹配，**缓存清了等于没清**。
+//
+// 症状是静默的：不报错、鉴权正常，只是失效通知失灵（旧缓存在 TTL 内继续放行
+// 已撤销/已改分组的 key）。
+//
+// 这个测试把"删除时用的键必须与读路径同一个 digest"钉死：
+//   - 现在（repo 返回明文）：删除键 == sha256(明文)
+//   - 阶段四之后（repo 返回 key_hash）：删除键 == key_hash（**不再二次哈希**）
+// 把 listReturnsDigest 改成 true 即切换到后者的断言。
+
+func TestAPIKeyService_InvalidateAuthCache_UsesSameDigestAsReadPath(t *testing.T) {
+	const listReturnsDigest = false // ← 阶段四把 ListKeysBy* 改成返回 key_hash 后改 true
+
+	const plaintext = "sk-plain-1"
+	digest := sha256HexForTest(plaintext)
+
+	cache := &authCacheStub{}
+	repo := &authRepoStub{
+		listKeysByUserID: func(ctx context.Context, userID int64) ([]string, error) {
+			if listReturnsDigest {
+				return []string{digest}, nil // 阶段四之后：repo 直接给摘要
+			}
+			return []string{plaintext}, nil // 现在：repo 给明文
+		},
+	}
+	svc := NewAPIKeyService(repo, nil, nil, nil, nil, cache, &config.Config{})
+
+	svc.InvalidateAuthCacheByUserID(context.Background(), 7)
+
+	require.Len(t, cache.deleteAuthKeys, 1, "必须删掉一个缓存条目")
+	require.Equal(t, digest, cache.deleteAuthKeys[0],
+		"删除用的缓存键必须与读路径 authCacheKey(明文)=sha256(明文) 一致；"+
+			"若这里变成 sha256(key_hash) 就是踩了二次哈希，缓存清不掉")
+
+	// 与读路径显式对齐：读路径的键
+	require.Equal(t, svc.authCacheKey(plaintext), cache.deleteAuthKeys[0],
+		"读路径 authCacheKey(明文) 与删除键必须是同一个值")
 }

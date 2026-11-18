@@ -93,6 +93,13 @@ func isOpenAIAccount(account *Account) bool {
 // handleOpenAIAccountUpstreamError expects canonicalModel to be the model used
 // for scheduling after applying account mapping exactly once.
 func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, canonicalModel ...string) bool {
+	// AIMD 喂点（add-sub2api-fork-concurrency 2.2）：所有经过账号错误面的
+	// 响应状态码统一记账——5xx 计连击、429 作容量信号收窄、其余视为恢复。
+	// 走 HTTPUpstream port（依赖方向：service→port，实现在 repository）；
+	// 放在最前：无论后续走哪条冷却/封锁分支，账号容量状态机都要吃到这次结果。
+	if account != nil && s != nil && s.httpUpstream != nil {
+		s.httpUpstream.RecordAIMDResult(account.ID, statusCode)
+	}
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}

@@ -19,6 +19,27 @@ const (
 	PlatformGatewayGemini PlatformGateway = "gemini"
 	// PlatformGatewayAntigravity 由 Antigravity 网关处理。
 	PlatformGatewayAntigravity PlatformGateway = "antigravity"
+	// PlatformGatewayLane 由词元车道网关处理（internal/lanes：rerank/websearch/
+	// audio 非 chat 协议）。chat 网关族不认领——UsesOpenAIGateway 等派生谓词
+	// 对它恒 false（词元 fork 缝点，台账§二「平台清单」）。
+	PlatformGatewayLane PlatformGateway = "lane"
+)
+
+// 词元车道上游平台标识（ADR-0024，tasks 2.4）：车道池与 3.x 适配器按此取账号。
+const (
+	// PlatformSiliconFlow 硅基流动：rerank 车道上游（原生 /v1/rerank）。
+	PlatformSiliconFlow = "siliconflow"
+	// PlatformSerpAPI SerpAPI：websearch 车道上游（平台 search-relay 既有 key 池可播种）。
+	PlatformSerpAPI = "serpapi"
+	// PlatformOpenAINext openai-next 聚合渠道：audio 车道上游（OpenAI 形状
+	// whisper/tts 系，运营指定 rerank=硅基、audio=本渠道的分工）。
+	PlatformOpenAINext = "openainext"
+	// PlatformDoubao 豆包语音（火山引擎 openspeech）：audio 车道上游——TTS 走
+	// WebSocket V3 二进制帧，ASR 走录音文件识别异步任务。
+	PlatformDoubao = "doubao"
+	// PlatformTencent 腾讯云语音：audio 车道上游——云 API 3.0，
+	// TextToVoice 与一句话识别，凭据为 SecretId/SecretKey（TC3 签名）。
+	PlatformTencent = "tencent"
 )
 
 // PlatformSpec 描述一个具体（非 composite）平台。
@@ -48,6 +69,20 @@ var platformList = []PlatformSpec{
 	{ID: PlatformTypeSafe, DisplayName: "TypeSafe / Jev", Gateway: PlatformGatewayAnthropic, LiteLLMProvider: "typesafe"},
 	{ID: PlatformCommandCode, DisplayName: "Command Code", Gateway: PlatformGatewayOpenAI},
 	{ID: PlatformCline, DisplayName: "Cline", Gateway: PlatformGatewayOpenAI},
+	// 词元车道上游平台（ADR-0024，tasks 2.4）：仅车道消费（Gateway=lane）。
+	// 登记后进入「所有平台」类列表（账号管理面下拉即达=复用既有账号管理形态）；
+	// 也会出现在分组平台下拉——误建 chat 分组会走默认网关失败，属可恢复误配
+	//（词元单管理员，风险受控）；车道池取数=ListSchedulableByPlatform。
+	// DisplayName 刻意**不含中文**：平台展示名没有 i18n 通道（前端直接读
+	// display_name），而管理台英文界面有"不得出现 CJK"的断言
+	// （AdminAccessKeysSettings.i18n.spec.ts 的资源标签扫描）。中文厂名放到
+	// `DisplayNameCN` 之外的 i18n 通道是后续事；先把跨语言可读性修好（2026-11-18
+	// merge-upstream-v0-2-23 引入上游该断言时抓到）。
+	{ID: PlatformSiliconFlow, DisplayName: "SiliconFlow", Gateway: PlatformGatewayLane},
+	{ID: PlatformSerpAPI, DisplayName: "SerpAPI", Gateway: PlatformGatewayLane},
+	{ID: PlatformOpenAINext, DisplayName: "OpenAI-Next", Gateway: PlatformGatewayLane},
+	{ID: PlatformDoubao, DisplayName: "Doubao Voice (Volcengine)", Gateway: PlatformGatewayLane},
+	{ID: PlatformTencent, DisplayName: "Tencent Cloud Voice", Gateway: PlatformGatewayLane},
 }
 
 var platformIndex = func() map[string]int {

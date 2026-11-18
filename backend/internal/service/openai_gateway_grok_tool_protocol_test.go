@@ -596,3 +596,4 @@ func requireGrokProtocolFrame(t *testing.T, frames []grokProtocolSSEFrame, event
 	t.Fatalf("missing SSE frame event=%q %s=%q", eventType, path, value)
 	return grokProtocolSSEFrame{}
 }
+

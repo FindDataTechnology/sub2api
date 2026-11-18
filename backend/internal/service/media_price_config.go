@@ -50,6 +50,15 @@ func webSearchPricePerCallFromAPIKey(apiKey *APIKey) *float64 {
 	return apiKey.Group.WebSearchPricePerCall
 }
 
+// rerankPricePerRequestFromAPIKey 词元 rerank 车道每请求单价（fork 缝点，
+// 台账§二「分组价目」）；nil=未配置（按 0 计费并告警）。
+func rerankPricePerRequestFromAPIKey(apiKey *APIKey) *float64 {
+	if apiKey == nil || apiKey.Group == nil {
+		return nil
+	}
+	return apiKey.Group.RerankPricePerRequest
+}
+
 func groupSearchPricePer1kFromAPIKey(apiKey *APIKey) *float64 {
 	if apiKey == nil || apiKey.Group == nil {
 		return nil

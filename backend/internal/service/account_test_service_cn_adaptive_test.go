@@ -290,3 +290,4 @@ func TestAccountTestService_AnthropicProtocol401MarksAccountError(t *testing.T) 
 	repo := svc.accountRepo.(*openAIAccountTestRepo)
 	require.Equal(t, account.ID, repo.setErrorID)
 }
+
