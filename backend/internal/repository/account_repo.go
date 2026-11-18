@@ -1785,7 +1785,10 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 			AND a.platform = $2
 			AND a.type = $3
 			AND a.credentials_hash = $4
-			AND a.proxy_id IS NOT DISTINCT FROM $9
+			-- $9 显式标注类型：expectedProxyID 可能是 nil，lib/pq 无法从 nil 推断，
+			-- 会让整条语句的参数类型推导失败（报在别的 $n 上，现象是
+			-- `inconsistent types deduced for parameter $4`，极具误导性）。
+			AND a.proxy_id IS NOT DISTINCT FROM $9::bigint
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
