@@ -27,7 +27,11 @@ func (s *APIKeyRepoSuite) SetupTest() {
 	// ctx 必须绑定事务（同上）。
 	s.ctx = dbent.NewTxContext(context.Background(), tx)
 	s.client = tx.Client()
-	s.repo = newAPIKeyRepositoryWithSQL(s.client, tx)
+	// 必须带 cryptor：迁移 251 后 key 只剩 key_hash / key_encrypted，
+	// GetByKey 命中指纹后要用**解密出来的明文**做常量时间复核，
+	// 没有加密器就解不开 ⇒ 一律判 not found。
+	// 与 mustCreateXXX 写入用的是同一个加密器。
+	s.repo = newAPIKeyRepositoryWithSQLCrypto(s.client, tx, credentialTestEncryptor(s.T()))
 }
 
 func TestAPIKeyRepoSuite(t *testing.T) {
