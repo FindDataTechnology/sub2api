@@ -274,41 +274,26 @@ type grokCatalogRow struct {
 	deleted        bool
 }
 
-// readGrokCatalogToken 解密账号凭据并取 access_token。
-// 明文列 credentials 已在迁移 251 drop，凭据只剩 credentials_encrypted；
-// mustCreateAccount 写入时用的就是 credentialTestEncryptor，这里用同一个解。
+// decryptGrokCatalogToken 从已取到的 credentials_encrypted 解出 access_token。
 //
-// client 必须传**调用方自己的** client：多数用例跑在 testEntTx 的事务里，
-// 用全局 integrationEntClient 会看不见未提交的行（实测报 `ent: account not found`）。
-func readGrokCatalogToken(t *testing.T, client *dbent.Client, id int64) string {
+// 刻意**不再二次查库**：用例跑在 testEntTx 的事务里，另起一路查询（无论用全局
+// integrationEntClient 还是混用 tx.Client + integrationDB）都会撞连接或读不到
+// 未提交的行（实测先后报 `ent: account not found` 与 `pq: unexpected Parse response 'C'`）。
+// 主查询已经把密文列取回来了，就地解最稳。
+func decryptGrokCatalogToken(t *testing.T, encrypted *string) string {
 	t.Helper()
-	row, err := client.Account.Get(context.Background(), id)
+	if encrypted == nil || *encrypted == "" {
+		return ""
+	}
+	plaintext, err := credentialTestEncryptor(t).Decrypt(*encrypted)
 	require.NoError(t, err)
-	r := newAccountRepositoryWithSQLCrypto(client, integrationDB, nil, credentialTestEncryptor(t))
-	creds, err := r.credentialsFromEntity(row)
-	require.NoError(t, err)
+	var creds map[string]any
+	require.NoError(t, json.Unmarshal([]byte(plaintext), &creds))
 	token, _ := creds["access_token"].(string)
 	return token
 }
 
 func readGrokCatalogRow(t *testing.T, q grokCatalogSQL, id int64) grokCatalogRow {
-	return readGrokCatalogRowWithClient(t, q, grokCatalogEntClientOf(t, q), id)
-}
-
-// grokCatalogEntClientOf 从传入的 SQL 执行器推断对应的 ent client。
-// 测试里两种形态：*dbent.Tx（事务）与 *sql.DB（全局）。前者必须用 tx.Client()，
-// 否则读不到未提交的行。
-func grokCatalogEntClientOf(t *testing.T, q grokCatalogSQL) *dbent.Client {
-	t.Helper()
-	switch v := q.(type) {
-	case *dbent.Tx:
-		return v.Client()
-	default:
-		return integrationEntClient
-	}
-}
-
-func readGrokCatalogRowWithClient(t *testing.T, q grokCatalogSQL, client *dbent.Client, id int64) grokCatalogRow {
 	t.Helper()
 	// access_token 是密钥子键，不在 credentials_meta 白名单里（明文列已在迁移 251 drop），
 	// SQL 取不到它。这里先用 SQL 取非密文字段，token 再经 ent + credentialsFromEntity 解密。
@@ -317,7 +302,8 @@ func readGrokCatalogRowWithClient(t *testing.T, q grokCatalogSQL, client *dbent.
 		       COALESCE((extra->'grok_observed_models')::text, 'null'),
 		       status,
 		       rate_multiplier::text,
-		       deleted_at IS NOT NULL
+		       deleted_at IS NOT NULL,
+		       credentials_encrypted
 		FROM accounts
 		WHERE id = $1`, id)
 	require.NoError(t, err)
@@ -325,9 +311,10 @@ func readGrokCatalogRowWithClient(t *testing.T, q grokCatalogSQL, client *dbent.
 	require.True(t, rows.Next())
 	var row grokCatalogRow
 	var raw string
-	require.NoError(t, rows.Scan(&row.unrelated, &raw, &row.status, &row.rateMultiplier, &row.deleted))
+	var encrypted *string
+	require.NoError(t, rows.Scan(&row.unrelated, &raw, &row.status, &row.rateMultiplier, &row.deleted, &encrypted))
 	require.NoError(t, rows.Err())
-	row.token = readGrokCatalogToken(t, client, id)
+	row.token = decryptGrokCatalogToken(t, encrypted)
 	row.rawModels = json.RawMessage(raw)
 	if raw != "null" {
 		var payload struct {

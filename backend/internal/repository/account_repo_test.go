@@ -28,12 +28,12 @@ func TestAccountsToService_LargeActiveAccountSetDoesNotExceedPostgresParameterLi
 	accounts := make([]*dbent.Account, 0, 65536)
 	for i := range 65536 {
 		accounts = append(accounts, &dbent.Account{
-			ID:          int64(i + 1),
-			Name:        "large-active",
-			Platform:    service.PlatformOpenAI,
-			Type:        service.AccountTypeOAuth,
+			ID:       int64(i + 1),
+			Name:     "large-active",
+			Platform: service.PlatformOpenAI,
+			Type:     service.AccountTypeOAuth,
 			// 阶段 5.2：ent.Account 已无明文 Credentials 字段（列已删）
-			Extra: map[string]any{},
+			Extra:       map[string]any{},
 			Status:      service.StatusActive,
 			Schedulable: true,
 		})

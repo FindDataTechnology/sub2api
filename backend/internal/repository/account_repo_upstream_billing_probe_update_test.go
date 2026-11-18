@@ -488,6 +488,7 @@ func updatedAccountRows(id int64, extra string) *sqlmock.Rows {
 // 为什么必须有这一版（阶段 3.4）：删掉明文回落之后，"只有明文、没有密文"的行读出来是
 // **硬错误**（不是回落）。凡是让读路径真的去解凭据的用例，夹具就必须像回填后的生产库
 // 一样带密文；否则测的是一种线上不存在的状态，而且失败信息还会指向"回填没跑"。
+//
 //nolint:unused // 被 //go:build unit 的用例使用，lint 在默认 tag 下看不见
 func updatedAccountRowsEncrypted(t *testing.T, id int64, extra string, cryptor service.SecretEncryptor) *sqlmock.Rows {
 	t.Helper()
