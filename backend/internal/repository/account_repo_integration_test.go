@@ -139,7 +139,12 @@ func (s *AccountRepoSuite) SetupTest() {
 	s.ctx = context.Background()
 	tx := testEntTx(s.T())
 	s.client = tx.Client()
-	s.repo = newAccountRepositoryWithSQL(s.client, tx, nil)
+	// 必须注入与 mustCreateAccount 同一个加密器：迁移 251 之后凭据只有
+	// credentials_encrypted，repo 没有 cryptor 时 credentialsFromEntity 会
+	// 直接报错（"has encrypted credentials but no encryptor"），
+	// 连带 GetByIDs 失败 ⇒ 调度快照同步被跳过，表现为
+	// `"[]" should have 2 item(s), but has 0`。
+	s.repo = newAccountRepositoryWithSQLCrypto(s.client, tx, nil, credentialTestEncryptor(s.T()))
 }
 
 func TestAccountRepoSuite(t *testing.T) {

@@ -404,7 +404,7 @@ func TestUsageBillingRepositoryApplyBatch_RejectsNonFiniteAmounts(t *testing.T) 
 func TestAccountRepositoryBatchUpdateLastUsed_LocksRowsInIDOrder(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
-	accounts := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	accounts := newAccountRepositoryWithSQLCrypto(client, integrationDB, credentialTestEncryptor(t))
 
 	low := mustCreateAccount(t, client, &service.Account{Name: "last-used-order-low-" + uuid.NewString(), Type: service.AccountTypeAPIKey})
 	high := mustCreateAccount(t, client, &service.Account{Name: "last-used-order-high-" + uuid.NewString(), Type: service.AccountTypeAPIKey})
@@ -445,7 +445,7 @@ func TestAccountRepositoryBatchUpdateLastUsed_LocksRowsInIDOrder(t *testing.T) {
 func TestAccountRepositoryBatchUpdateLastUsed_DoesNotBlockForeignKeyShareLocks(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
-	accounts := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	accounts := newAccountRepositoryWithSQLCrypto(client, integrationDB, credentialTestEncryptor(t))
 
 	acc := mustCreateAccount(t, client, &service.Account{Name: "last-used-fk-" + uuid.NewString(), Type: service.AccountTypeAPIKey})
 

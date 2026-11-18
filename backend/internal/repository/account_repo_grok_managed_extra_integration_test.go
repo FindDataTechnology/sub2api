@@ -144,7 +144,7 @@ func TestGrokManagedExtraSurvivesOrdinaryUpdate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tx := testEntTx(t)
-			repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+			repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, credentialTestEncryptor(t))
 			account := mustCreateAccount(t, tx.Client(), &service.Account{
 				Name:        "grok-managed-" + tt.name,
 				Platform:    service.PlatformGrok,
@@ -249,7 +249,7 @@ func TestGrokManagedExtraUpdateOverlapsCatalogCAS(t *testing.T) {
 
 	updateDone := make(chan error, 1)
 	go func() {
-		repo := newAccountRepositoryWithSQL(integrationEntClient, integrationDB, nil)
+		repo := newAccountRepositoryWithSQLCrypto(integrationEntClient, integrationDB, credentialTestEncryptor(t))
 		account.Name = "saved-during-cas"
 		account.Extra = map[string]any{
 			"unrelated": "keep",
