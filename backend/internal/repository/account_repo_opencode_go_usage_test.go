@@ -60,7 +60,8 @@ func TestUpdateOpenCodeGoUsageSnapshotWritesSnapshotOnly(t *testing.T) {
 		WithArgs(string(expectedPayload), credentialAPIKeyHashHex("key"), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	repo := newAccountRepositoryWithSQL(client, nil, nil)
+	// 该路径要写凭据派生列，必须带加密器（迁移 251 后凭据只有密文）。
+	repo := newAccountRepositoryWithSQLCrypto(client, nil, nil, credentialTestEncryptor(t))
 
 	err = repo.UpdateOpenCodeGoUsageSnapshot(context.Background(), account, snapshot)
 
