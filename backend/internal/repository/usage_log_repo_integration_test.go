@@ -1321,7 +1321,7 @@ func (s *UsageLogRepoSuite) TestActiveFiveHourResetExcludesPreviousWindowCost() 
 	})
 	s.createUsageLog(user, apiKey, account, 10, 20, 20, start.Add(-time.Minute))
 	s.createUsageLog(user, apiKey, account, 10, 20, 2, start.Add(time.Minute))
-	accounts := newAccountRepositoryWithSQLCrypto(s.client, s.tx, nil, credentialTestEncryptor(t))
+	accounts := newAccountRepositoryWithSQLCrypto(s.client, s.tx, nil, credentialTestEncryptor(s.T()))
 
 	// Active quota reads persist this reset before another model response can
 	// supply session-window headers. Reload as the next scheduler/UI read does.
