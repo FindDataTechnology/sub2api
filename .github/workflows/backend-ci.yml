@@ -25,8 +25,14 @@ jobs:
           /bin/sh deploy/tests/docker-runtime-resources-test.sh
           /bin/sh deploy/test-caddyfile-cache.sh
 
-  test:
+  # fork 偏离上游：unit 与 integration 拆成两个 job。
+  # 原因（2026-11-18 实测）：合成一个 job 时，integration 段（需 testcontainers 起
+  # Docker）卡死过一次，整个 job 挂 8 小时不返回，而 unit 的结论也一起拿不到。
+  # 拆分后 unit 与 integration 各自独立，任一侧卡死都不影响另一侧；两 job 都带
+  # timeout-minutes 兜底（go test 自身也有 -timeout）。
+  unit:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - name: Check Docker Compose simple mode environment
@@ -43,6 +49,21 @@ jobs:
       - name: Unit tests
         working-directory: backend
         run: make test-unit
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Verify Go version
+        run: |
+          go version | grep -q 'go1.27.4'
       - name: Integration tests
         working-directory: backend
         run: make test-integration
