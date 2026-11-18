@@ -60,7 +60,8 @@ func TestServeCapabilities_NotWiredIs503(t *testing.T) {
 	body := decodeCapabilities(t, rec)
 	_, hasModels := body["models"]
 	require.False(t, hasModels, "503 不得返回不完整的能力结构")
-	errBody := body["error"].(map[string]any)
+	errBody, ok := body["error"].(map[string]any)
+	require.True(t, ok, "error 必须是对象")
 	require.Equal(t, "lane_upstream_unavailable", errBody["type"])
 	require.Equal(t, capabilityLane, errBody["lane"])
 }

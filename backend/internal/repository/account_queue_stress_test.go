@@ -140,5 +140,3 @@ func TestStressRecoveryAfterStormClears(t *testing.T) {
 		t.Fatal("tripped must clear after sustained success")
 	}
 }
-
-

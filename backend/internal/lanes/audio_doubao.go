@@ -247,7 +247,11 @@ func (a *doubaoAdapter) realSubmitAndPoll(ctx context.Context, apiKeyStr, audioU
 		"request": map[string]any{"model_name": "bigmodel", "enable_punc": true},
 	}
 	if opts.Language != "" {
-		body["audio"].(map[string]any)["language"] = opts.Language
+		audio, ok := body["audio"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("doubao: audio payload is not an object")
+		}
+		audio["language"] = opts.Language
 	}
 	payload, _ := json.Marshal(body)
 

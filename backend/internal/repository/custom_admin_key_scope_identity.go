@@ -24,7 +24,7 @@ import (
 //   - 字符串：去首尾空白（btrim，空白集合与 unicode.IsSpace 一致）
 //   - 数字：按 float64 展开成十进制文本并去掉尾随零（对应
 //     trim_scale(((x)::double precision)::text::numeric)::text）
-//   - 其它类型（bool/对象/数组/null/缺失）：空串（对应 CASE ... ELSE ''）
+//   - 其它类型（bool/对象/数组/null/缺失）：空串（对应 CASE ... ELSE ”）
 type scopedCodexIdentityFields struct {
 	AccountID string
 	UserID    string

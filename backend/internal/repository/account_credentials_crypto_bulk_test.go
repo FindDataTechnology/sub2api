@@ -10,8 +10,8 @@ import (
 
 	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
-	_ "github.com/lib/pq"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
