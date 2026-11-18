@@ -90,7 +90,7 @@ type Pool struct {
 	accounts AccountLister
 	cooldown AccountCooldownWriter
 
-	mu          sync.Mutex
+	mu           sync.Mutex
 	lastCooldown map[int64]time.Time // account id -> 上次冷却写时刻（节流）
 }
 

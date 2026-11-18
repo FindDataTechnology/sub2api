@@ -174,7 +174,10 @@ func (g *KeyCapacityGate) Reconcile(staleAfter time.Duration, now time.Time) int
 	cutoff := now.Add(-staleAfter).UnixNano()
 	recovered := 0
 	g.keys.Range(func(_, v any) bool {
-		slot := v.(*keySlot)
+		slot, ok := v.(*keySlot)
+		if !ok {
+			return true
+		}
 		if n := slot.inflight.Load(); n > 0 {
 			since := slot.oldestSince.Load()
 			if since > 0 && since < cutoff {
@@ -202,10 +205,14 @@ func (g *KeyCapacityGate) CapacitySnapshot(userID, apiKeyID int64) (userInflight
 		return 0, 0, 0
 	}
 	if v, ok := g.users.Load(userID); ok {
-		userInflight = v.(*atomic.Int64).Load()
+		if c, ok := v.(*atomic.Int64); ok {
+			userInflight = c.Load()
+		}
 	}
 	if v, ok := g.keys.Load(apiKeyID); ok {
-		keyInflight = v.(*keySlot).inflight.Load()
+		if slot, ok := v.(*keySlot); ok {
+			keyInflight = slot.inflight.Load()
+		}
 	}
 	return userInflight, keyInflight, g.leakedRecovered.Load()
 }
