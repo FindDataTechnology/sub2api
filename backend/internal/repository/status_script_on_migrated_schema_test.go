@@ -46,7 +46,8 @@ func TestStatusScript_OnMigratedSchema_ThreeStates(t *testing.T) {
 	restoreLegacyPlaintextColumns(t, db) // 状态脚本的 pre 分支要求这两列存在
 
 	run := func() (string, int) {
-		cmd := exec.Command(script, dsn)
+		// script 与 dsn 都是本测试自己构造的，不是外部输入。
+		cmd := exec.Command(script, dsn) //nolint:gosec // 参数来自测试内部
 		cmd.Env = os.Environ() // PG_BIN（如设）由脚本自己处理
 		out, err := cmd.CombinedOutput()
 		if err == nil {

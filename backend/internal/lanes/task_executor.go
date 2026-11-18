@@ -136,6 +136,7 @@ func replayBody(raw []byte) ([]byte, taskBodyMeta, error) {
 }
 
 // run 执行一次尝试（尝试号决定 request_id）。
+//nolint:unused // 生产走 taskRunner 接口的 runWithRequestID；run 是给测试用的薄包装
 func (e *taskExecutor) run(ctx context.Context, job *service.LanesTaskJob, attemptNo int) attemptOutcome {
 	return e.runWithRequestID(ctx, job, taskRequestID(job.ID, attemptNo))
 }

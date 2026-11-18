@@ -111,7 +111,7 @@ func TestLaneUpstreamFaultsAreUniform(t *testing.T) {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
 		deadURL := "http://" + ln.Addr().String()
-		ln.Close() // 释放端口 → 连接必被拒
+		_ = ln.Close() // 释放端口 → 连接必被拒
 
 		for _, lc := range laneCases() {
 			recorded := make(chan *service.OpenAIRecordUsageInput, 1)

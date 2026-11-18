@@ -110,7 +110,10 @@ func envInt(key string, fallback int) int {
 // 上限（管理员显式设置优先于 env 默认）；热更新只升不降（降由 AIMD 管）。
 func queueFor(accountID int64, accountConcurrency int) *accountQueueState {
 	if v, ok := accountQueues.Load(accountID); ok {
-		st := v.(*accountQueueState)
+		st, ok := v.(*accountQueueState)
+		if !ok {
+			return nil
+		}
 		if accountConcurrency > 0 {
 			want := int32(accountConcurrency)
 			for {
@@ -126,15 +129,17 @@ func queueFor(accountID int64, accountConcurrency int) *accountQueueState {
 		}
 		return st
 	}
-	bound := int32(defaultAccountQueueBound)
+	bound := accountQueueBoundFromEnv()
 	if accountConcurrency > 0 {
 		bound = int32(accountConcurrency)
-	} else {
-		bound = accountQueueBoundFromEnv()
 	}
 	st := &accountQueueState{bound: bound, limit: bound, waitMax: accountQueueWaitersFromEnv(bound), wake: make(chan struct{}, 1)}
 	actual, _ := accountQueues.LoadOrStore(accountID, st)
-	return actual.(*accountQueueState)
+	queued, ok := actual.(*accountQueueState)
+	if !ok {
+		return st
+	}
+	return queued
 }
 
 // acquireAccountSlot: 带界排队。快速路径 CAS 占槽；慢路径入等待队列
@@ -252,7 +257,10 @@ func (s *httpUpstreamService) RecordAIMDResult(accountID int64, statusCode int) 
 	if !ok {
 		return
 	}
-	st := v.(*accountQueueState)
+	st, ok := v.(*accountQueueState)
+	if !ok {
+		return
+	}
 	switch {
 	case statusCode >= 500:
 		aimdRecordFailure(st)

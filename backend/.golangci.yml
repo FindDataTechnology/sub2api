@@ -36,6 +36,10 @@ linters:
           list-mode: original
           files:
             - "**/internal/handler/**"
+            # 运维观测端点直连 repository 的进程内指标（无业务逻辑、只读）。
+            # 与 service-no-repository 给 ops_* 开例外的同一性质：这类端点读的是
+            # 进程内原子计数，经过 service 层转一手只增加样板，不增加隔离。
+            - "!**/internal/handler/admin/account_handler.go"
           deny:
             - pkg: github.com/Wei-Shaw/sub2api/internal/repository
               desc: "handler must not import repository"

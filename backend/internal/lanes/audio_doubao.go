@@ -227,10 +227,6 @@ type doubaoASRResult struct {
 	DurationSecond float64 // 计费依据
 }
 
-type doubaoSubmitResponse struct {
-	TaskID string
-}
-
 // realSubmitAndPoll 真实实现：submit 拿受理 → 轮询 query 直到完成或超时。
 func (a *doubaoAdapter) realSubmitAndPoll(ctx context.Context, apiKeyStr, audioURL string, opts doubaoASROptions) (*doubaoASRResult, error) {
 	taskID := newUUIDLike()
@@ -300,7 +296,7 @@ func (a *doubaoAdapter) doubaoASRCall(ctx context.Context, url, apiKeyStr, taskI
 		return &doubaoUpstreamError{status: 0, err: err}
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	statusCode := resp.Header.Get("X-Api-Status-Code")
 	if statusCode != "" && statusCode != "20000000" {

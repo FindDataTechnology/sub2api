@@ -404,14 +404,14 @@ func int64ArrayLiteral(ids []int64) string {
 		return "{}"
 	}
 	var b strings.Builder
-	b.WriteByte('{')
+	_ = b.WriteByte('{')
 	for i, v := range ids {
 		if i > 0 {
-			b.WriteByte(',')
+			_ = b.WriteByte(',')
 		}
-		b.WriteString(strconv.FormatInt(v, 10))
+		_, _ = b.WriteString(strconv.FormatInt(v, 10))
 	}
-	b.WriteByte('}')
+	_ = b.WriteByte('}')
 	return b.String()
 }
 

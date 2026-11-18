@@ -136,12 +136,12 @@ func parseASRMultipart(c *gin.Context, body []byte) (*asrFormData, int, error) {
 		switch name {
 		case "file":
 			if form.fileBytes != nil {
-				part.Close()
+				_ = part.Close()
 				return nil, http.StatusBadRequest, fmt.Errorf("field `file` must appear exactly once")
 			}
 			limited := io.LimitReader(part, audioMaxUploadBytes+1)
 			data, err := io.ReadAll(limited)
-			part.Close()
+			_ = part.Close()
 			if err != nil {
 				return nil, http.StatusBadRequest, fmt.Errorf("failed to read uploaded file")
 			}
@@ -156,7 +156,7 @@ func parseASRMultipart(c *gin.Context, body []byte) (*asrFormData, int, error) {
 		case "model":
 			v, _ := io.ReadAll(io.LimitReader(part, 512))
 			form.model = strings.TrimSpace(string(v))
-			part.Close()
+			_ = part.Close()
 		case "response_format":
 			v, _ := io.ReadAll(io.LimitReader(part, 64))
 			form.responseFormat = strings.ToLower(strings.TrimSpace(string(v)))
@@ -262,13 +262,8 @@ func (a *AudioAdapter) serveTranscriptions(c *gin.Context, apiKey *service.APIKe
 		return
 	}
 	if len(body) > audioMaxUploadBytes {
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
-			"error": gin.H{
-				"type":    "lane_payload_too_large",
-				"message": fmt.Sprintf("audio upload exceeds %d bytes", audioMaxUploadBytes),
-				"lane":    LaneAudio,
-			},
-		})
+		// 走统一错误构造器：手写版漏了 engine 字段，与其它车道错误面不一致。
+		laneRequestTooLarge(c, LaneAudio, audioMaxUploadBytes)
 		return
 	}
 	form, status, err := parseASRMultipart(c, body)
@@ -331,7 +326,7 @@ func (a *AudioAdapter) serveTranscriptions(c *gin.Context, apiKey *service.APIKe
 			return false, &upstreamFailure{status: 0}
 		}
 		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, audioASRResponseLimit))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity {
 				// 调用者上传内容问题（编码/超长等）换号无意义 → 终态。
@@ -463,7 +458,7 @@ func (a *AudioAdapter) serveSpeech(c *gin.Context, apiKey *service.APIKey, accou
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			failure := laneUpstreamFailureFromResponse(resp)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity {
 				laneUpstreamHTTPError(c, LaneAudio, resp.StatusCode)
 				return true, nil
@@ -475,7 +470,7 @@ func (a *AudioAdapter) serveSpeech(c *gin.Context, apiKey *service.APIKey, accou
 			contentType = "audio/mpeg"
 		}
 		audioBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, audioMaxUploadBytes))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if readErr != nil {
 			return false, &upstreamFailure{status: resp.StatusCode}
 		}

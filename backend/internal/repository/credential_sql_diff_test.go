@@ -331,6 +331,7 @@ func mustCanonical(t *testing.T, v map[string]any) []byte {
 
 // seedCredentialDiffRowsWithExtra 与 seedCredentialDiffRows 相同，但额外写入 extra，
 // 供"哪些受管键会被清掉"的观察用。
+//nolint:unused // 同上：跨 build tag
 func seedCredentialDiffRowsWithExtra(t *testing.T, db *sql.DB, extras map[int64]string) {
 	t.Helper()
 	repo := newAccountRepositoryWithSQL(nil, nil, nil)

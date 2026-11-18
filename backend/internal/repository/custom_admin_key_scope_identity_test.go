@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"os"
 	"testing"
 
@@ -143,6 +142,6 @@ func TestScopedCodexIdentityPredicates_FrozenShapeMatrix(t *testing.T) {
 			"身份匹配语义漂移：%s。这份金标是从改造前实现录下来的，"+
 				"任何重写（meta / 指纹 / Go 侧过滤）都必须逐元素相同——包括顺序", c.name)
 		// 便于人工核对：把实际顺序打出来
-		t.Logf("%-42s → %v", fmt.Sprintf("%s", c.name), gotNames)
+		t.Logf("%-42s → %v", c.name, gotNames)
 	}
 }

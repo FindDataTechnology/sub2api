@@ -145,7 +145,7 @@ func sha256Hex(s string) string {
 
 func hmacSHA256(key []byte, data string) []byte {
 	h := hmac.New(sha256.New, key)
-	h.Write([]byte(data))
+	_, _ = h.Write([]byte(data))
 	return h.Sum(nil)
 }
 

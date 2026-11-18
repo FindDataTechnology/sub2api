@@ -22,8 +22,8 @@ func TestFixAPIKeyCacheInvalidationTriggerMigration(t *testing.T) {
 		if strings.HasPrefix(strings.TrimSpace(line), "--") {
 			continue
 		}
-		stmt.WriteString(line)
-		stmt.WriteString("\n")
+		_ = stmt.WriteString(line)
+		_ = stmt.WriteString("\n")
 	}
 
 	sql := strings.Join(strings.Fields(string(content)), " ")

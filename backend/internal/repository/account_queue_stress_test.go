@@ -54,14 +54,14 @@ func TestStressQueueBoundedUnder5xxStorm(t *testing.T) {
 			defer wg.Done()
 			for time.Now().Before(deadline) {
 				st, err := acquireAccountSlot(accountID, 2)
-				switch {
-				case err == nil:
+				switch err {
+				case nil:
 					okCount.Add(1)
 					time.Sleep(2 * time.Millisecond) // 模拟上游调用
 					releaseAccountSlot(st)
-				case err == service.ErrAccountQueueFull:
+				case service.ErrAccountQueueFull:
 					fullCount.Add(1)
-				case err == service.ErrAccountTrippedAIMD:
+				case service.ErrAccountTrippedAIMD:
 					trippedCount.Add(1)
 				default:
 					t.Errorf("unexpected error: %v", err)

@@ -14,9 +14,9 @@ import (
 //  3. 基线来源必须自证：population（群体继承）还是 personal（自身样本足够）。
 
 const (
-	// 自身样本达到该量才从 population 切到 personal。
-	baselinePersonalMinRequests = 200
 	// 群体样本分档：>=high 为 high，>=medium 为 medium，否则 low。
+	// （「自身样本达到多少才从 population 切到 personal」复用 medium 这一档，
+	//   原 baselinePersonalMinRequests 与它同值，已并入本条。）
 	baselineClassHighRequests   = 2000
 	baselineClassMediumRequests = 200
 )
