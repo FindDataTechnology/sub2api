@@ -48,7 +48,7 @@ func TestStatusScript_OnMigratedSchema_ThreeStates(t *testing.T) {
 	run := func() (string, int) {
 		// script 与 dsn 都是本测试自己构造的，不是外部输入。
 		cmd := exec.Command(script, dsn) //nolint:gosec // 参数来自测试内部
-		cmd.Env = os.Environ() // PG_BIN（如设）由脚本自己处理
+		cmd.Env = os.Environ()           // PG_BIN（如设）由脚本自己处理
 		out, err := cmd.CombinedOutput()
 		if err == nil {
 			return string(out), 0

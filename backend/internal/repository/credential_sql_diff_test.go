@@ -66,7 +66,7 @@ const ollamaCloudUsageEligibleLegacySQL = `
 `
 
 // 新谓词：引用生产常量，即"现在实际生效的写法"。
-func ollamaEligibleOldSQL() string { return ollamaCloudUsageEligibleLegacySQL }
+func ollamaEligibleOldSQL() string     { return ollamaCloudUsageEligibleLegacySQL }
 func ollamaEligibleCurrentSQL() string { return ollamaCloudUsageEligibleSQL }
 
 // 新谓词：与旧谓词逐条对位，只把取值来源换掉。
@@ -113,9 +113,9 @@ func credentialDiffFixtures() []credentialDiffFixture {
 		{id: 10, platform: "minimax", accountTyp: "apikey", creds: map[string]any{"api_key": 42, "base_url": "https://ollama.com"}}, // api_key 非字符串
 
 		// ── opencode 侧 ──────────────────────────────────────────────
-		{id: 11, platform: "opencode_go", accountTyp: "apikey", creds: map[string]any{"api_key": "sk-k"}},                                  // account_mode 缺失 → 视为 go
-		{id: 12, platform: "opencode_go", accountTyp: "apikey", creds: map[string]any{"api_key": "sk-l", "account_mode": "zen"}},          // zen → 不合格
-		{id: 13, platform: "opencode_go", accountTyp: "apikey", creds: map[string]any{"api_key": "sk-m", "account_mode": "go"}},           // go → 合格
+		{id: 11, platform: "opencode_go", accountTyp: "apikey", creds: map[string]any{"api_key": "sk-k"}},                        // account_mode 缺失 → 视为 go
+		{id: 12, platform: "opencode_go", accountTyp: "apikey", creds: map[string]any{"api_key": "sk-l", "account_mode": "zen"}}, // zen → 不合格
+		{id: 13, platform: "opencode_go", accountTyp: "apikey", creds: map[string]any{"api_key": "sk-m", "account_mode": "go"}},  // go → 合格
 		{id: 14, platform: "openai", accountTyp: "apikey", creds: map[string]any{"api_key": "sk-n", "base_url": "https://opencode.ai/zen/go"}},
 		{id: 15, platform: "openai", accountTyp: "apikey", creds: map[string]any{"api_key": "sk-o", "base_url": "https://opencode.ai/zen"}}, // zen（非 Go）→ 不合格
 		{id: 16, platform: "deepseek", accountTyp: "apikey", creds: map[string]any{"api_key": "sk-p", "base_url": "https://OpenCode.ai:443/zen/go/v1"}},
@@ -331,6 +331,7 @@ func mustCanonical(t *testing.T, v map[string]any) []byte {
 
 // seedCredentialDiffRowsWithExtra 与 seedCredentialDiffRows 相同，但额外写入 extra，
 // 供"哪些受管键会被清掉"的观察用。
+//
 //nolint:unused // 同上：跨 build tag
 func seedCredentialDiffRowsWithExtra(t *testing.T, db *sql.DB, extras map[int64]string) {
 	t.Helper()
