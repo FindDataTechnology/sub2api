@@ -70,9 +70,20 @@ gh run list --repo Wei-Shaw/sub2api --workflow CI --limit 3
 **为什么这么定**：unit（含主干逻辑）已连续两轮绿；integration 这套是合并的深层冲突，
 在 CI 红绿上反复试错对交付不划算。
 
-### golangci-lint 的 gofmt 检查与裸 gofmt 判据不同
+### golangci-lint 的 gofmt 检查与裸 gofmt 判据不同（**已解决**）
 
-`gofmt -l` 对全仓报 95 个文件「未格式化」，而 CI 的 golangci-lint 每轮只报 3 个
-（且每轮换一批，是每 linter 的滚动上限）。两者判据不同，**不要用全仓 `gofmt -w` 去追**
-——那会制造 95 个文件的巨大 diff，且可能引入 CI 不认的变化。
-正确做法：按 CI 当轮报的具体文件修，用 CI 同版本 `GOTOOLCHAIN=go1.27.4 gofmt -w`。
+**症状**：CI 每轮只报 3 个 gofmt，按轮修了 4 轮还在报新的；而裸 `gofmt -l` 对全仓
+报 95 个「未格式化」。
+
+**真因**：`.golangci.yml` 的 `formatters.gofmt` 配了 `rewrite-rules`
+（`interface{}` → `any`、`a[b:len(a)]` → `a[b:]`），裸 `gofmt` 不带这些规则。
+所以两个工具对同一批文件给出相反结论——不是滚动上限，是判据不同。
+
+**正解**：用 golangci 自己的格式化命令，与判据同源：
+
+```bash
+cd backend && GOTOOLCHAIN=go1.27.4 golangci-lint fmt
+```
+
+2026-11-19 用它一次清完 94 个文件（纯格式，`go build ./...` 仍 exit 0）。
+**不要再按 CI 当轮报的文件逐个修**——那是打地鼠。
