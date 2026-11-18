@@ -247,7 +247,7 @@ RETURNING `+lanesTaskColumnsQualified+``, now, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*LanesTaskJob
 	for rows.Next() {
 		job, serr := scanLanesTaskJob(rows)

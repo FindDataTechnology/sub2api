@@ -160,11 +160,11 @@ func parseASRMultipart(c *gin.Context, body []byte) (*asrFormData, int, error) {
 		case "response_format":
 			v, _ := io.ReadAll(io.LimitReader(part, 64))
 			form.responseFormat = strings.ToLower(strings.TrimSpace(string(v)))
-			part.Close()
+			_ = part.Close()
 		default:
 			v, _ := io.ReadAll(io.LimitReader(part, 64<<10))
 			form.extraFields[name] = string(v)
-			part.Close()
+			_ = part.Close()
 		}
 	}
 	if form.fileBytes == nil {

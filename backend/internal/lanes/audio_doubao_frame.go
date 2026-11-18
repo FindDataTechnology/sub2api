@@ -39,22 +39,22 @@ const (
 	doubaoSerializationJSON = 1
 
 	// 事件编号（官方 Event 定义）
-	doubaoEventStartConnection      = 1
-	doubaoEventFinishConnection     = 2
-	doubaoEventConnectionStarted    = 50
-	doubaoEventConnectionFailed     = 51
-	doubaoEventConnectionFinished   = 52
-	doubaoEventStartSession         = 100
-	doubaoEventCancelSession        = 101
-	doubaoEventFinishSession        = 102
-	doubaoEventSessionStarted       = 150
-	doubaoEventSessionCanceled      = 151
-	doubaoEventSessionFinished      = 152
-	doubaoEventSessionFailed        = 153
-	doubaoEventTaskRequest          = 200
-	doubaoEventTTSSentenceStart     = 350
-	doubaoEventTTSSentenceEnd       = 351
-	doubaoEventTTSResponse          = 352
+	doubaoEventStartConnection    = 1
+	doubaoEventFinishConnection   = 2
+	doubaoEventConnectionStarted  = 50
+	doubaoEventConnectionFailed   = 51
+	doubaoEventConnectionFinished = 52
+	doubaoEventStartSession       = 100
+	doubaoEventCancelSession      = 101
+	doubaoEventFinishSession      = 102
+	doubaoEventSessionStarted     = 150
+	doubaoEventSessionCanceled    = 151
+	doubaoEventSessionFinished    = 152
+	doubaoEventSessionFailed      = 153
+	doubaoEventTaskRequest        = 200
+	doubaoEventTTSSentenceStart   = 350
+	doubaoEventTTSSentenceEnd     = 351
+	doubaoEventTTSResponse        = 352
 )
 
 // doubaoFrame 解出的一个上行/下行帧。

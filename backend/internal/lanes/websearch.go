@@ -273,7 +273,7 @@ func (a *WebsearchAdapter) serpAPISearch(c *gin.Context, baseURL, apiKeyStr, q s
 		return nil, &upstreamFailure{status: 0}
 	}
 	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		failure := &upstreamFailure{status: resp.StatusCode}
 		if readErr == nil {

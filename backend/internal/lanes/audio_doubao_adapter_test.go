@@ -26,7 +26,7 @@ func stubDoubaoTTS(t *testing.T, audioChunks [][]byte, failWith *diagFrame) *htt
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// 断言鉴权头齐备（真实上游缺一即拒）。
 		if r.Header.Get("X-Api-Key") == "" || r.Header.Get("X-Api-Resource-Id") != doubaoResourceTTS {

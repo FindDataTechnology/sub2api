@@ -115,7 +115,7 @@ func (a *RerankAdapter) Serve(c *gin.Context, apiKey *service.APIKey, accounts [
 			return false, &upstreamFailure{status: 0}
 		}
 		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			// 400/422=调用者内容问题（换号无意义）→ 直接终态；其余进轮转。
 			if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity {

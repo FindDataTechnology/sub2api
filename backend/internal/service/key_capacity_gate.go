@@ -53,20 +53,30 @@ func NewKeyCapacityGate() *KeyCapacityGate {
 
 func (g *KeyCapacityGate) userCounter(userID int64) *atomic.Int64 {
 	if v, ok := g.users.Load(userID); ok {
-		return v.(*atomic.Int64)
+		if c, ok := v.(*atomic.Int64); ok {
+			return c
+		}
 	}
 	c := &atomic.Int64{}
 	actual, _ := g.users.LoadOrStore(userID, c)
-	return actual.(*atomic.Int64)
+	if counter, ok := actual.(*atomic.Int64); ok {
+		return counter
+	}
+	return c
 }
 
 func (g *KeyCapacityGate) keyCounter(apiKeyID, userID int64) *keySlot {
 	if v, ok := g.keys.Load(apiKeyID); ok {
-		return v.(*keySlot)
+		if slot, ok := v.(*keySlot); ok {
+			return slot
+		}
 	}
 	s := &keySlot{userID: userID}
 	actual, _ := g.keys.LoadOrStore(apiKeyID, s)
-	return actual.(*keySlot)
+	if slot, ok := actual.(*keySlot); ok {
+		return slot
+	}
+	return s
 }
 
 // TryAcquireCapacity 尝试占用一个并发槽位。

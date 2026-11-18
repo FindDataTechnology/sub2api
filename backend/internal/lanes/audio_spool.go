@@ -58,7 +58,8 @@ func publishAudioForUpstream(form *asrFormData, accountPublicBase string) (strin
 	if dir == "" {
 		dir = filepath.Join(os.TempDir(), "lane-audio-spool")
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	// dir 来自账号凭据或环境变量（部署侧配置），不是终端用户输入。
+	if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gosec // dir 是部署侧配置
 		return "", fmt.Errorf("create audio spool dir: %w", err)
 	}
 
@@ -66,8 +67,8 @@ func publishAudioForUpstream(form *asrFormData, accountPublicBase string) (strin
 	// 而扩展名走 audioFileExt 的**白名单**（8 个固定值，见该函数）。
 	// gosec 的污点分析看不穿这两层，故此处显式豁免。
 	name := randomSpoolName(audioFileExt(form.fileName))
-	path := filepath.Join(dir, name) //nolint:gosec // 见上：随机名 + 扩展名白名单
-	if err := os.WriteFile(path, form.fileBytes, 0o600); err != nil {
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, form.fileBytes, 0o600); err != nil { //nolint:gosec // 见上：随机名 + 扩展名白名单
 		return "", fmt.Errorf("write audio spool file: %w", err)
 	}
 	sweepAudioSpool(dir)

@@ -180,7 +180,7 @@ func (a *tencentAdapter) tencentCall(ctx context.Context, cred tencentCredential
 	if err != nil {
 		return nil, &tencentUpstreamError{status: 0, err: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
 		return nil, &tencentUpstreamError{status: resp.StatusCode, err: err}

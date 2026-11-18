@@ -181,7 +181,7 @@ func TestLaneUpstreamFaultsAreUniform(t *testing.T) {
 				require.NotContainsf(t, w.Body.String(), "sk-SECRET-12345", "lane=%s", lc.lane)
 				require.NotContainsf(t, w.Body.String(), "acct-9", "lane=%s", lc.lane)
 				assertNotBilled(t, recorded, lc.lane)
-				server.Close()
+				_ = server.Close()
 			}
 		}
 	})

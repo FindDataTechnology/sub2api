@@ -30,9 +30,9 @@ import (
 // 对外契约仍是 OpenAI 音频形状（由 audio.go 的分派层保证）——上游差异全部
 // 吞在这里。计量口径复用既有 Group 音频三价（TTS 每百万字符 / STT 每小时）。
 const (
-	doubaoWSURL          = "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
-	doubaoASRSubmitURL   = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit"
-	doubaoASRQueryURL    = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query"
+	doubaoWSURL        = "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
+	doubaoASRSubmitURL = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit"
+	doubaoASRQueryURL  = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query"
 
 	// 资源 ID 决定模型版本与计费商品（官方文档）。
 	doubaoResourceTTS = "seed-tts-2.0"
@@ -76,9 +76,9 @@ func newDoubaoAdapter() *doubaoAdapter {
 
 // doubaoTTSOptions 一次合成的入参。
 type doubaoTTSOptions struct {
-	Text      string
-	Voice     string // 2.0 音色名；空则用默认
-	Format    string // mp3 / pcm / ogg_opus
+	Text       string
+	Voice      string // 2.0 音色名；空则用默认
+	Format     string // mp3 / pcm / ogg_opus
 	SampleRate int
 }
 
@@ -119,7 +119,7 @@ func (a *doubaoAdapter) synthesize(ctx context.Context, apiKeyStr string, opts d
 		}
 		return nil, &doubaoUpstreamError{status: status, err: err}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	sessionID := newUUIDLike()
 	deadline := time.Now().Add(doubaoWSReadTimeout)
@@ -295,7 +295,7 @@ func (a *doubaoAdapter) doubaoASRCall(ctx context.Context, url, apiKeyStr, taskI
 	if err != nil {
 		return &doubaoUpstreamError{status: 0, err: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	statusCode := resp.Header.Get("X-Api-Status-Code")
@@ -328,7 +328,7 @@ func (a *doubaoAdapter) doubaoASRQuery(ctx context.Context, apiKeyStr, taskID st
 	if err != nil {
 		return nil, &doubaoUpstreamError{status: 0, err: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	statusCode := resp.Header.Get("X-Api-Status-Code")
 	// 20000000=完成；20000001/20000002=处理中（官方口径）；其余=失败。
