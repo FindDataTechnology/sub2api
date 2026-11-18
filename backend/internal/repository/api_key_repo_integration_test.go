@@ -23,8 +23,9 @@ type APIKeyRepoSuite struct {
 }
 
 func (s *APIKeyRepoSuite) SetupTest() {
-	s.ctx = context.Background()
 	tx := testEntTx(s.T())
+	// ctx 必须绑定事务（同上）。
+	s.ctx = dbent.NewTxContext(context.Background(), tx)
 	s.client = tx.Client()
 	s.repo = newAPIKeyRepositoryWithSQL(s.client, tx)
 }

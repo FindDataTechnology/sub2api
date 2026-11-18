@@ -3581,7 +3581,6 @@ type accountGroupQueryOptions struct {
 	platforms            []string // 允许的多个平台，空切片表示不进行平台过滤
 }
 
-
 // bulkMergeCredentialsOnly 处理「只改凭据、没有别的列」的批量更新。
 //
 // 主 UPDATE 在这种情形下 setClauses 为空，但不能因此跳过凭据合并：

@@ -41,8 +41,10 @@ func (s *forbidSQLExecutor) QueryContext(ctx context.Context, query string, args
 }
 
 func (s *GroupRepoSuite) SetupTest() {
-	s.ctx = context.Background()
 	tx := testEntTx(s.T())
+	// ctx 必须绑定事务：写路径用 dbent.TxFromContext 判断是否已在事务里，
+	// 拿不到就新开独立事务，其写入对外层 testEntTx 不可见。
+	s.ctx = dbent.NewTxContext(context.Background(), tx)
 	s.tx = tx
 	s.repo = newGroupRepositoryWithSQL(tx.Client(), tx)
 }
