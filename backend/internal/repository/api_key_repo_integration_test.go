@@ -24,8 +24,8 @@ type APIKeyRepoSuite struct {
 
 func (s *APIKeyRepoSuite) SetupTest() {
 	tx := testEntTx(s.T())
-	// ctx 必须绑定事务（同上）。
-	s.ctx = dbent.NewTxContext(context.Background(), tx)
+	// 与上游一致：不把 tx 绑进 ctx。
+	s.ctx = context.Background()
 	s.client = tx.Client()
 	// 必须带 cryptor：迁移 251 后 key 只剩 key_hash / key_encrypted，
 	// GetByKey 命中指纹后要用**解密出来的明文**做常量时间复核，

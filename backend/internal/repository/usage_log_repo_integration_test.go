@@ -30,9 +30,8 @@ type UsageLogRepoSuite struct {
 
 func (s *UsageLogRepoSuite) SetupTest() {
 	tx := testEntTx(s.T())
-	// ctx 绑定事务：写路径用 dbent.TxFromContext 判断是否已在事务里，
-	// 拿不到就新开独立事务，写入对外层不可见。
-	s.ctx = dbent.NewTxContext(context.Background(), tx)
+	// 与上游一致：不把 tx 绑进 ctx。
+	s.ctx = context.Background()
 	s.tx = tx
 	s.client = tx.Client()
 	s.repo = newUsageLogRepositoryWithSQL(s.client, tx)

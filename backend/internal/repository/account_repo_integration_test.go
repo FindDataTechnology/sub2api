@@ -137,10 +137,11 @@ func (s *schedulerCacheRecorder) SetOutboxWatermark(ctx context.Context, id int6
 
 func (s *AccountRepoSuite) SetupTest() {
 	tx := testEntTx(s.T())
-	// ctx 必须绑定事务：BulkUpdate 等写路径用 dbent.TxFromContext(ctx) 判断是否已在
-	// 事务里，拿不到就**新开一个独立事务**。那样它的写入对外层 testEntTx 不可见，
-	// 随后的 GetByID 读不到刚写的值（表现为 `expected "new_value", actual nil`）。
-	s.ctx = dbent.NewTxContext(context.Background(), tx)
+	// 刻意**不**把 tx 绑进 ctx：与上游一致。绑定会让 accountTransactionScope 走
+	// scoped 分支并把 schedulerCache 置 nil（"禁止在提交前发布缓存"），
+	// 而本套件大量用例断言"事务内快照已同步"——绑定后它们必然失败。
+	// 写入可见性靠 repo.client 就是 tx.Client() 保证，不依赖 ctx。
+	s.ctx = context.Background()
 	s.client = tx.Client()
 	// 必须注入与 mustCreateAccount 同一个加密器：迁移 251 之后凭据只有
 	// credentials_encrypted，repo 没有 cryptor 时 credentialsFromEntity 会

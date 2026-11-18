@@ -23,8 +23,8 @@ type UserSubscriptionRepoSuite struct {
 
 func (s *UserSubscriptionRepoSuite) SetupTest() {
 	tx := testEntTx(s.T())
-	// ctx 必须绑定事务（同上）。
-	s.ctx = dbent.NewTxContext(context.Background(), tx)
+	// 与上游一致：不把 tx 绑进 ctx。
+	s.ctx = context.Background()
 	s.client = tx.Client()
 	s.repo = NewUserSubscriptionRepository(s.client).(*userSubscriptionRepository)
 }

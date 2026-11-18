@@ -22,9 +22,9 @@ type GatewayRoutingSuite struct {
 
 func (s *GatewayRoutingSuite) SetupTest() {
 	tx := testEntTx(s.T())
-	// ctx 绑定事务：写路径用 dbent.TxFromContext 判断是否已在事务里，
-	// 拿不到就新开独立事务，写入对外层不可见。
-	s.ctx = dbent.NewTxContext(context.Background(), tx)
+	// 与上游一致：不把 tx 绑进 ctx（绑定会触发 accountTransactionScope 的
+	// schedulerCache=nil 分支，破坏快照同步断言）。
+	s.ctx = context.Background()
 	s.client = tx.Client()
 	s.accountRepo = newAccountRepositoryWithSQLCrypto(s.client, tx, nil, credentialTestEncryptor(s.T()))
 }
