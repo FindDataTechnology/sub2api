@@ -3,6 +3,8 @@
 package repository
 
 import (
+	"regexp"
+	"strconv"
 	"context"
 	"database/sql"
 	"strings"
@@ -84,11 +86,24 @@ type failAtomicSchedulerOutboxSQLExecutor struct {
 
 func (e *failAtomicSchedulerOutboxSQLExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	if strings.Contains(query, "WITH updated AS") && strings.Contains(query, "INSERT INTO scheduler_outbox") && len(args) > 0 {
-		args = append([]any(nil), args...)
-		args[len(args)-1] = nil // event_type is NOT NULL; the whole statement must roll back.
+		// event_type 的占位符位置由 SQL 决定，**不能假设它是最后一个参数**：
+		// 凭据加密改造后 fork 把 event_type 从 $8 挪到 $7，末位变成了 credentials_hash。
+		// 从 `SELECT $N, updated.id` 里解析出真实位置再把它置 nil
+		// （event_type NOT NULL ⇒ 整条语句必须回滚）。
+		if m := atomicOutboxEventTypePlaceholder.FindStringSubmatch(query); m != nil {
+			idx, convErr := strconv.Atoi(m[1])
+			if convErr == nil && idx >= 1 && idx <= len(args) {
+				args = append([]any(nil), args...)
+				args[idx-1] = nil
+			}
+		}
 	}
 	return e.sqlExecutor.ExecContext(ctx, query, args...)
 }
+
+// atomicOutboxEventTypePlaceholder 匹配 `SELECT $N, updated.id, ... FROM updated` 里
+// 那个 event_type 占位符。
+var atomicOutboxEventTypePlaceholder = regexp.MustCompile(`(?s)INSERT INTO scheduler_outbox[^;]*?SELECT\s+\$(\d+)`)
 
 type cancelAfterAtomicMutationSQLExecutor struct {
 	sqlExecutor
