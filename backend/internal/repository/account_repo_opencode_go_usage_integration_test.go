@@ -35,7 +35,7 @@ func openCodeGoManagedExtra(now time.Time) map[string]any {
 func TestBulkUpdateOpenCodeGoMixedPlatformIdentityCleanup(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
-	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 	now := time.Now().UTC()
 
 	create := func(name, platform, baseURL string, extra map[string]any) *service.Account {
@@ -120,7 +120,7 @@ func TestBulkUpdateOpenCodeGoMixedPlatformIdentityCleanup(t *testing.T) {
 func TestUpdateCredentialsOpenCodeGoClearsAllManagedStateOnIdentityChange(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
-	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 	now := time.Now().UTC()
 
 	account := mustCreateAccount(t, tx.Client(), &service.Account{
@@ -147,7 +147,7 @@ func TestUpdateCredentialsOpenCodeGoClearsAllManagedStateOnIdentityChange(t *tes
 func TestUpdateCredentialsOpenCodeGoMissingBaseURLClearsManagedState(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
-	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 	now := time.Now().UTC()
 
 	account := mustCreateAccount(t, tx.Client(), &service.Account{
@@ -175,7 +175,7 @@ func TestUpdateCredentialsOpenCodeGoMissingBaseURLClearsManagedState(t *testing.
 func TestBulkUpdateOpenCodeGoRemovedBaseURLClearsManagedState(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
-	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 	now := time.Now().UTC()
 
 	account := mustCreateAccount(t, tx.Client(), &service.Account{
@@ -204,7 +204,7 @@ func TestBulkUpdateOpenCodeGoRemovedBaseURLClearsManagedState(t *testing.T) {
 func TestOpenCodeGoUsageEligibleSQLAcceptsDefaultPort443(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
-	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 
 	account := mustCreateAccount(t, tx.Client(), &service.Account{
 		Name: "opencode-port-443", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
@@ -226,7 +226,7 @@ func TestOpenCodeGoUsageEligibleSQLAcceptsDefaultPort443(t *testing.T) {
 func TestOpenCodeGoUsageEligibleSQLOpencodePlatformAndAnthropicBaseURL(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
-	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 
 	platformGo := mustCreateAccount(t, tx.Client(), &service.Account{
 		Name: "opencode-platform-go", Platform: service.PlatformOpenCodeGo, Type: service.AccountTypeAPIKey,
@@ -264,7 +264,7 @@ func TestOpenCodeGoUsageEligibleSQLOpencodePlatformAndAnthropicBaseURL(t *testin
 func TestUpdateCredentialsOpenCodeGoUnrelatedCredentialChangeKeepsManagedState(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
-	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 	now := time.Now().UTC()
 
 	create := func(name, platform string, credentials map[string]any) *service.Account {
@@ -313,7 +313,7 @@ func TestUpdateCredentialsOpenCodeGoUnrelatedCredentialChangeKeepsManagedState(t
 func TestUpdateOpenCodeGoManagedStateSurvivesDesensitizedEdit(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
-	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 	now := time.Now().UTC()
 
 	proxy := mustCreateProxy(t, tx.Client(), &service.Proxy{

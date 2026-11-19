@@ -316,7 +316,7 @@ func TestBulkUpdateOpenCodeGoIdentityCleanupIsValueConditional(t *testing.T) {
 func TestBulkUpdateOpenCodeGoEligiblePredicateIncludesBaseURL(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
 	exec.queryRows = emptyCredentialQueryRows(t)
-	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+	repo := newAccountRepositoryWithSQLCrypto(nil, exec, nil, credentialTestEncryptor(t))
 
 	proxyID := int64(9)
 	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
@@ -436,7 +436,7 @@ func TestOpenCodeGoUsagePlatformWhitelistMatchesServicePredicate(t *testing.T) {
 func TestBulkUpdateOpenCodeGoProxyChangeClearsSnapshotOnly(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
 	exec.queryRows = emptyCredentialQueryRows(t)
-	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+	repo := newAccountRepositoryWithSQLCrypto(nil, exec, nil, credentialTestEncryptor(t))
 
 	proxyID := int64(9)
 	_, err := repo.BulkUpdate(context.Background(), []int64{17}, service.AccountBulkUpdate{
