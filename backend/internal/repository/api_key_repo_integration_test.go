@@ -580,13 +580,18 @@ func (s *APIKeyRepoSuite) TestDeleteWithAudit_TombstonesWithoutRetainingCredenti
 	_, err := s.repo.GetByID(s.ctx, key.ID)
 	s.Require().Error(err)
 
-	var tombstone string
+	// 明文列 api_keys.key 已在迁移 251 drop；墓碑现在写进 key_encrypted，
+	// 所以这里解密后检查它不再是原 key 且带墓碑标记。
+	var tombstoneEnc *string
 	var deletedAt time.Time
-	rows, err := s.repo.sql.QueryContext(s.ctx, `SELECT key, deleted_at FROM api_keys WHERE id = $1`, key.ID)
+	rows, err := s.repo.sql.QueryContext(s.ctx, `SELECT key_encrypted, deleted_at FROM api_keys WHERE id = $1`, key.ID)
 	s.Require().NoError(err)
 	s.Require().True(rows.Next())
-	s.Require().NoError(rows.Scan(&tombstone, &deletedAt))
+	s.Require().NoError(rows.Scan(&tombstoneEnc, &deletedAt))
 	s.Require().NoError(rows.Close())
+	s.Require().NotNil(tombstoneEnc, "墓碑必须留下密文而不是 NULL")
+	tombstone, derr := credentialTestEncryptor(s.T()).Decrypt(*tombstoneEnc)
+	s.Require().NoError(derr, "墓碑密文必须可解")
 	s.Require().NotEqual("sk-del-audit-1", tombstone)
 	s.Require().Contains(tombstone, "__deleted__")
 
