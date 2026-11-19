@@ -975,7 +975,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 		SET
 			credentials_meta = $5::jsonb,
 			credentials_encrypted = $6::text,
-			credentials_hash = $4,
+			credentials_hash = $4::varchar,
 			-- 无 api_key / 无加密器时对应参数为 nil，lib/pq 从 nil 推断不出类型会让
 			-- 整条语句崩溃并报在别的参数上（注释里不要写 $n，Postgres 会当成占位符）。
 			credentials_api_key_hash = $3::varchar,
@@ -991,7 +991,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				-- ollama.com 基址正则）：Ollama 行不会被 OpenCode 分支遮蔽；
 				-- opencode_go 平台行不在 Ollama 白名单内，与 Ollama 分支真互斥。
 				WHEN type = 'apikey'
-					AND credentials_hash IS DISTINCT FROM $4
+					AND credentials_hash IS DISTINCT FROM $4::varchar
 					AND (
 						-- 旧行按新谓词属于 OpenCode 用量身份
 						(platform = 'opencode_go'
@@ -1022,7 +1022,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				-- 非 Ollama 账号的无变化持久化误清探测快照或重写 NULL extra。
 				WHEN platform IN (`+ollamaCloudUsagePlatformsSQL+`)
 					AND type = 'apikey'
-					AND credentials_hash IS DISTINCT FROM $4
+					AND credentials_hash IS DISTINCT FROM $4::varchar
 					AND (
 						credentials_api_key_hash IS DISTINCT FROM $3::varchar
 						OR NOT (
@@ -1038,7 +1038,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				-- 上游倍率探测已放宽到全部 API-key 平台：凭证变化即视为探测
 				-- 身份变化，丢弃 stale 快照。
 				WHEN type = 'apikey'
-					AND credentials_hash IS DISTINCT FROM $4
+					AND credentials_hash IS DISTINCT FROM $4::varchar
 				THEN COALESCE(extra, '{}'::jsonb) - 'upstream_billing_probe'
 				ELSE extra
 			END,
@@ -1710,7 +1710,7 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 			AND a.platform = $4
 			AND a.type = $5
 			AND a.status = $6
-			AND a.credentials_hash = $8
+			AND a.credentials_hash = $8::varchar
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
@@ -1786,7 +1786,7 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 			AND a.deleted_at IS NULL
 			AND a.platform = $2
 			AND a.type = $3
-			AND a.credentials_hash = $4
+			AND a.credentials_hash = $4::varchar
 			-- 显式标注类型：expectedProxyID 可能是 nil，lib/pq 无法从 nil 推断，
 			-- 会让整条语句的参数类型推导失败（错误会报在别的参数上，极具误导性）。
 			-- 注意：SQL 注释里不要写占位符记号，Postgres 会当成真参数解析。
