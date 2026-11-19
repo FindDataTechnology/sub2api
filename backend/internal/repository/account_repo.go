@@ -976,8 +976,8 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 			credentials_meta = $5::jsonb,
 			credentials_encrypted = $6::text,
 			credentials_hash = $4,
-			-- $3/$6 可能为 nil（无 api_key / 无加密器），lib/pq 从 nil 推断不出类型会让
-			-- 整条语句崩溃并报在别的参数上（现象：inconsistent types for $4）。
+			-- 无 api_key / 无加密器时对应参数为 nil，lib/pq 从 nil 推断不出类型会让
+			-- 整条语句崩溃并报在别的参数上（注释里不要写 $n，Postgres 会当成占位符）。
 			credentials_api_key_hash = $3::varchar,
 			extra = CASE
 				-- 正确性依赖（非防御）：OpenCode 分支必须先于 Ollama 分支求值。两分支
@@ -1787,9 +1787,9 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 			AND a.platform = $2
 			AND a.type = $3
 			AND a.credentials_hash = $4
-			-- $9 显式标注类型：expectedProxyID 可能是 nil，lib/pq 无法从 nil 推断，
-			-- 会让整条语句的参数类型推导失败（报在别的 $n 上，现象是
-			-- inconsistent types deduced for parameter $4，极具误导性）。
+			-- 显式标注类型：expectedProxyID 可能是 nil，lib/pq 无法从 nil 推断，
+			-- 会让整条语句的参数类型推导失败（错误会报在别的参数上，极具误导性）。
+			-- 注意：SQL 注释里不要写占位符记号，Postgres 会当成真参数解析。
 			AND a.proxy_id IS NOT DISTINCT FROM $9::bigint
 		RETURNING a.id
 		)
