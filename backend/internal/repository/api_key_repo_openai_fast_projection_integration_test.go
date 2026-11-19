@@ -24,7 +24,8 @@ func TestGetByKeyForAuthCarriesGroupForceOpenAIFast(t *testing.T) {
 	})
 	groupID := group.ID
 	keyValue := fmt.Sprintf("sk-fast-proj-%d", suffix)
-	apiKeyRepo := NewAPIKeyRepository(integrationEntClient, integrationDB)
+	// 必须带加密器：GetByKey 命中指纹后要用解密明文复核，没有加密器一律 not found。
+	apiKeyRepo := NewAPIKeyRepositoryCrypto(integrationEntClient, integrationDB, credentialTestEncryptor(t))
 	key := &service.APIKey{UserID: user.ID, GroupID: &groupID, Key: keyValue, Name: "fast-proj", Status: service.StatusActive}
 	require.NoError(t, apiKeyRepo.Create(ctx, key))
 	t.Cleanup(func() {
@@ -57,7 +58,8 @@ func TestGetByKeyForAuthCarriesGroupForceOpenAIUltrafast(t *testing.T) {
 	})
 	groupID := group.ID
 	keyValue := fmt.Sprintf("sk-ultrafast-proj-%d", suffix)
-	apiKeyRepo := NewAPIKeyRepository(integrationEntClient, integrationDB)
+	// 必须带加密器：GetByKey 命中指纹后要用解密明文复核，没有加密器一律 not found。
+	apiKeyRepo := NewAPIKeyRepositoryCrypto(integrationEntClient, integrationDB, credentialTestEncryptor(t))
 	key := &service.APIKey{UserID: user.ID, GroupID: &groupID, Key: keyValue, Name: "ultrafast-proj", Status: service.StatusActive}
 	require.NoError(t, apiKeyRepo.Create(ctx, key))
 	t.Cleanup(func() {

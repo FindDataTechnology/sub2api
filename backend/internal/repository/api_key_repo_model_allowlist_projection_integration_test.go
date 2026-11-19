@@ -28,7 +28,7 @@ func TestGetByKeyForAuthCarriesGroupModelAllowlist(t *testing.T) {
 	})
 	groupID := group.ID
 	keyValue := fmt.Sprintf("sk-model-allowlist-proj-%d", suffix)
-	apiKeyRepo := NewAPIKeyRepository(integrationEntClient, integrationDB)
+	apiKeyRepo := NewAPIKeyRepositoryCrypto(integrationEntClient, credentialTestEncryptor(t))
 	key := &service.APIKey{UserID: user.ID, GroupID: &groupID, Key: keyValue, Name: "model-allowlist-proj", Status: service.StatusActive}
 	require.NoError(t, apiKeyRepo.Create(ctx, key))
 	t.Cleanup(func() {

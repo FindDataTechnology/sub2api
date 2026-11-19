@@ -29,7 +29,7 @@ func TestAuthCacheInvalidationTrigger_ProfitControlColumns(t *testing.T) {
 	})
 	groupID := group.ID
 	keyValue := fmt.Sprintf("sk-profit-trigger-%d", suffix)
-	apiKeyRepo := NewAPIKeyRepository(integrationEntClient, integrationDB)
+	apiKeyRepo := NewAPIKeyRepositoryCrypto(integrationEntClient, credentialTestEncryptor(t))
 	key := &service.APIKey{UserID: user.ID, GroupID: &groupID, Key: keyValue, Name: "profit-trigger", Status: service.StatusActive}
 	require.NoError(t, apiKeyRepo.Create(ctx, key))
 

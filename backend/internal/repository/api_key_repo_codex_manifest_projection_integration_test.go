@@ -29,7 +29,7 @@ func TestGetByKeyForAuthCarriesGroupCodexModelsManifestConfig(t *testing.T) {
 	})
 	groupID := group.ID
 	keyValue := fmt.Sprintf("sk-codex-manifest-proj-%d", suffix)
-	apiKeyRepo := NewAPIKeyRepository(integrationEntClient, integrationDB)
+	apiKeyRepo := NewAPIKeyRepositoryCrypto(integrationEntClient, credentialTestEncryptor(t))
 	key := &service.APIKey{UserID: user.ID, GroupID: &groupID, Key: keyValue, Name: "codex-manifest-proj", Status: service.StatusActive}
 	require.NoError(t, apiKeyRepo.Create(ctx, key))
 	t.Cleanup(func() {
