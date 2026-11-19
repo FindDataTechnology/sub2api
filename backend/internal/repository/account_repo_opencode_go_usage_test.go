@@ -266,7 +266,7 @@ func TestUpdateCredentialsOpenCodeGoToOllamaCrossOverClearsManagedExtra(t *testi
 func TestUpdateCredentialsOpenCodeGoCleanupRequiresChangedCredentials(t *testing.T) {
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)UPDATE accounts.*CASE.*AND credentials_hash IS DISTINCT FROM \$4`).
+	mock.ExpectExec(`(?s)UPDATE accounts.*CASE.*AND credentials_hash IS DISTINCT FROM \$4::varchar`).
 		WithArgs(`{"api_key":"same-key","base_url":"https://relay.example.com/v1"}`, int64(17), credentialAPIKeyHashHex("same-key"),
 			credentialHashOfJSONString(`{"api_key":"same-key","base_url":"https://relay.example.com/v1"}`),
 			`{"base_url":"https://relay.example.com/v1","has_refresh_token":false}`,

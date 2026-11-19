@@ -328,7 +328,7 @@ func TestUpdateCredentials_RefusesWithoutEncryptor(t *testing.T) {
 func TestUpdateCredentials_AllowsEmptyCredentialsWithoutEncryptor(t *testing.T) {
 	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)UPDATE accounts.*credentials_encrypted = \$6.*WHERE id = \$2`).
+	mock.ExpectExec(`(?s)UPDATE accounts.*credentials_encrypted = \$6::text.*WHERE id = \$2`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 		WillReturnResult(sqlmock.NewResult(1, 1))

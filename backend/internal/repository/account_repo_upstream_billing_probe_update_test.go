@@ -346,7 +346,7 @@ func TestUpdateCredentialsAtomicallyClearsProbeForOpenAIAPIKeyIdentityChange(t *
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)UPDATE accounts.*credentials_hash IS DISTINCT FROM \$4.*- 'upstream_billing_probe'`).
+	mock.ExpectExec(`(?s)UPDATE accounts.*credentials_hash IS DISTINCT FROM \$4::varchar.*- 'upstream_billing_probe'`).
 		WithArgs(`{"api_key":"sk-new"}`, int64(27), credentialAPIKeyHashHex("sk-new"),
 			credentialHashOfJSONString(`{"api_key":"sk-new"}`),
 			`{"has_refresh_token":false}`,
@@ -439,7 +439,7 @@ func TestUpdateCredentialsRollsBackWhenOutboxFails(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)UPDATE accounts.*credentials_hash IS DISTINCT FROM \$4.*- 'upstream_billing_probe'`).
+	mock.ExpectExec(`(?s)UPDATE accounts.*credentials_hash IS DISTINCT FROM \$4::varchar.*- 'upstream_billing_probe'`).
 		WithArgs(`{"api_key":"sk-new"}`, int64(27), credentialAPIKeyHashHex("sk-new"),
 			credentialHashOfJSONString(`{"api_key":"sk-new"}`),
 			`{"has_refresh_token":false}`,
