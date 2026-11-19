@@ -61,8 +61,10 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "groups", "force_openai_ultrafast", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "free_openai_fast", "boolean", 0, false)
 
-	// api_keys: key length should be 128
-	requireColumn(t, tx, "api_keys", "key", "character varying", 128, false)
+	// api_keys：凭据落盘加密（迁移 251）之后，明文列 `key` 已物理删除。
+	// 派生列取代它：key_hash 供查找（sha256 十六进制，64 字符）、key_encrypted 供解密。
+	requireColumn(t, tx, "api_keys", "key_hash", "character varying", 64, true)
+	requireColumn(t, tx, "api_keys", "key_encrypted", "text", 0, true)
 
 	// redeem_codes: subscription fields
 	requireColumn(t, tx, "redeem_codes", "group_id", "bigint", 0, true)
