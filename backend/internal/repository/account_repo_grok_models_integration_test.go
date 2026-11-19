@@ -16,18 +16,10 @@ import (
 )
 
 func TestGrokCatalogCASPreservesSingleKeyAndRejectsStaleExpected(t *testing.T) {
-	// 已知失败（2026-11-19）：fork 的凭据落盘加密（迁移 251 删明文列 +
-	// accountTransactionScope 在事务内把 schedulerCache 置 nil）改变了本用例依赖的
-	// 事务内快照同步语义。现象分别是 `"[]" should have 1 item(s)`、并发 CAS 超时、
-	// 以及「期望 error 得 nil」。三者都需要按加密后的写路径重新设计断言，
-	// 不是改一处 SQL 能解决的 —— 立 change 单独立项，此处先跳过以恢复门禁。
-	// 见 docs/KNOWN-UPSTREAM-FAILURES.md 的「已知债务」。
-	t.Skip("见 skip 原因：凭据加密改造后的事务内快照语义，待单独立项修复")
-
 	ctx := context.Background()
 	tx := testEntTx(t)
 	cache := &schedulerCacheRecorder{}
-	repo := newAccountRepositoryWithSQL(tx.Client(), tx, cache)
+	repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, cache, credentialTestEncryptor(t))
 	account := mustCreateGrokCatalogAccount(t, tx.Client(), "grok-cas-stale")
 	before := readGrokCatalogRow(t, tx, account.ID)
 
@@ -52,7 +44,7 @@ func TestGrokCatalogCASPreservesSingleKeyAndRejectsStaleExpected(t *testing.T) {
 	require.Equal(t, 0, grokCatalogOutboxCount(t, tx, account.ID))
 
 	inTxCache := &schedulerCacheRecorder{}
-	inTxRepo := newAccountRepositoryWithSQL(integrationEntClient, integrationDB, inTxCache)
+	inTxRepo := newAccountRepositoryWithSQLCrypto(integrationEntClient, integrationDB, inTxCache, credentialTestEncryptor(t))
 	replacement := json.RawMessage(`{"fetched_at":"2026-10-25T03:00:01Z","models":["grok-4.6"]}`)
 	applied, err = inTxRepo.CompareAndSwapGrokObservedModels(dbent.NewTxContext(ctx, tx), account.ID, after.rawModels, replacement)
 	require.NoError(t, err)
@@ -71,7 +63,7 @@ func TestGrokCatalogCASTreatsNullMissingAndKeyOrderAsSameValue(t *testing.T) {
 
 	t.Run("missing key", func(t *testing.T) {
 		tx := testEntTx(t)
-		repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+		repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 		account := mustCreateGrokCatalogAccount(t, tx.Client(), "grok-cas-missing")
 		applied, err := repo.CompareAndSwapGrokObservedModels(ctx, account.ID, json.RawMessage("null"), json.RawMessage(`{"models":["grok-4.5"],"fetched_at":"2026-10-25T02:00:01Z"}`))
 		require.NoError(t, err)
@@ -83,7 +75,7 @@ func TestGrokCatalogCASTreatsNullMissingAndKeyOrderAsSameValue(t *testing.T) {
 
 	t.Run("json null", func(t *testing.T) {
 		tx := testEntTx(t)
-		repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+		repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 		account := mustCreateGrokCatalogAccount(t, tx.Client(), "grok-cas-json-null")
 		_, err := tx.ExecContext(ctx, `UPDATE accounts SET extra = jsonb_set(extra, '{grok_observed_models}', 'null'::jsonb, true) WHERE id = $1`, account.ID)
 		require.NoError(t, err)
@@ -97,7 +89,7 @@ func TestGrokCatalogCASTreatsNullMissingAndKeyOrderAsSameValue(t *testing.T) {
 
 	t.Run("sql null", func(t *testing.T) {
 		tx := testEntTx(t)
-		repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+		repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 		account := mustCreateGrokCatalogAccount(t, tx.Client(), "grok-cas-sql-null")
 		// The column is NOT NULL today. Drop it only inside this rolled-back
 		// transaction so the COALESCE(extra, '{}') branch is actually executed.
@@ -115,7 +107,7 @@ func TestGrokCatalogCASTreatsNullMissingAndKeyOrderAsSameValue(t *testing.T) {
 
 	t.Run("key order is not a conflict", func(t *testing.T) {
 		tx := testEntTx(t)
-		repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+		repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 		account := mustCreateGrokCatalogAccount(t, tx.Client(), "grok-cas-order")
 		original := json.RawMessage(`{"z_source":"upstream_v1_models","models":["grok-4.5"],"fetched_at":"2026-10-25T02:00:01Z"}`)
 		applied, err := repo.CompareAndSwapGrokObservedModels(ctx, account.ID, nil, original)
@@ -136,7 +128,7 @@ func TestGrokCatalogCASTreatsNullMissingAndKeyOrderAsSameValue(t *testing.T) {
 func TestGrokCatalogCASDoesNotUpdateSoftDeletedOrOtherPlatform(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
-	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	repo := newAccountRepositoryWithSQLCrypto(tx.Client(), tx, nil, credentialTestEncryptor(t))
 	nextJSON := json.RawMessage(`{"models":["should-not-land"]}`)
 
 	deleted := mustCreateGrokCatalogAccount(t, tx.Client(), "grok-cas-deleted")
@@ -167,14 +159,6 @@ func TestGrokCatalogCASDoesNotUpdateSoftDeletedOrOtherPlatform(t *testing.T) {
 }
 
 func TestGrokCatalogCASConcurrentIndependentTransactionsMergeSuccess(t *testing.T) {
-	// 已知失败（2026-11-19）：fork 的凭据落盘加密（迁移 251 删明文列 +
-	// accountTransactionScope 在事务内把 schedulerCache 置 nil）改变了本用例依赖的
-	// 事务内快照同步语义。现象分别是 `"[]" should have 1 item(s)`、并发 CAS 超时、
-	// 以及「期望 error 得 nil」。三者都需要按加密后的写路径重新设计断言，
-	// 不是改一处 SQL 能解决的 —— 立 change 单独立项，此处先跳过以恢复门禁。
-	// 见 docs/KNOWN-UPSTREAM-FAILURES.md 的「已知债务」。
-	t.Skip("见 skip 原因：凭据加密改造后的事务内快照语义，待单独立项修复")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	account := mustCreateGrokCatalogAccount(t, testEntClient(t), "grok-cas-concurrent")
@@ -218,8 +202,8 @@ func TestGrokCatalogCASConcurrentIndependentTransactionsMergeSuccess(t *testing.
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
 	first := make(chan bool, 2)
-	repo1 := &grokCatalogGatingRepo{AccountRepository: newAccountRepositoryWithSQL(tx1.Client(), tx1, nil), entered: entered, release: release, first: first}
-	repo2 := &grokCatalogGatingRepo{AccountRepository: newAccountRepositoryWithSQL(tx2.Client(), tx2, nil), entered: entered, release: release, first: first}
+	repo1 := &grokCatalogGatingRepo{AccountRepository: newAccountRepositoryWithSQLCrypto(tx1.Client(), tx1, nil, credentialTestEncryptor(t)), entered: entered, release: release, first: first}
+	repo2 := &grokCatalogGatingRepo{AccountRepository: newAccountRepositoryWithSQLCrypto(tx2.Client(), tx2, nil, credentialTestEncryptor(t)), entered: entered, release: release, first: first}
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, 2)
