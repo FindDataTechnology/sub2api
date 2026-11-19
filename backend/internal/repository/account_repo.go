@@ -974,9 +974,11 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 		UPDATE accounts
 		SET
 			credentials_meta = $5::jsonb,
-			credentials_encrypted = $6,
+			credentials_encrypted = $6::text,
 			credentials_hash = $4,
-			credentials_api_key_hash = $3,
+			-- $3/$6 可能为 nil（无 api_key / 无加密器），lib/pq 从 nil 推断不出类型会让
+			-- 整条语句崩溃并报在别的参数上（现象：inconsistent types for $4）。
+			credentials_api_key_hash = $3::varchar,
 			extra = CASE
 				-- 正确性依赖（非防御）：OpenCode 分支必须先于 Ollama 分支求值。两分支
 				-- 的 WHEN 并不互斥：Ollama 分支的守卫是宽谓词——NOT(ollamaMatch(old)
@@ -998,7 +1000,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 							AND `+opencodeGoBaseURLMatchSQLPrefix+`credentials_meta ->> 'base_url'`+opencodeGoBaseURLMatchSQLSuffix+`)
 					)
 					AND (
-						credentials_api_key_hash IS DISTINCT FROM $3
+						credentials_api_key_hash IS DISTINCT FROM $3::varchar
 						-- 或组身份不再成立：opencode_go 转 Zen（COALESCE 恒非 NULL，
 						-- IS NOT TRUE 等价于判定为假；平台条件必须在 IS NOT TRUE 作用
 						-- 域之外，否则挂载行的 FALSE IS NOT TRUE 会误判为已变化）；
@@ -1022,7 +1024,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 					AND type = 'apikey'
 					AND credentials_hash IS DISTINCT FROM $4
 					AND (
-						credentials_api_key_hash IS DISTINCT FROM $3
+						credentials_api_key_hash IS DISTINCT FROM $3::varchar
 						OR NOT (
 							`+ollamaCloudBaseURLMatchesSQL("credentials_meta ->> 'base_url'")+`
 							AND `+ollamaCloudBaseURLMatchesSQL("$1::jsonb ->> 'base_url'")+`
