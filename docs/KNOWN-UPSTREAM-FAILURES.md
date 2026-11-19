@@ -70,10 +70,21 @@ gh run list --repo Wei-Shaw/sub2api --workflow CI --limit 3
    修法是给每个可空参数显式加 `::varchar` / `::text` / `::bigint`。
 4. `BulkUpdate` 只改凭据时被早退分支静默跳过（**生产 bug**）
 
-**最后 3 个已 t.Skip**（`GrokCatalogCAS*` ×2、`GrokOAuthConditionalMutation*`）：
-它们依赖「事务内 schedulerCache 可用」，而 `accountTransactionScope()` 在
-ctx 带 tx 时会把 `schedulerCache` 置 nil（上游设计）。要修得按加密后的写路径
-重新设计断言，立 change 单独立项。
+**最后 3 个也已修复**（2026-11-19，change `fix-grok-cas-snapshot-sync-tests`）。
+
+初判「它们依赖事务内 schedulerCache 可用」是**错的**。真因两条：
+
+1. `GrokCatalogCAS*` ×2：repo 用 `newAccountRepositoryWithSQL(..., nil)`（cryptor 为 nil）。
+   `PersistGrokCatalogObservation` 第一步 `repo.GetByID()` 解不开密文凭据就提前返回，
+   `CompareAndSwap` 根本没被调用 → 测试的 `entered` channel 收不到信号 → 30s 超时。
+   补齐 cryptor 后断言**原样通过**，无需改动口径。
+2. `GrokOAuthConditionalMutation*`：失败注入器靠「把末位参数置 nil」制造 outbox 失败
+   （假设 event_type 是末位）。加密改造把 event_type 从 `$8` 挪到 `$7`，末位变成
+   `credentials_hash`，置 nil 不再触发 NOT NULL 失败。改为从 SQL 解析
+   `INSERT INTO scheduler_outbox ... SELECT $N` 的真实位置。
+
+**教训**：又一次「错误现象指向错误位置」——「期望 error 得 nil」看起来像业务逻辑问题，
+实际是测试夹具假设了参数位置。
 
 **integration 已恢复为阻塞门禁**（`backend-ci.yml` 去掉了 `continue-on-error`）。
 

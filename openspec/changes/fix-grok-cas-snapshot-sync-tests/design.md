@@ -24,6 +24,25 @@
 - 不追查「为什么上游这三个测试本来能过」——上游跑在明文列 schema 下，
   与加密后不是同一套前提，没有可比性
 
+## 实施结果（2026-11-19，先于决策落地）
+
+**实际修改与下面 D1–D3 的设想完全不同**，如实记录以免误导后来人：
+
+三个用例的真因都不是「断言口径与 `schedulerCache=nil` 契约冲突」，而是：
+
+1. **两个 Grok CAS 用例**：repo 用 `newAccountRepositoryWithSQL(..., nil)`（cryptor 为 nil）。
+   `PersistGrokCatalogObservation` 第一步就 `repo.GetByID()`，读账号时解不开密文凭据 →
+   提前返回 → `CompareAndSwap` 根本没被调用 → 测试的 `entered` channel 收不到信号 →
+   30s 超时。**补齐 cryptor 后断言原样通过，无需改动。**
+2. **回滚用例**：`failAtomicSchedulerOutboxSQLExecutor` 靠「把最后一个参数置 nil」制造
+   outbox 失败（假设 event_type 是末位）。加密改造把 event_type 从 `$8` 挪到 `$7`，
+   末位变成 `credentials_hash`；加上我给 `$9` 补了 `::bigint`，置 nil 不再触发
+   NOT NULL 失败 → 语句成功 → 「期望 error 得 nil」。**改为从 SQL 解析
+   `INSERT INTO scheduler_outbox ... SELECT $N` 的真实位置**，不再假设末位。
+
+**所以 D1/D2 不需要执行**：没有改断言口径，也没有改断言回滚结果。
+保留在下方作为「考虑过但被证据否决的方案」记录。
+
 ## Decisions
 
 ### D1 断言口径改为「outbox 入队 + 提交后派发」

@@ -1,31 +1,36 @@
 # Tasks: fix-grok-cas-snapshot-sync-tests
 
-## 1. 定位并发超时（D3，先定性再改）
+> **实际结果与初版计划的差异**已记在 design.md 的「实施结果」一节：
+> 三个用例的真因都不是「断言口径与 schedulerCache=nil 冲突」，
+> 而是缺 cryptor（×2）与失败注入器假设了错误的参数位置（×1）。
+> 下面按**实际执行**的记录。
 
-- [ ] 1.1 读 `TestGrokCatalogCASConcurrentIndependentTransactionsMergeSuccess` 的同步逻辑，确认两个 goroutine 各自等什么。验证：能说出「谁在等谁」
-- [ ] 1.2 判断 30s 超时的性质：行锁等待 / 测试自身同步 bug / 加密后 GetByID 变慢。验证：结论有证据（如日志时序、锁等待统计），不是猜测
-- [ ] 1.3 若确属测试同步逻辑问题 → 修测试；若属锁语义变化 → 按新语义重写并在注释写明
+## 1. 定性（先查原因，不改代码）
 
-## 2. 按 outbox 契约重设断言（D1）
+- [x] 1.1 读 `TestGrokCatalogCASConcurrentIndependentTransactionsMergeSuccess` 的同步逻辑：两个 goroutine 各持一个 tx，靠 `grokCatalogGatingRepo` 的 `entered`/`release` channel 强制交错
+- [x] 1.2 定性 30s 超时：**不是锁等待**。`PersistGrokCatalogObservation` 第一步 `repo.GetByID()` 因 cryptor=nil 解不开密文凭据而提前返回 → `CompareAndSwap` 未被调用 → `entered` 永不收到信号。证据：补齐 cryptor 后该用例直接通过
+- [x] 1.3 第三个用例（回滚）定性：`failAtomicSchedulerOutboxSQLExecutor` 靠「末位参数置 nil」制造失败，但加密改造把 event_type 从 `$8` 挪到了 `$7`，末位变成 `credentials_hash`
 
-- [ ] 2.1 `TestGrokCatalogCASPreservesSingleKeyAndRejectsStaleExpected`：把「断 schedulerCache 被写」改为「断 `scheduler_outbox` 有对应行」，移除 skip。验证：断言里能查到 outbox 行
-- [ ] 2.2 同文件加一条负向断言：stale expected 时 CAS 必须被拒（已有 `applied == false` 的断言，确认保留且真实生效）
-- [ ] 2.3 移除两处 `t.Skip` 的跳过说明
+## 2. 两个 Grok CAS 用例（真因：缺 cryptor）
 
-## 3. 回滚语义用例重写（D2）
+- [x] 2.1 `account_repo_grok_models_integration_test.go` 5 处 repo 构造改用 `newAccountRepositoryWithSQLCrypto(..., credentialTestEncryptor(t))`。验证：文件内 `newAccountRepositoryWithSQL(` 归零
+- [x] 2.2 移除两处 `t.Skip`。验证：文件中 `t.Skip(` 归零
+- [x] 2.3 **断言原样保留**（不需要按 D1 改口径——问题不在口径）
 
-- [ ] 3.1 `TestGrokOAuthConditionalMutationRollsBackWhenOutboxInsertFails`：改为注入「确定失败」的 executor（只读事务或违反约束），而不是靠模拟层
-- [ ] 3.2 断言从 `require.Error(t, err)` 改为「账号行未被修改」——查 `credentials_encrypted` 与 `updated_at` 未变
-- [ ] 3.3 移除 skip
+## 3. 回滚用例（真因：失败注入器假设了末位）
+
+- [x] 3.1 `failAtomicSchedulerOutboxSQLExecutor` 改为从 SQL 解析真实位置：正则 `INSERT INTO scheduler_outbox[^;]*?SELECT\s+\$(\d+)` 取出 event_type 的 `$N`，再置该位置为 nil
+- [x] 3.2 移除 skip
+- [x] 3.3 断言原样保留（`require.Error` + 「行未被修改」+「outbox 计数为 0」三条都在）
 
 ## 4. 同类模式核对
 
-- [ ] 4.1 全仓扫「断 schedulerCache 在事务内被写」的测试，确认没有别的漏网。验证：`grep -rn "setAccounts" backend/internal/**/*_test.go` 逐条看是否在事务内
-- [ ] 4.2 若还有同类，一并按 D1 改或登记到本 change
+- [x] 4.1 全仓扫 `newAccountRepositoryWithSQL(` 在测试里的用法，涉密路径的已统一补 cryptor
+- [x] 4.2 参数个数静态校验（`newAccountRepositoryWithSQLCrypto` 必须 4 个参数）全仓 0 异常
 
 ## 5. 验证与收口
 
-- [ ] 5.1 CI 全绿（含 integration，且三处 skip 已移除）。验证：`gh run view <run> --json jobs` 六个 job 全 success
-- [ ] 5.2 确认三个用例**确实执行了**（不是被别的 skip 连带跳过）。验证：CI 日志里能找到这三个测试的 RUN/PASS 行
+- [x] 5.1 CI 全绿：`gh run view <run> --json jobs` 六个 job 全 success，`conclusion: success`
+- [x] 5.2 三个用例**确实执行且通过**（无 `t.Skip`，`FAIL: 0`）
 - [ ] 5.3 更新 `docs/KNOWN-UPSTREAM-FAILURES.md`：把这三个从「已知债务」移到「已修复」
-- [ ] 5.4 归档本 change
+- [ ] 5.4 归档本 change（`openspec archive fix-grok-cas-snapshot-sync-tests`）
