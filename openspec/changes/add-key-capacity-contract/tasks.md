@@ -1,3 +1,11 @@
+> **延后（2026-11-21 治理复核）**：4/31 是**低报**——代码已落一大半：
+> 迁移 `250_api_key_capacity.sql`、`service/api_key_capacity_rules.go`（9.4K + 测试）、
+> `service/key_capacity_gate.go`（7.6K + 测试）、`group_capacity_service.go`，两级准入已装进
+> `api_key_auth`。真缺的是：**rpm 闸无消费方**（`RPMLimit` 只在 DTO 与 admin 用户 CRUD 里出现，
+> 没有一处读它做过闸）、2.3 fail-open、2.4 429 入 `ops_error_logs`、M4 自助创建与同额度分配、
+> 5.1-5.3 基线/稳定性、6.x 上产与报表。
+> 不归档：20 条未做，归档会把半成品要求固化进主 spec。先按证据回勾已做的，再按上面清单推进。
+
 # Tasks: add-key-capacity-contract
 
 > 用户点名重点：**让用户能申请/创建不同 key 并管理 concurrency 等配置；平台侧能快速说清
