@@ -79,3 +79,8 @@
   存在且 Scenario 与本实现一致
 - [ ] 6.2 `paas` 仓接入：壹座 sync 改「读快照为主、探测为校验」；各线 `llm.py` 读推荐默认模型
   （章程 tasks 3.5-3.6）——验证：各仓独立 change 的 tasks 勾选 + 证据路径
+
+## 归档豁免
+
+归档豁免：2026-11-21 6.1 已在别处做掉——paas `2026-11-14-add-ciyuan-capability-contract` 已归档，含 5 条 Requirement
+归档豁免：2026-11-21 6.2 已在别处做掉——同一 change 3.2「已实现在 main」（planSyncProbeSet）

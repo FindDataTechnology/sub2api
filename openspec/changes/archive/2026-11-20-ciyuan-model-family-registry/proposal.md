@@ -1,10 +1,27 @@
+> **2026-11-20 裁决：放弃。** 理由：能力演进非故障；等客户明确要求接新图片/embedding 上游再启动，本轮裁决不动。
+> 归档目的仅为清出在途清单，内容原样保留于 `changes/archive/`；若将来重启，从归档目录取回即可。
+
+## 状态：**有效，但无需本周启动（2026-11-20 治理复核）**
+
+复核结论（逐条核过代码与生产）：
+
+- **缺口属实**：`isOpenAIImageGenerationModel` 硬编码 gpt-image/grok-imagine 两族，`isGeminiCompatibleImageModel` 单独硬编码 gemini 族，`embeddingModelIDs` 是四条 Go 静态切片（`service/openai_images.go:556`、`embedding_model_catalog.go:31`）
+- **但没有痛点驱动**：近 24 小时生产日志 `requires an image model` 拒绝 **0 次**；embedding 目录四条覆盖了当前全部在用模型
+- **价值定位**：让「接一家新图片/embedding 上游」从「改 Go + 出片」变成「后台登记」。是运营效率，不是故障修复
+
+结论：**保留在途，不归档、不废弃**。它们是能力演进，不是 bug。启动时机由「某客户明确要求接入非现有三族的图片模型或新 embedding 供应商」决定，
+不必现在动。工作量为 27 项 / 8 组，含 3 个判定点逐个接 + 等价性测试。
+
 ## Why
 
 今天要给词元接一家新的图片/embedding 上游，多半会被网关在**触达上游之前**拒掉，原因不是渠道
 不可用，而是三张写死在代码里的模型名白名单：
 
-- 图片：`service/openai_images.go` 的 `isOpenAIImageGenerationModel` 只认三个族——
-  `gpt-image-*`、`grok-imagine*`、`gemini-*-image*`。任何其它 OpenAI 兼容渠道的图片模型名
+- 图片：`service/openai_images.go` 的图片准入由**两个谓词**把关（2026-11-20 复核订正：
+  原文说一个谓词认三族，实际是两层）——`isOpenAIImageGenerationModel` 认
+  `gpt-image-*` + `grok-imagine*` 两族；`isGeminiCompatibleImageModel` 另认
+  `gemini-*-image*`，两者由 `validateCompatibleImagesModel` 串起来。任何其它 OpenAI 兼容
+  渠道的图片模型名
   （flux / seedream / 即梦 / 可灵，或聚合渠道的自有命名）会在解析阶段返回 400
   `images endpoint requires an image model`。
 - embedding：`service/embedding_model_catalog.go` 的 `embeddingModelIDs` 是四条 Go 静态切片
@@ -18,7 +35,7 @@
 ## What Changes
 
 - **BREAKING（行为面，非接口面）**：图片模型族的判定从「三个硬编码前缀谓词」改为「可配置模型族表」，
-  默认值 = 今天的三族，未配置时逐字节等价。后台可登记新的模型名前缀族，登记后该族模型能穿过准入
+  默认值 = 今天这两层谓词认的全部族，未配置时逐字节等价。后台可登记新的模型名前缀族，登记后该族模型能穿过准入
   触达上游（**能否真的出图仍由上游决定**，网关不再替上游做拒绝）。
 - embedding 模型目录从 Go 静态切片改为配置项，默认值 = 今天的四条，同样零值等价。
 - 图片族的配置项 MUST 同时作用于三处判定（请求解析、渠道映射后的复核、Responses 意图识别），
