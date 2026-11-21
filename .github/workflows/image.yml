@@ -1,0 +1,22 @@
+# 共享实现见 FindDataTechnology/fd-ci（openspec: extract-shared-ci-workflow）。
+#
+# **本仓此前没有出片 workflow** —— 出片靠 law-ai-official/sub2api-images 那个
+# 私有镜像仓（2026-11-19 还在跑）。那个壳存在的唯一理由是「私有源仓 Actions 额度
+# 不够」，而本仓现在是公开仓（Actions 免费无限），理由消失。
+#
+# 2026-11-21 补上本仓自己的出片（openspec: one-repo-per-project 的标准形态），
+# 随后 law-ai-official/sub2api-images 归档。
+name: image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-push:
+    uses: FindDataTechnology/fd-ci/.github/workflows/image-build.yml@main
+    secrets: inherit
+    with:
+      image: sub2api
+      namespace: finddata
