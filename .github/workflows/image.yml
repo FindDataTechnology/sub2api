@@ -5,7 +5,7 @@
 # 不够」，而本仓现在是公开仓（Actions 免费无限），理由消失。
 #
 # 2026-11-21 补上本仓自己的出片（openspec: one-repo-per-project 的标准形态），
-# 随后 law-ai-official/sub2api-images 归档。
+# law-ai-official/sub2api-images 已于 2026-11-21 归档。
 name: image
 
 on:
