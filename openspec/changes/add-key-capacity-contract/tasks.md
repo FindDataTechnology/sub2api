@@ -5,6 +5,27 @@
 > 没有一处读它做过闸）、2.3 fail-open、2.4 429 入 `ops_error_logs`、M4 自助创建与同额度分配、
 > 5.1-5.3 基线/稳定性、6.x 上产与报表。
 > 不归档：20 条未做，归档会把半成品要求固化进主 spec。先按证据回勾已做的，再按上面清单推进。
+>
+> **2026-11-21 09:20 逐条复核（三个 agent 之一调研）**：4/31 是低报，**约 14 项已满足**。
+> 最该先补的四件：
+> 1. **key 级 rpm 闸无消费方**（2.1 的 rpm 半）：`RPMLimit` 在 `backend/internal` 有 112 处非测试命中，
+>    但 `apiKey.RPMLimit` 的三处读取（`lanes/capabilities.go:347`、`api_key_capacity_rules.go:188/199/213`）
+>    全是**展示**；`key_capacity_gate.go` 与 `api_key_auth.go` 对 RPM 零命中。
+> 2. **capacity 三字段 HTTP 层没接**（4.1/4.1b）：service 层字段/校验/聚合不变量都在，
+>    但 `api_key_handler.go` 的 DTO（`:34-47`/`:50-65`）与 `svcReq` 映射（`:282-303`/`:337-369`）
+>    完全没带 → 用户面无法自助创建/分配。
+> 3. **容量 429 不入 `ops_error_logs`（2.4）是反着做的**：`api_key_auth.go:370` 走
+>    `MarkIngressRejected`，而 `ops_error_logger.go:1093-1095` 对 ingress reject 直接 return。
+>    连带后果：5.3 的 `throttle_ratio` 也读这张表 ⇒ 容量拒绝永远不出现在稳定性口径里。
+> 4. **列表/详情回明文 key（4.4）**：`Key` 存的是 `sk-`+32 字节随机数的**完整明文**，
+>    `dto/mappers.go:87` 原样放进响应 ⇒ 任何能 list keys 的会话都能拿到别人的可用密钥。
+>
+> 另三处会让人踩空的实现缺口：
+> - `observed_snapshot_version` 恒 0（3.2 的 state 端点字段只声明无赋值）
+> - `CapacityInvariantError` 非 ApplicationError ⇒ 经 `ErrorFrom` 落成 500 而非 400+配额明细
+> - 分配不变量无事务无锁（2b.3 校验在事务外）
+> - `backend/migrations` 下有三个 `250_*`（capacity / credentials_meta / openai_cache_write_ttl），
+>   撞号需先澄清 runner 排序
 
 # Tasks: add-key-capacity-contract
 
