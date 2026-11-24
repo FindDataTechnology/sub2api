@@ -1,4 +1,7 @@
 > **延后（2026-11-21 治理复核）**：4/31 是**低报**——代码已落一大半：
+
+> **2026-11-25 复核留任**：4/31。delta 16 条全未合主 spec。代码已落一大半（迁移+两级准入），但 6.2 出片上产、6.3 真机四件未做。是真欠账。
+
 > 迁移 `250_api_key_capacity.sql`、`service/api_key_capacity_rules.go`（9.4K + 测试）、
 > `service/key_capacity_gate.go`（7.6K + 测试）、`group_capacity_service.go`，两级准入已装进
 > `api_key_auth`。真缺的是：**rpm 闸无消费方**（`RPMLimit` 只在 DTO 与 admin 用户 CRUD 里出现，
