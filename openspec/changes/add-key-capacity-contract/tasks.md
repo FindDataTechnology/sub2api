@@ -2,6 +2,15 @@
 
 > **2026-11-25 复核留任**：4/31。delta 16 条全未合主 spec。代码已落一大半（迁移+两级准入），但 6.2 出片上产、6.3 真机四件未做。是真欠账。
 
+> **2026-11-25 复核 4.4 定性（撤回「安全问题」的判断）**：`dto.APIKey.Key` 确为完整明文，
+> 但它是**按用户隔离的**（`List` 走 `ListByUserID(subject.UserID)`，`GetByID` 有所有权校验，
+> admin 端点群挂 `adminAuth`），且前端**把它当功能用**：`UseKeyModal` 用它展示/复制用户自己的 key，
+> `BatchImageGuideView` 用它直接调批图 API。所以「列表回明文」不是越权，是「明文可重复读取」的
+> 设计选择；改成掩码会打断上述两条产品路径。
+> **正确修法**（不是本 change 的补丁粒度）：新增一个需重新认证的 reveal 端点，列表只回
+> `sk-` 前缀 + `has_key`，前端改为按需 reveal。属独立 change，**不在本 change 内做**。
+> 原优先级从「安全项先上」降为「设计改进，排期另定」。
+
 > 迁移 `250_api_key_capacity.sql`、`service/api_key_capacity_rules.go`（9.4K + 测试）、
 > `service/key_capacity_gate.go`（7.6K + 测试）、`group_capacity_service.go`，两级准入已装进
 > `api_key_auth`。真缺的是：**rpm 闸无消费方**（`RPMLimit` 只在 DTO 与 admin 用户 CRUD 里出现，
