@@ -172,7 +172,7 @@ func laneBillingErrorDetails(err error) (status int, code, message string, retry
 		errors.Is(err, service.ErrAPIKeyRateLimit7dExceeded) {
 		return http.StatusTooManyRequests, "rate_limit_exceeded", pkgerrors.Message(err), 0
 	}
-	if errors.Is(err, service.ErrGroupRPMExceeded) || errors.Is(err, service.ErrUserRPMExceeded) {
+	if errors.Is(err, service.ErrGroupRPMExceeded) || errors.Is(err, service.ErrUserRPMExceeded) || errors.Is(err, service.ErrAPIKeyRPMExceeded) {
 		retrySeconds := 60 - int(time.Now().Unix()%60)
 		return http.StatusTooManyRequests, "rate_limit_exceeded", pkgerrors.Message(err), retrySeconds
 	}

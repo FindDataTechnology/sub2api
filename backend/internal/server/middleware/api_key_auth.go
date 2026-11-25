@@ -368,9 +368,12 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		if !KeyCapacityExemptPath(c.Request.URL.Path) {
 			if allowed, scope, release := acquireKeyCapacity(apiKey); !allowed {
 				MarkIngressRejected(c, IngressRejectKeyCapacity)
-				AbortWithError(c, http.StatusTooManyRequests,
-					"KEY_CAPACITY_EXCEEDED",
-					"key capacity exceeded (scope="+scope+"); retry later")
+				// 池满最多等 1 秒一轮；key 硬顶要等当前在飞请求退出一批，给 5 秒。
+				retryAfter := 1
+				if scope == "key" {
+					retryAfter = 5
+				}
+				AbortWithCapacityLimit(c, "concurrency", scope, retryAfter)
 				return
 			} else {
 				defer release()

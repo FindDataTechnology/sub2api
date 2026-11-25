@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
@@ -64,6 +66,10 @@ func GetForcePlatformFromContext(c *gin.Context) (string, bool) {
 type ErrorResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// 限流归因（add-key-capacity-contract 2.2）。omitempty：非限流错误形状不变。
+	LimitKind  string `json:"limit_kind,omitempty"`  // concurrency | rpm
+	LimitScope string `json:"limit_scope,omitempty"` // key | user | group
+	RetryAfter int    `json:"retry_after,omitempty"`
 }
 
 // NewErrorResponse 创建错误响应
@@ -77,6 +83,23 @@ func NewErrorResponse(code, message string) ErrorResponse {
 // AbortWithError 中断请求并返回JSON错误
 func AbortWithError(c *gin.Context, statusCode int, code, message string) {
 	c.JSON(statusCode, NewErrorResponse(code, message))
+	c.Abort()
+}
+
+// AbortWithCapacityLimit 拒绝一次因本方额度用尽的请求，并说明是哪一层挡的。
+//
+// 只说 "key capacity exceeded" 而不给归因，调用方只能猜是 key 设小了还是池满了
+// —— 而这两件事的处置完全不同（改自己的 key vs 找管理员扩池）。
+func AbortWithCapacityLimit(c *gin.Context, kind, scope string, retryAfter int) {
+	statusCode := http.StatusTooManyRequests
+	c.Header("Retry-After", strconv.Itoa(retryAfter))
+	c.JSON(statusCode, ErrorResponse{
+		Code:       "KEY_CAPACITY_EXCEEDED",
+		Message:    fmt.Sprintf("%s limit exceeded (scope=%s); retry in %ds", kind, scope, retryAfter),
+		LimitKind:  kind,
+		LimitScope: scope,
+		RetryAfter: retryAfter,
+	})
 	c.Abort()
 }
 

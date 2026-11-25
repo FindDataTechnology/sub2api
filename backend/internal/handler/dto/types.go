@@ -86,6 +86,16 @@ type APIKey struct {
 	Reset1dAt     *time.Time `json:"reset_1d_at,omitempty"`
 	Reset7dAt     *time.Time `json:"reset_7d_at,omitempty"`
 
+	// 容量契约（add-key-capacity-contract）。effective_concurrency_limit 是该 key
+	// 实际会被闸用到的那一个数（key 硬顶与 user 池取更严者），limit_source 说明它来自哪一层。
+	ConcurrencyRequest        int        `json:"concurrency_request"`
+	ConcurrencyLimit          int        `json:"concurrency_limit"`
+	RPMLimit                  int        `json:"rpm_limit"`
+	EffectiveConcurrencyLimit int        `json:"effective_concurrency_limit"`
+	EffectiveRPMLimit         int        `json:"effective_rpm_limit"`
+	LimitSource               string     `json:"limit_source"`
+	EffectiveAt               *time.Time `json:"effective_at"`
+
 	User  *User  `json:"user,omitempty"`
 	Group *Group `json:"group,omitempty"`
 }
