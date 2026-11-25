@@ -1,5 +1,24 @@
 > **延后（2026-11-21 治理复核）**：4/31 是**低报**——代码已落一大半：
 
+> **2026-11-26 接线进展（14/31 → 约 17/31）**：`2f2d3d66b` + `1936a9bcc` 接通了三处断线，
+> 直击 2026-11-25 复核列的四处优先缺口里的三处：
+>   - **4.1 产品路径通了**：`POST/PUT /keys` 现在真的收 `concurrency_request`/`concurrency_limit`/
+>     `rpm_limit`/`effective_at`（此前 handler DTO 完全没带，service 层写得再好也不可达）
+>   - **2.1 的 rpm 半通了**：`key.rpm_limit` 接上 Redis `rpm:k:{id}:{minute}`，判在 user 级之前
+>     （此前 112 处 RPMLimit 命中全是展示，`key_capacity_gate.go` 对 RPM 零读取）
+>   - **3.2 的 observed 字段通了**：state 端点改用 `getAuthCacheEntry` 并填
+>     `observed_snapshot_version`（原先 `loadAuthCacheEntry` 永远回源 ⇒ `config_applied` 恒 true，
+>     等于永远告诉运维"已生效"）
+> 顺带修了 2.4（容量/生效时刻入口拒绝入 `ops_error_logs`）与 2.2 的一半（`limit_kind`/`limit_scope`/
+> `retry_after` 进 429 体），以及 `CapacityInvariantError` 落 500 的缺陷（现 400 + 三个数）。
+> **仍未做**：2.3 的故障注入计数（fail-open 有，可观测计数器没有）、4.1b 的并发分配用例、
+> 5.x 基线与稳定性（端点已存在但未验）、2b.3 的事务锁（现为事务外校验）、2c.x 容量规划助手、
+> 6.2/6.3 上产与真机验收。
+> **6.2 的状态**：镜像已出（`sha-3883789`，ccr 实测 digest `sha256:d0865d0e…`），
+> 清单已改（`fd-infra-deploy` `24b44d3e`，GitHub 与 Gitee 两端一致）。
+> **但 ArgoCD 当前因 `chengsi` 整机失联（见 `fd-infra-deploy/docs/incident-2026-11-26-…`）
+> 不可达 ⇒ 尚未真正滚动到生产。6.2/6.3 均未完成，不得勾选。**
+
 > **2026-11-25 复核留任**：4/31。delta 16 条全未合主 spec。代码已落一大半（迁移+两级准入），但 6.2 出片上产、6.3 真机四件未做。是真欠账。
 
 > **2026-11-25 复核 4.4 定性（撤回「安全问题」的判断）**：`dto.APIKey.Key` 确为完整明文，
