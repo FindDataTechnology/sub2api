@@ -249,7 +249,14 @@ func TestAPIContracts(t *testing.T) {
 					"window_7d_start": null,
 					"expires_at": null,
 					"created_at": "2025-01-02T03:04:05Z",
-					"updated_at": "2025-01-02T03:04:05Z"
+					"updated_at": "2025-01-02T03:04:05Z",
+					"concurrency_request": 0,
+					"concurrency_limit": 0,
+					"rpm_limit": 0,
+					"effective_concurrency_limit": 0,
+					"effective_rpm_limit": 0,
+					"limit_source": "unlimited",
+					"effective_at": null
 				}
 			}`,
 		},
@@ -300,7 +307,14 @@ func TestAPIContracts(t *testing.T) {
 							"window_7d_start": null,
 							"expires_at": null,
 							"created_at": "2025-01-02T03:04:05Z",
-							"updated_at": "2025-01-02T03:04:05Z"
+							"updated_at": "2025-01-02T03:04:05Z",
+							"concurrency_request": 0,
+							"concurrency_limit": 0,
+							"rpm_limit": 0,
+							"effective_concurrency_limit": 0,
+							"effective_rpm_limit": 0,
+							"limit_source": "unlimited",
+							"effective_at": null
 						}
 					],
 					"total": 1,

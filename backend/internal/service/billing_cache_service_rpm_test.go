@@ -322,7 +322,7 @@ func TestAPIKeyAuthSnapshotRecordsResolvedRPMOverrideGroup(t *testing.T) {
 // key 级席位 RPM（add-key-capacity-contract）：key.rpm_limit 必须真的成为一道闸。
 // 之前 RPMLimit 只在展示层被读，闸一条都不看——配置得再准也不生效。
 func TestBillingCacheService_CheckRPM_KeySeatLimitFires(t *testing.T) {
-	cache := &userRPMCacheStub{keyCounts: []int{1, 2}}
+	cache := &userRPMCacheStub{keyCounts: []int{1, 2, 3}}
 	svc := newBillingServiceForRPM(t, cache, &rpmOverrideRepoStub{})
 	user := &User{ID: 1}
 	key := &APIKey{ID: 7, RPMLimit: 2}
