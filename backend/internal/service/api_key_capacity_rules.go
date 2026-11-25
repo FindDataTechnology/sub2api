@@ -48,6 +48,24 @@ func AsCapacityInvariant(err error) (*CapacityInvariantError, bool) {
 	return nil, false
 }
 
+// As 让 errors.As 直接把本错误识别成 *ApplicationError。
+//
+// 没有它，容量不变量违反会走 pkg/errors.FromError 的兜底分支落成 **500**
+// ——调用方拿不到 requested/remaining/capacity，只会以为服务端坏了。
+// 用 As 而不是 Unwrap：errors.Is 的链不该被这条合成错误影响。
+func (e *CapacityInvariantError) As(target any) bool {
+	p, ok := target.(**infraerrors.ApplicationError)
+	if !ok {
+		return false
+	}
+	*p = infraerrors.BadRequest(e.Reason, e.Message).WithMetadata(map[string]string{
+		"requested": fmt.Sprintf("%d", e.Requested),
+		"remaining": fmt.Sprintf("%d", e.Remaining),
+		"capacity":  fmt.Sprintf("%d", e.Capacity),
+	})
+	return true
+}
+
 // clampNonNegative 把负余量折成 0（余量为负说明已超额，对调用方展示 0 更有意义）。
 // capacityListPagination 用一个大页一次取全量：容量校验需要看到该用户所有活跃 key，
 // 分页截断会导致漏算（少算别人的 request ⇒ 放过超额配置）。key 量级几十到几百，一页足够。
@@ -195,8 +213,8 @@ func BuildKeyCapacityState(configured, cached *APIKey, gate *KeyCapacityGate) *K
 		userRPM = configured.User.RPMLimit
 	}
 	st.PoolCapacity = poolCap
-	st.EffectiveConcurrencyLimit, st.LimitSource = effectiveLimitForState(configured.ConcurrencyLimit, poolCap)
-	st.EffectiveRPMLimit, _ = effectiveLimitForState(configured.RPMLimit, userRPM)
+	st.EffectiveConcurrencyLimit, st.LimitSource = EffectiveLimit(configured.ConcurrencyLimit, poolCap)
+	st.EffectiveRPMLimit, _ = EffectiveLimit(configured.RPMLimit, userRPM)
 
 	if gate != nil {
 		userID := configured.UserID
@@ -217,7 +235,8 @@ func BuildKeyCapacityState(configured, cached *APIKey, gate *KeyCapacityGate) *K
 
 // effectiveLimitForState 与 lanes 包的 effectiveLimit 同语义（取更严者）。
 // 这里单独一份是为了让 service 不依赖 lanes（lanes 依赖 middleware，会成环）。
-func effectiveLimitForState(keyLimit, poolLimit int) (int, string) {
+// EffectiveLimit 对外导出，供 handler 的 DTO 复用同一套「取更严者」语义。
+func EffectiveLimit(keyLimit, poolLimit int) (int, string) {
 	switch {
 	case keyLimit > 0 && poolLimit > 0:
 		if keyLimit <= poolLimit {
@@ -246,13 +265,21 @@ func (s *APIKeyService) GetKeyCapacityState(ctx context.Context, keyID int64, ga
 		return nil, ErrAPIKeyNotFound
 	}
 
-	// 从鉴权缓存取当前生效的快照（只读，不触发重建）
+	// 从鉴权缓存取当前生效的快照（只读，不触发重建）。
+	// 必须用 getAuthCacheEntry 而不是 loadAuthCacheEntry：后者永远回源 DB 并新建快照，
+	// 于是 config_applied 恒为 true——那等于告诉运维"已生效"，即使鉴权链上跑的还是旧值。
 	var cached *APIKey
-	if entry, cerr := s.loadAuthCacheEntry(ctx, configured.Key, s.authCacheKey(configured.Key)); cerr == nil && entry != nil {
+	var observedSnapshotVersion int
+	if entry, hit := s.getAuthCacheEntry(ctx, s.authCacheKey(configured.Key)); hit && entry != nil && !entry.NotFound {
 		if probe, used, aerr := s.applyAuthCacheEntry(configured.Key, entry); aerr == nil && used {
 			cached = probe
+			if entry.Snapshot != nil {
+				observedSnapshotVersion = entry.Snapshot.Version
+			}
 		}
 	}
 
-	return BuildKeyCapacityState(configured, cached, gate), nil
+	st := BuildKeyCapacityState(configured, cached, gate)
+	st.ObservedSnapshotVersion = observedSnapshotVersion
+	return st, nil
 }

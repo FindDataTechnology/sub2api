@@ -20,6 +20,8 @@ import (
 const (
 	userGroupRPMKeyPrefix = "rpm:ug:"
 	userRPMKeyPrefix      = "rpm:u:"
+	// apiKeyRPMKeyPrefix：key 级席位 RPM（add-key-capacity-contract）。
+	apiKeyRPMKeyPrefix = "rpm:k:"
 
 	userRPMKeyTTL = 120 * time.Second
 )
@@ -70,6 +72,16 @@ func (c *userRPMCacheImpl) IncrementUserRPM(ctx context.Context, userID int64) (
 		return 0, err
 	}
 	key := fmt.Sprintf("%s%d:%d", userRPMKeyPrefix, userID, minute)
+	return c.atomicIncr(ctx, key)
+}
+
+// IncrementAPIKeyRPM 递增单个 key 分钟计数。
+func (c *userRPMCacheImpl) IncrementAPIKeyRPM(ctx context.Context, apiKeyID int64) (int, error) {
+	minute, err := c.minuteTS(ctx)
+	if err != nil {
+		return 0, err
+	}
+	key := fmt.Sprintf("%s%d:%d", apiKeyRPMKeyPrefix, apiKeyID, minute)
 	return c.atomicIncr(ctx, key)
 }
 

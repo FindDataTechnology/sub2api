@@ -44,6 +44,12 @@ type CreateAPIKeyRequest struct {
 	RateLimit5h *float64 `json:"rate_limit_5h"`
 	RateLimit1d *float64 `json:"rate_limit_1d"`
 	RateLimit7d *float64 `json:"rate_limit_7d"`
+
+	// 容量契约（add-key-capacity-contract）：0 = 不限/不占席位
+	ConcurrencyRequest *int   `json:"concurrency_request"`
+	ConcurrencyLimit   *int   `json:"concurrency_limit"`
+	RPMLimit           *int   `json:"rpm_limit"`
+	EffectiveAt        string `json:"effective_at"` // RFC3339；空 = 立即生效
 }
 
 // UpdateAPIKeyRequest represents the update API key request payload
@@ -62,6 +68,12 @@ type UpdateAPIKeyRequest struct {
 	RateLimit1d         *float64 `json:"rate_limit_1d"`
 	RateLimit7d         *float64 `json:"rate_limit_7d"`
 	ResetRateLimitUsage *bool    `json:"reset_rate_limit_usage"` // 重置限速用量
+
+	// 容量契约（nil = 不修改；0 = 不限/不占席位）。effective_at 传空串表示清空。
+	ConcurrencyRequest *int    `json:"concurrency_request"`
+	ConcurrencyLimit   *int    `json:"concurrency_limit"`
+	RPMLimit           *int    `json:"rpm_limit"`
+	EffectiveAt        *string `json:"effective_at"`
 }
 
 func validAPIKeyLimit(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 }
@@ -82,7 +94,36 @@ func validateAPIKeyCreateRequest(req CreateAPIKeyRequest) error {
 	if req.ExpiresInDays != nil && *req.ExpiresInDays <= 0 {
 		return errors.New("invalid expires_in_days")
 	}
+	if err := validateCapacityRequest(req.ConcurrencyRequest, req.ConcurrencyLimit, req.RPMLimit); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateCapacityRequest 只查形状（非负）。聚合不变量（Σrequest ≤ 池）在 service 层，
+// 那里才有用户池容量。
+func validateCapacityRequest(request, limit, rpm *int) error {
+	for _, f := range []struct {
+		name string
+		v    *int
+	}{{"concurrency_request", request}, {"concurrency_limit", limit}, {"rpm_limit", rpm}} {
+		if f.v != nil && *f.v < 0 {
+			return errors.New("invalid " + f.name)
+		}
+	}
+	return nil
+}
+
+// parseCapacityEffectiveAt 解析 effective_at：空串 = 明确清空（clear=true）。
+func parseCapacityEffectiveAt(s string) (t *time.Time, clear bool, err error) {
+	if s == "" {
+		return nil, true, nil
+	}
+	parsed, perr := time.Parse(time.RFC3339, s)
+	if perr != nil {
+		return nil, false, perr
+	}
+	return &parsed, false, nil
 }
 
 func validateAPIKeyUpdateRequest(req UpdateAPIKeyRequest) error {
@@ -98,7 +139,7 @@ func validateAPIKeyUpdateRequest(req UpdateAPIKeyRequest) error {
 	if req.RateLimit7d != nil && !validAPIKeyLimit(*req.RateLimit7d) {
 		return errors.New("invalid rate_limit_7d")
 	}
-	return nil
+	return validateCapacityRequest(req.ConcurrencyRequest, req.ConcurrencyLimit, req.RPMLimit)
 }
 
 // List handles listing user's API keys with pagination
@@ -287,6 +328,23 @@ func (h *APIKeyHandler) Create(c *gin.Context) {
 		IPBlacklist:   req.IPBlacklist,
 		ExpiresInDays: req.ExpiresInDays,
 	}
+	if req.ConcurrencyRequest != nil {
+		svcReq.ConcurrencyRequest = *req.ConcurrencyRequest
+	}
+	if req.ConcurrencyLimit != nil {
+		svcReq.ConcurrencyLimit = *req.ConcurrencyLimit
+	}
+	if req.RPMLimit != nil {
+		svcReq.RPMLimit = *req.RPMLimit
+	}
+	if req.EffectiveAt != "" {
+		t, _, err := parseCapacityEffectiveAt(req.EffectiveAt)
+		if err != nil {
+			response.BadRequest(c, "Invalid effective_at format: "+err.Error())
+			return
+		}
+		svcReq.EffectiveAt = t
+	}
 	if req.Quota != nil {
 		svcReq.Quota = *req.Quota
 	}
@@ -343,6 +401,9 @@ func (h *APIKeyHandler) Update(c *gin.Context) {
 		RateLimit1d:         req.RateLimit1d,
 		RateLimit7d:         req.RateLimit7d,
 		ResetRateLimitUsage: req.ResetRateLimitUsage,
+		ConcurrencyRequest:  req.ConcurrencyRequest,
+		ConcurrencyLimit:    req.ConcurrencyLimit,
+		RPMLimit:            req.RPMLimit,
 	}
 	if req.Name != "" {
 		svcReq.Name = &req.Name
@@ -365,6 +426,15 @@ func (h *APIKeyHandler) Update(c *gin.Context) {
 			}
 			svcReq.ExpiresAt = &t
 		}
+	}
+	if req.EffectiveAt != nil {
+		t, clear, err := parseCapacityEffectiveAt(*req.EffectiveAt)
+		if err != nil {
+			response.BadRequest(c, "Invalid effective_at format: "+err.Error())
+			return
+		}
+		svcReq.EffectiveAt = t
+		svcReq.ClearEffectiveAt = clear
 	}
 
 	key, err := h.apiKeyService.Update(c.Request.Context(), keyID, subject.UserID, svcReq)

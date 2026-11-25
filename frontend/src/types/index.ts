@@ -776,6 +776,15 @@ export interface ApiKey {
   reset_5h_at: string | null
   reset_1d_at: string | null
   reset_7d_at: string | null
+  // 容量契约：effective_* 是该 key 实际生效的数（key 硬顶与 user 池取更严者），
+  // limit_source 说明来自哪一层（key | user | unlimited）。
+  concurrency_request: number
+  concurrency_limit: number
+  rpm_limit: number
+  effective_concurrency_limit: number
+  effective_rpm_limit: number
+  limit_source: string
+  effective_at: string | null
 }
 
 export interface CreateApiKeyRequest {
@@ -789,6 +798,10 @@ export interface CreateApiKeyRequest {
   rate_limit_5h?: number
   rate_limit_1d?: number
   rate_limit_7d?: number
+  concurrency_request?: number
+  concurrency_limit?: number
+  rpm_limit?: number
+  effective_at?: string // RFC3339；不传 = 立即生效
 }
 
 export interface UpdateApiKeyRequest {
@@ -804,6 +817,10 @@ export interface UpdateApiKeyRequest {
   rate_limit_1d?: number
   rate_limit_7d?: number
   reset_rate_limit_usage?: boolean
+  concurrency_request?: number
+  concurrency_limit?: number
+  rpm_limit?: number
+  effective_at?: string // 空串 = 清空生效时刻
 }
 
 export interface CreateGroupRequest {

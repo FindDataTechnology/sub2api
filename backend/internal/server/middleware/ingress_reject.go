@@ -95,6 +95,20 @@ func MarkIngressRejected(c *gin.Context, reason IngressRejectReason) {
 	c.Set(ingressRejectReasonContextKey, reason)
 }
 
+// LoggableIngressReject 报告该入口拒绝是否应写入 ops_error_logs。
+//
+// 默认不入表：入口拒绝里绝大多数是攻击者可控的无效 key 噪音，写表只会冲淡真实错误面。
+// 例外是 key 容量与生效时刻两类——它们是调用方自己的额度问题，而且是稳定性口径
+// throttle_ratio 的分子来源；不入表就等于「最该看的那一类永远看不到」。
+func LoggableIngressReject(reason IngressRejectReason) bool {
+	switch reason {
+	case IngressRejectKeyCapacity, IngressRejectKeyNotEffective:
+		return true
+	default:
+		return false
+	}
+}
+
 // GetIngressRejectReason returns the admission rejection reason, if any.
 func GetIngressRejectReason(c *gin.Context) (IngressRejectReason, bool) {
 	if c == nil {

@@ -29,9 +29,9 @@ func TestBillingCacheService_CheckRPM_OverrideFromAnotherGroupMustNotApply(t *te
 	group := &Group{ID: 11, RPMLimit: 5}
 
 	for i := 0; i < 5; i++ {
-		require.NoError(t, svc.checkRPM(context.Background(), user, group))
+		require.NoError(t, svc.checkRPM(context.Background(), user, nil, group))
 	}
-	require.ErrorIs(t, svc.checkRPM(context.Background(), user, group), ErrGroupRPMExceeded,
+	require.ErrorIs(t, svc.checkRPM(context.Background(), user, nil, group), ErrGroupRPMExceeded,
 		"分组 11 的 rpm_limit 应生效，不能使用分组 10 的 override")
 	require.EqualValues(t, 6, atomic.LoadInt32(&repo.calls),
 		"snapshot 只确认了分组 10，分组 11 应回源查询")
@@ -51,8 +51,8 @@ func TestBillingCacheService_CheckRPM_SnapshotOverrideAppliesForItsOwnGroup(t *t
 	}
 	group := &Group{ID: 10, RPMLimit: 100}
 
-	require.NoError(t, svc.checkRPM(context.Background(), user, group))
-	require.NoError(t, svc.checkRPM(context.Background(), user, group))
-	require.ErrorIs(t, svc.checkRPM(context.Background(), user, group), ErrGroupRPMExceeded)
+	require.NoError(t, svc.checkRPM(context.Background(), user, nil, group))
+	require.NoError(t, svc.checkRPM(context.Background(), user, nil, group))
+	require.ErrorIs(t, svc.checkRPM(context.Background(), user, nil, group), ErrGroupRPMExceeded)
 	require.Zero(t, atomic.LoadInt32(&repo.calls), "分组 10 的 override 已确认，不应回源")
 }

@@ -45,3 +45,25 @@ func TestAPIKeyFromService_MapsNilLastUsedAt(t *testing.T) {
 	require.Nil(t, out.LastUsedAt)
 	require.Nil(t, out.LastUsedIP)
 }
+
+// key 没设上限但 user 池是 5：必须回报 5/user，不能显示成"不限"
+// —— 否则用户看到 0 会以为随便开并发，撞墙时归因不到自己头上。
+func TestAPIKeyFromService_EffectiveLimitTakesStricterLayer(t *testing.T) {
+	poolOnly := &service.APIKey{ID: 1, User: &service.User{ID: 2, Concurrency: 5}}
+	out := APIKeyFromService(poolOnly)
+	require.Equal(t, 5, out.EffectiveConcurrencyLimit)
+	require.Equal(t, "user", out.LimitSource)
+
+	stricterKey := &service.APIKey{
+		ID: 1, ConcurrencyLimit: 3,
+		User: &service.User{ID: 2, Concurrency: 5},
+	}
+	out = APIKeyFromService(stricterKey)
+	require.Equal(t, 3, out.EffectiveConcurrencyLimit)
+	require.Equal(t, "key", out.LimitSource)
+
+	unlimited := &service.APIKey{ID: 1}
+	out = APIKeyFromService(unlimited)
+	require.Zero(t, out.EffectiveConcurrencyLimit)
+	require.Equal(t, "unlimited", out.LimitSource)
+}

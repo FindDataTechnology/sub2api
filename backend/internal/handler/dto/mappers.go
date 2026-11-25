@@ -109,7 +109,20 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 		Window7dStart:      k.Window7dStart,
 		User:               UserFromServiceShallow(k.User),
 		Group:              GroupFromServiceShallow(k.Group),
+		ConcurrencyRequest: k.ConcurrencyRequest,
+		ConcurrencyLimit:   k.ConcurrencyLimit,
+		RPMLimit:           k.RPMLimit,
+		EffectiveAt:        k.EffectiveAt,
 	}
+	// 有效上限：key 硬顶与 user 池取更严者。不填这个字段，用户面对「key=0 但 user=5」
+	// 会显示成"不限"——正是本契约要消灭的那种骗人。
+	poolCap, userRPM := 0, 0
+	if k.User != nil {
+		poolCap = k.User.Concurrency
+		userRPM = k.User.RPMLimit
+	}
+	out.EffectiveConcurrencyLimit, out.LimitSource = service.EffectiveLimit(k.ConcurrencyLimit, poolCap)
+	out.EffectiveRPMLimit, _ = service.EffectiveLimit(k.RPMLimit, userRPM)
 	if k.Window5hStart != nil && !service.IsWindowExpired(k.Window5hStart, service.RateLimitWindow5h) {
 		t := k.Window5hStart.Add(service.RateLimitWindow5h)
 		out.Reset5hAt = &t

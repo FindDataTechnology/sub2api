@@ -1065,8 +1065,10 @@ func (state *opsCaptureWriterState) shouldCapture() bool {
 	if state.ctx == nil {
 		return true
 	}
-	_, rejected := middleware2.GetIngressRejectReason(state.ctx)
-	return !rejected
+	reason, rejected := middleware2.GetIngressRejectReason(state.ctx)
+	// 与 middleware2.LoggableIngressReject 同一判据：会入表的拒绝必须抓 body，
+	// 否则那一行只有状态码没有原因，等于记了个空壳。
+	return !rejected || middleware2.LoggableIngressReject(reason)
 }
 
 // OpsErrorLoggerMiddleware records error responses (status >= 400) into ops_error_logs.
@@ -1091,7 +1093,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		c.Next()
 		w.finalizeCapture()
 
-		if _, rejected := middleware2.GetIngressRejectReason(c); rejected {
+		if reason, rejected := middleware2.GetIngressRejectReason(c); rejected && !middleware2.LoggableIngressReject(reason) {
 			return
 		}
 

@@ -22,4 +22,9 @@ type UserRPMCache interface {
 
 	// GetUserRPM 获取用户当前分钟已用 RPM（只读，不递增）。
 	GetUserRPM(ctx context.Context, userID int64) (count int, err error)
+
+	// IncrementAPIKeyRPM 原子递增单个 key 的分钟计数并返回最新值。
+	// 用于 key.rpm_limit（add-key-capacity-contract）——key 是池内席位，
+	// 席位自己的 rpm 上限不该再借道 user 级计数。
+	IncrementAPIKeyRPM(ctx context.Context, apiKeyID int64) (count int, err error)
 }
