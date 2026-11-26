@@ -32,6 +32,9 @@ type userRepository struct {
 	sql    sqlExecutor
 }
 
+// 编译期断言：生产实现必须提供行锁能力，否则容量分配会静默降级为不加锁（2b.3）。
+var _ service.UserRowLocker = (*userRepository)(nil)
+
 var _ service.RedeemUserAdjustmentRepository = (*userRepository)(nil)
 
 func NewUserRepository(client *dbent.Client, sqlDB *sql.DB) service.UserRepository {
@@ -220,7 +223,9 @@ func (r *userRepository) WithUserRowLock(ctx context.Context, userID int64, fn f
 }
 
 func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, error) {
-	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
+	// 事务感知：WithUserRowLock 里读池容量必须看到锁内视图（2b.3），
+	// 用 r.client 会绕过事务读到锁外快照，锁就白加了。
+	m, err := clientFromContext(ctx, r.client).User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
@@ -1506,7 +1511,7 @@ func (r *userRepository) loadAllowedGroups(ctx context.Context, userIDs []int64)
 		return out, nil
 	}
 
-	rows, err := r.client.UserAllowedGroup.Query().
+	rows, err := clientFromContext(ctx, r.client).UserAllowedGroup.Query().
 		Where(userallowedgroup.UserIDIn(userIDs...)).
 		All(ctx)
 	if err != nil {

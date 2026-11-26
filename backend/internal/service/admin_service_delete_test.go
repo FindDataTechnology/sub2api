@@ -54,11 +54,6 @@ func (s *userRepoStub) CreateWithEmailAliasGuardAndDomainLimit(ctx context.Conte
 	return s.CreateWithEmailAliasGuard(ctx, user)
 }
 
-// WithUserRowLock 测试桩无需真锁：直接跑 fn（add-key-capacity-contract 2b.3）。
-func (s *userRepoStub) WithUserRowLock(ctx context.Context, _ int64, fn func(context.Context) error) error {
-	return fn(ctx)
-}
-
 func (s *userRepoStub) Create(ctx context.Context, user *User) error {
 	if s.createErr != nil {
 		return s.createErr

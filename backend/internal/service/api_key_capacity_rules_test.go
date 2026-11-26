@@ -178,7 +178,7 @@ func TestCheckCapacityAllocation_ConcurrentCreateDoesNotOversell(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := svc.userRepo.WithUserRowLock(context.Background(), 1, func(txCtx context.Context) error {
+			err := svc.withUserRowLock(context.Background(), 1, func(txCtx context.Context) error {
 				if aerr := svc.checkCapacityAllocation(txCtx, 1, 5, 0, 1, 0); aerr != nil {
 					return aerr
 				}

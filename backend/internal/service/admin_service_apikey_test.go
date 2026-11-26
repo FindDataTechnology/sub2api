@@ -32,11 +32,6 @@ func (s *userRepoStubForGroupUpdate) AddGroupToAllowedGroups(_ context.Context, 
 	return s.addGroupErr
 }
 
-// WithUserRowLock 测试桩无需真锁：直接跑 fn（add-key-capacity-contract 2b.3）。
-func (s *userRepoStubForGroupUpdate) WithUserRowLock(ctx context.Context, _ int64, fn func(context.Context) error) error {
-	return fn(ctx)
-}
-
 func (s *userRepoStubForGroupUpdate) Create(context.Context, *User) error { panic("unexpected") }
 func (s *userRepoStubForGroupUpdate) CreateWithEmailAliasGuard(context.Context, *User) error {
 	panic("unexpected")

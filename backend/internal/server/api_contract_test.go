@@ -1852,11 +1852,6 @@ func (r *stubUserRepo) GetByID(ctx context.Context, id int64) (*service.User, er
 	return &clone, nil
 }
 
-// WithUserRowLock 在契约测试里无需真锁：桩不并发，直接跑 fn。
-func (r *stubUserRepo) WithUserRowLock(ctx context.Context, _ int64, fn func(context.Context) error) error {
-	return fn(ctx)
-}
-
 func (r *stubUserRepo) GetByEmail(ctx context.Context, email string) (*service.User, error) {
 	for _, user := range r.users {
 		if user.Email == email {

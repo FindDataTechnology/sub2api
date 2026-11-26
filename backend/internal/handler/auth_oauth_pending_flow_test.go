@@ -3106,10 +3106,6 @@ type oauthPendingFlowUserRepoOptions struct {
 	rejectDeleteWhileAuthIdentityExists bool
 }
 
-// WithUserRowLock 测试桩无需真锁：直接跑 fn（add-key-capacity-contract 2b.3）。
-func (r *oauthPendingFlowUserRepo) WithUserRowLock(ctx context.Context, _ int64, fn func(context.Context) error) error {
-	return fn(ctx)
-}
 func (r *oauthPendingFlowUserRepo) Create(ctx context.Context, user *service.User) error {
 	entity, err := r.client.User.Create().
 		SetEmail(user.Email).

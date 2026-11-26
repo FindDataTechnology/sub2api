@@ -127,6 +127,20 @@ func (f UserUpdateFields) IsEmpty() bool {
 	return f == UserUpdateFields{}
 }
 
+// UserRowLocker 是 UserRepository 的**可选**能力：在该用户的行锁事务内执行 fn。
+//
+// 为什么做成可选而不是塞进 UserRepository（add-key-capacity-contract 2b.3）：
+// UserRepository 有 40+ 个测试桩，把方法塞进主接口会让每个桩都要实现一遍，
+// 而绝大多数桩与容量分配无关。做成能力探测后：
+//   - 生产实现（userRepository）实现了它 ⇒ 分配走真锁；
+//   - 桩没实现 ⇒ 退回不加锁（桩本身单 goroutine，行为等价）。
+//
+// 代价：**生产实现漏实现时不会编译失败**，只会静默降级。故 userRepository 上有
+// 编译期断言 `var _ UserRowLocker = (*userRepository)(nil)`（见 repository 包）。
+type UserRowLocker interface {
+	WithUserRowLock(ctx context.Context, userID int64, fn func(context.Context) error) error
+}
+
 type UserRepository interface {
 	Create(ctx context.Context, user *User) error
 	// CreateWithEmailAliasGuard 创建用户，并在邮箱唯一性锁内复查"收件箱身份"是否已被占用
@@ -135,9 +149,6 @@ type UserRepository interface {
 	// 服务层的前置查重会同时通过，必须由这里串行化兜底。管理员建号仍走 Create，不受限制。
 	CreateWithEmailAliasGuard(ctx context.Context, user *User) error
 	GetByID(ctx context.Context, id int64) (*User, error)
-	// WithUserRowLock 在该用户的行锁事务内执行 fn（add-key-capacity-contract 2b.3）。
-	// 用于把"读其他 key 的请求之和 → 判定 → 写本 key"串成一笔，防并发超卖。
-	WithUserRowLock(ctx context.Context, userID int64, fn func(context.Context) error) error
 	// GetByIDIncludeDeleted 绕过软删除过滤按 ID 取用户（含已删）。仅供管理员审计/usage 点击使用。
 	GetByIDIncludeDeleted(ctx context.Context, id int64) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)

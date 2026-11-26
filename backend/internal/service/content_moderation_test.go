@@ -164,10 +164,6 @@ type contentModerationTestUserRepo struct {
 	updated []User
 }
 
-// WithUserRowLock 测试桩无需真锁：直接跑 fn（add-key-capacity-contract 2b.3）。
-func (r *contentModerationTestUserRepo) WithUserRowLock(ctx context.Context, _ int64, fn func(context.Context) error) error {
-	return fn(ctx)
-}
 func (r *contentModerationTestUserRepo) Create(ctx context.Context, user *User) error {
 	panic("unexpected Create call")
 }

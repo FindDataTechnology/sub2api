@@ -504,6 +504,15 @@ func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group 
 	return user.CanBindGroup(group.ID, group.IsExclusive)
 }
 
+// withUserRowLock 是 UserRowLocker 的能力探测包装：仓储实现该能力时走真锁，
+// 否则直接执行（测试桩/单 goroutine 场景，行为等价）。
+func (s *APIKeyService) withUserRowLock(ctx context.Context, userID int64, fn func(context.Context) error) error {
+	if locker, ok := s.userRepo.(UserRowLocker); ok && locker != nil {
+		return locker.WithUserRowLock(ctx, userID, fn)
+	}
+	return fn(ctx)
+}
+
 // Create 创建API Key
 func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIKeyRequest) (*APIKey, error) {
 	if err := validateCreateAPIKeyRequest(req); err != nil {
@@ -626,7 +635,7 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 	// 校验与写入必须同事务且串行（add-key-capacity-contract 2b.3）：
 	// 锁 user 行把同一用户的并发分配排成队，锁内重做聚合判定，再写。
 	// 不加锁时两个请求各自读到旧的 Σrequest、各自判定合法、各自写入 ⇒ 合计超池。
-	if err := s.userRepo.WithUserRowLock(ctx, userID, func(txCtx context.Context) error {
+	if err := s.withUserRowLock(ctx, userID, func(txCtx context.Context) error {
 		freshPool := 0
 		if u, uerr := s.userRepo.GetByID(txCtx, userID); uerr == nil && u != nil {
 			freshPool = u.Concurrency
@@ -1039,7 +1048,7 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	}
 	// 只在真的动了时加锁：改名字/状态不需要串行化。
 	if req.ConcurrencyRequest != nil || req.ConcurrencyLimit != nil {
-		if err := s.userRepo.WithUserRowLock(ctx, apiKey.UserID, updateFn); err != nil {
+		if err := s.withUserRowLock(ctx, apiKey.UserID, updateFn); err != nil {
 			return nil, err
 		}
 	} else if err := updateFn(ctx); err != nil {
