@@ -175,34 +175,34 @@
 
 ## M1 字段 + 快照 + 只读暴露（行为零变化）
 
-- [ ] 1.1 迁移 `250_api_key_capacity.sql`：`concurrency_limit int NOT NULL DEFAULT 0`、
+- [x] 1.1 迁移 `250_api_key_capacity.sql`：`concurrency_limit int NOT NULL DEFAULT 0`、
   `rpm_limit int NOT NULL DEFAULT 0`、`effective_at timestamptz NULL` + ent schema + `go generate`
   ——验证：真 PG scratch 库跑 DDL、幂等重跑；存量行全为 0/null
-- [ ] 1.2 `APIKeyAuthSnapshot` 加三字段并**升 `apiKeyAuthSnapshotVersion` v26→v27**，注释写明来源
+- [x] 1.2 `APIKeyAuthSnapshot` 加三字段并**升 `apiKeyAuthSnapshotVersion` v26→v27**，注释写明来源
   ——验证：单测断言「v26 快照被拒绝重建」；部署后首次鉴权触发重建且新字段非零（设一个非零值验证）
-- [ ] 1.3 `capabilities.limits` 增 `concurrency_limit` / `rpm_limit` / `effective_at`
+- [x] 1.3 `capabilities.limits` 增 `concurrency_limit` / `rpm_limit` / `effective_at`
   ——验证：真实 key 调用返回三字段；默认值为 0/0/null 时不误报为"受限"
-- [ ] 1.3b **有效上限与来源**：`effective_concurrency_limit` / `effective_rpm_limit` /
+- [x] 1.3b **有效上限与来源**：`effective_concurrency_limit` / `effective_rpm_limit` /
   `limit_source`（`key|user|group|unlimited`）——验证：构造「key=0 但 user=5」的用例，
   断言 `effective=5` 且 `limit_source=user`，且响应中**不出现"不限"**（这是最容易骗到人的一处）
 
 ## M2 key 级准入（默认不限，存量零影响）
 
-- [ ] 2.1 准入闸：`apiKeyAuth` 之后、分组 allowlist 之前，按 `concurrency_limit`（进行中计数）
+- [x] 2.1 准入闸：`apiKeyAuth` 之后、分组 allowlist 之前，按 `concurrency_limit`（进行中计数）
   与 `rpm_limit`（滑动一分钟）判定——验证：单测覆盖「未超限放行」「并发超限 429」「rpm 超限 429」
   三条；超限时**不触达上游**（无用量行、不占账号槽位）
-- [ ] 2.2 超限错误体与既有 429 同形，带 `retry_after`、`limit_kind`（concurrency|rpm）与
+- [x] 2.2 超限错误体与既有 429 同形，带 `retry_after`、`limit_kind`（concurrency|rpm）与
   **`limit_scope`（key|user|group）**——验证：对比 chat 入口 429 的键集合仅多这两个；
   三种 scope 各造一例，断言调用方能看出是哪一层挡的（否则永远在猜）
-- [ ] 2.3 fail-open：计数后端不可用时放行 + 递增可观测计数器——验证：注入后端故障，
+- [x] 2.3 fail-open：计数后端不可用时放行 + 递增可观测计数器——验证：注入后端故障，
   请求全部通过且计数器非零；**不得**出现全站 429
-- [ ] 2.4 429 计入 `ops_error_logs`——验证:超限请求在错误表可见（否则稳定性口径漏掉最该看的一类）
+- [x] 2.4 429 计入 `ops_error_logs`——验证:超限请求在错误表可见（否则稳定性口径漏掉最该看的一类）
 
 ## M3 生命周期：生效时刻 + 传播状态
 
-- [ ] 3.1 `effective_at` 语义：未到时刻返回 `KEY_NOT_YET_EFFECTIVE`（**不是 401**），回传该时刻
+- [x] 3.1 `effective_at` 语义：未到时刻返回 `KEY_NOT_YET_EFFECTIVE`（**不是 401**），回传该时刻
   ——验证：构造未来生效的 key，鉴权通过但请求被拒；到点后自动放行（不重启）
-- [ ] 3.2 `GET /api/v1/keys/{id}/state`：`config_applied` / `observed_snapshot_version` /
+- [x] 3.2 `GET /api/v1/keys/{id}/state`：`config_applied` / `observed_snapshot_version` /
   计数后端类型与可用性——验证：改 concurrency 后立即查为 `false`，快照重建后为 `true`
   （这条直接回答"我怎么知道改的生效了"）
 
@@ -238,33 +238,39 @@
 
 ## M2b 长期机制（池 + 席位）
 
-- [ ] 2b.1 两级准入实现：`admit = (池==0 ∨ userInflight<池) ∧ (硬顶==0 ∨ keyInflight<硬顶)`，
+- [x] 2b.1 两级准入实现：`admit = (池==0 ∨ userInflight<池) ∧ (硬顶==0 ∨ keyInflight<硬顶)`，
   两级计数均为进程内原子（生产单副本精确）——验证：单测覆盖四种组合
   （池满/key 满/两者皆满/皆未满）；多 key 合计不得超池的用例必须存在
-- [ ] 2b.2 **计数泄漏防护**（长期方案的核心风险）：所有路径 `defer` 释放 + 周期性对账回收
+- [x] 2b.2 **计数泄漏防护**（长期方案的核心风险）：所有路径 `defer` 释放 + 周期性对账回收
   超时槽位 + `key_capacity_leaked_slots` 指标——验证：注入 panic/超时/客户端断开三条路径，
   计数归零；再注入一次"故意不释放"，对账在 N 秒内回收且指标非零（**泄漏必须可见**）
-- [ ] 2b.3 分配不变量事务校验：`Σrequest ≤ 池`、`limit ≤ 池`、`request ≤ limit`，持锁，
+- [x] 2b.3 分配不变量事务校验：`Σrequest ≤ 池`、`limit ≤ 池`、`request ≤ limit`，持锁，
   违反回传 `requested/remaining/capacity`——验证：三条各一负例；并发两个请求同时分配不得超卖
   （用两个事务并发跑，断言只有一个成功）
-- [ ] 2b.4 剩余额度用查询聚合，不做物化计数器——验证：删除 key 后剩余额度立即回升，
+- [x] 2b.4 剩余额度用查询聚合，不做物化计数器——验证：删除 key 后剩余额度立即回升，
   无补偿任务；代码里搜不到"剩余额度"字段
 
 ## M2c 容量规划助手
 
-- [ ] 2c.1 `GET /api/v1/keys/capacity-plan`：返回 `capacity` / `allocated` / `remaining` /
+> **2c 不做（2026-11-26 判据）**：容量规划助手是给**正在分配**的人用的。实测
+> 197 把活跃 key 里 **0 把**设了 `concurrency_request` 或 `concurrency_limit`——
+> 没有任何分配可规划。做出来是空转端点。
+> **升级条件**：首次出现「用户问我要给这把 key 多少并发」时再做，届时
+> `capacity-plan` 才有真实输入。
+
+- [~] 2c.1 `GET /api/v1/keys/capacity-plan`：返回 `capacity` / `allocated` / `remaining` /
   各 key 的 request+limit 表——验证：与手工 SQL 一致；剩余为 0 时给出"要提升需扩池"的明确提示
-- [ ] 2c.2 针对现状给出可执行建议：89 人池=5 而人均 key 数未知 → 先测"每人 key 数分布"，
+- [~] 2c.2 针对现状给出可执行建议：89 人池=5 而人均 key 数未知 → 先测"每人 key 数分布"，
   据此给出"池容量该不该提、提到多少"的依据（不拍数字）——验证：给出分布与建议区间
 
 ## M6 验收
 
-- [ ] 6.1 本地快包：`go build ./... && go test ./internal/lanes/ ./internal/server/routes/ && go vet`
+- [x] 6.1 本地快包：`go build ./... && go test ./internal/lanes/ ./internal/server/routes/ && go vet`
   ——验证：全绿；`gofmt -l` 对新增文件为空
-- [ ] 6.2 出片上产（专用线，`ciyuan-tag` 递增，迁移 250 执行核对）——验证：GHA 双绿、
+- [x] 6.2 出片上产（专用线，`ciyuan-tag` 递增，迁移 250 执行核对）——验证：GHA 双绿、
   digest 一致、rollout 绿、`api_keys` 三列已建
-- [ ] 6.3 真机四件：①存量 key 行为不变；②设 `concurrency_limit=1` 并发打两发，第二发 429 且
+- [x] 6.3 真机四件：①存量 key 行为不变；②设 `concurrency_limit=1` 并发打两发，第二发 429 且
   `limit_kind=concurrency`；③未来 `effective_at` 的 key 被拒且到点自动放行；④新 key 的
   `baseline` 返回群体值 + 置信度——验证：四条各留 JSON 存档
-- [ ] 6.4 稳定性口径上报表：`tools/line-metrics.sql` 或新 `tools/key-health.sql` 增一节按 key——
+- [x] 6.4 稳定性口径上报表：`tools/line-metrics.sql` 或新 `tools/key-health.sql` 增一节按 key——
   验证：能回答"这把 key 成功率多少、p95 多少、429 占多少、什么时候最忙"
