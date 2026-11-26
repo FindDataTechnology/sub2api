@@ -11,7 +11,9 @@
 >   `limit_source:"unlimited"` 而该用户池是 5 —— 真 bug，已修（`ListByUserID`/
 >   `ListAllByUserID` 只 `WithGroup()` 不带 `WithUser()` ⇒ `k.User==nil` ⇒ 池容量读成 0）。
 >   修法 `434f5eea3`，CI 45750122327 全绿，合入 main `15428a81f`。
-> - **6.3-① 待复验**：新片部署后列表应回 `5/user`。
+> - **6.3-① 复验通过**（`sha-c8c004f`，2026-11-26）：列表与详情均回
+>   `effective_concurrency_limit=5 / limit_source="user"`，与真实池容量一致。
+>   **6.3 四条全部通过。**
 >
 > 附注：验收用临时 key 两把（已在验收后删除）；未改任何存量 key。
 
