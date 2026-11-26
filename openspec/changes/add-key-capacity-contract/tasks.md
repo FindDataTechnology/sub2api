@@ -1,5 +1,16 @@
 > **延后（2026-11-21 治理复核）**：4/31 是**低报**——代码已落一大半：
 
+> **2026-11-26 5.2 实现并生产验证（`sha-6ec9b49`）**：原先 `buildKeyBaseline` **永远返回 population**
+> ——一个用了几个月的 key 会看到「继承自平台 openai 的群体统计」，用户会以为那是自己的表现。
+> 现在先判自身样本：达 `baselineClassMediumRequests`(200) 用自身数据、达 `high`(2000) 置信度升 high；
+> 阈值复用既有置信度分档，不引入新常量。
+> 生产实测三档（`/api/v1/keys/{id}/stability?window=24h`）：
+> - key 1（5592 样本）⇒ `source=personal, confidence=high`，note「基于本 key 自身 5592 次样本」
+> - key 131（532 样本）⇒ `source=personal, confidence=medium`
+> - key 252（1 样本）⇒ `source=population, confidence=low`（正确回落）
+>
+> **M4/M5 收口**：4.1/4.1b/4.2/5.1/5.3 补勾（均已实现且生产验过）；4.4 改 `[~]` 并写明理由。
+
 > **2026-11-26 2b.3 最终验证通过（`sha-6257a79`）**：生产实测四条全过。
 > - 创建不挂：带鉴权 `POST /api/v1/keys` **0.32s 返回 200**（修前永久挂起）
 > - **并发不超卖**：池=5，8 并发各 `request=1` ⇒ **恰好放行 5、拒绝 3**，库里 `Σrequest=5`
@@ -220,7 +231,7 @@
 - [x] 5.1 `baseline`：按 `(platform, model)` 类取中位数；新 key 给 `source: population` +
   `confidence`；样本不足时数值为 `null` 且 `confidence: low`——验证：新 key 首次查询返回群体值；
   构造小样本类断言返回 `null` 而非假精确数
-- [ ] 5.2 个人样本达阈值后切 `source: personal`——验证：造够样本后切源，且数值随自身数据变化
+- [x] 5.2 个人样本达阈值后切 `source: personal`——验证：造够样本后切源，且数值随自身数据变化
 - [x] 5.3 `stability`：`success_ratio` / `p95_latency_ms` / `throttle_ratio` / `active_hours`，
   窗口 1h/24h/7d——验证：**分母含失败**（有 429 时 `success_ratio` 严格 <1）；
   无数据时为 `null` 而非 0/1（"无数据"不等于"稳定"）
