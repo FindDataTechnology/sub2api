@@ -14,9 +14,22 @@
 >   这需要真实流量累积，**不是写代码能完成的**。
 > - **[~] 2c.1/2c.2 容量规划助手**：一个新端点。当前 0 把 key 设了 `concurrency_request`，
 >   没有分配可规划。**升级条件**：首次出现「用户问我要多少并发」时再做。
-> - **[x] 2b.3 分配不变量事务锁**：`b9a79a63c` 实现（`UserRepository.WithUserRowLock`，
->   锁 user 行 + 事务内重做判定），20 并发打池 5 的单测断言恰好放行 5。
->   **原先是真实缺陷**：两个并发创建各自读到旧 Σrequest ⇒ 超卖，正是本 change 的立论。
+> - **[x] 2b.3 分配不变量事务锁**：实现见 `ca506068c`。**过程中翻出四层问题**，
+>   前两层会让"锁加上了"变成假象：
+>   1. **接口加宽的代价**：塞进 `UserRepository` 主接口 ⇒ 40+ 测试桩各要补一遍
+>      （CI 两轮都是这个原因，每轮只暴露 10 个编译错误）。改成可选接口
+>      `UserRowLocker` + 能力探测，生产实现有 `var _ service.UserRowLocker` 编译期断言。
+>   2. **`userRepository.GetByID` / `loadAllowedGroups` 用裸 `r.client`** ⇒ 事务被绕过，
+>      锁内读池容量读到锁外快照 ⇒ **锁形同虚设**。改用 `clientFromContext`。
+>   3. **`activeQuery()` / `apiKeyListByUserIDQuery()` 同样绕过事务** ⇒ key 侧的同型缺陷。
+>      改成带 ctx 的 `activeQuery(ctx)`（11 处调用点）。
+>   4. 我自己引入的回归：用 `fields.RateLimits` 守卫误伤"只改限速"的请求 ⇒ nil 解引用。
+>      改为只看 `req.ConcurrencyRequest/ConcurrencyLimit`。
+>
+>   **判据**：20 并发打池 5，断言恰好放行 5、写入 5 条、无两 fn 并发。
+>   **这条测试第一次跑出 6**——因为测试桩的 `WithUserRowLock` 只统计并发、不持锁跨越 fn，
+>   等于没锁。桩修对之后才验出第 2/3 层真缺陷。**原先是真实缺陷**：两个并发创建各自
+>   读到旧 Σrequest ⇒ 超卖，正是本 change 的立论。
 
 > **2026-11-26 真机验收（sha-3883789 已在生产）**：用真实用户材料签 JWT 调生产
 > `https://router.finddatatech.cloud`，四条结果：
