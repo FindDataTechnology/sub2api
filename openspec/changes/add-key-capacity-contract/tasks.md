@@ -1,5 +1,22 @@
 > **延后（2026-11-21 治理复核）**：4/31 是**低报**——代码已落一大半：
 
+> **2026-11-26 2b.3 最终验证通过（`sha-6257a79`）**：生产实测四条全过。
+> - 创建不挂：带鉴权 `POST /api/v1/keys` **0.32s 返回 200**（修前永久挂起）
+> - **并发不超卖**：池=5，8 并发各 `request=1` ⇒ **恰好放行 5、拒绝 3**，库里 `Σrequest=5`
+> - 拒绝体正确：`400 API_KEY_CAPACITY_REQUEST_EXCEEDS_POOL` + `capacity=5 / remaining=0 / requested=1`
+>   （顺带验证 `errors.As` 修复——原先这类违反会落成 500）
+> - 既有行为不变：列表仍 `eff=5 / src=user`；`/health` 0.15s
+> - 收尾干净：DB `idle-in-transaction=0`、锁等待=0、`Σrequest` 归零（测试 key 全删）
+>
+> **过程中撞到的真 bug（已修，`57a8672dd`）**：应用层自死锁——
+> `WithUserRowLock` 外层事务对 users 行持 `FOR UPDATE`，而 `apiKeyRepo.Create` 走 `r.client`
+> 另开连接 INSERT；`api_keys.user_id` 是 NOT NULL 外键，外键检查要取父行 `FOR KEY SHARE`
+> ⇒ 被自己的外层事务挡住。表现为 `POST /api/v1/keys` 永久挂起，**而 DB 侧看不到任何等待**
+> （`pg_stat_activity` 无阻塞查询、`idle in transaction` 为 0、`pg_locks` 未授予为 0）。
+> 判据：pod 内直连 `127.0.0.1:8080` 同样挂 ⇒ 排除网络与 Ingress。
+> **为什么单测没抓到**：内存桩的"锁"是本地 mutex，桩里 fn 在同一 goroutine 跑，永远不会冲突。
+> 修后补两条**真库 integration**：锁内创建 12s 内必须完成、池=5 时 20 并发恰好放行 5。
+
 > **2026-11-26 生产验证 + 一次误判的纠正**：
 > `sha-ca50606` 上过生产（revision 115），随后因 DB 端点超时回滚到 `sha-c8c004f`（revision 116）。
 > **超时不是本次改动的锅**：同一时刻 cheap6 在 tailnet 上是 `offline`（Headscale 控制面 chengsi 失联），
