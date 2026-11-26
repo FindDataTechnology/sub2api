@@ -116,6 +116,8 @@ func TestCheckCapacityAllocation_InactiveKeysDoNotCount(t *testing.T) {
 
 type serializedUserRepoStub struct {
 	UserRepository
+	// runMu 真正串行化 fn（模拟 FOR UPDATE 持锁到事务结束）
+	runMu  sync.Mutex
 	mu     sync.Mutex
 	locked bool
 	// violations 记录观察到"同时有两个 fn 在跑"的次数；锁生效时应恒为 0。
@@ -127,6 +129,12 @@ func (s *serializedUserRepoStub) GetByID(_ context.Context, _ int64) (*User, err
 }
 
 func (s *serializedUserRepoStub) WithUserRowLock(ctx context.Context, _ int64, fn func(context.Context) error) error {
+	// 必须**持锁跨越 fn**：Postgres 的 FOR UPDATE 是在事务结束前一直持行锁。
+	// 先前的写法只在进出时碰一下 mu（只统计并发、不串行化），于是两个 goroutine
+	// 能同时跑 fn —— 那等于没锁，测试会真的超卖。
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+
 	s.mu.Lock()
 	if s.locked {
 		atomic.AddInt32(&s.violations, 1)
