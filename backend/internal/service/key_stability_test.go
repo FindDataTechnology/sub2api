@@ -69,7 +69,7 @@ func TestBuildKeyBaseline_LowConfidenceGivesNoNumbers(t *testing.T) {
 	}}
 	s := &APIKeyService{apiKeyRepo: repo}
 
-	bl, err := s.buildKeyBaseline(context.Background(), repo, &APIKey{ID: 1, Group: &Group{Platform: "openai"}}, time.Now().Add(-time.Hour))
+	bl, err := s.buildKeyBaseline(context.Background(), repo, &APIKey{ID: 1, Group: &Group{Platform: "openai"}}, nil, time.Now().Add(-time.Hour))
 	require.NoError(t, err)
 
 	require.Equal(t, "population", bl.Source)
@@ -85,7 +85,7 @@ func TestBuildKeyBaseline_MediumAndHighGiveNumbers(t *testing.T) {
 	}}
 	s := &APIKeyService{apiKeyRepo: repo}
 
-	bl, err := s.buildKeyBaseline(context.Background(), repo, &APIKey{ID: 1, Group: &Group{Platform: "openai"}}, time.Now().Add(-time.Hour))
+	bl, err := s.buildKeyBaseline(context.Background(), repo, &APIKey{ID: 1, Group: &Group{Platform: "openai"}}, nil, time.Now().Add(-time.Hour))
 	require.NoError(t, err)
 
 	require.Equal(t, "high", bl.Confidence)
@@ -98,7 +98,7 @@ func TestBuildKeyBaseline_NoClassSampleIsHonest(t *testing.T) {
 	repo := &stabilityRepoStub{classRaw: &KeyStabilityRaw{}}
 	s := &APIKeyService{apiKeyRepo: repo}
 
-	bl, err := s.buildKeyBaseline(context.Background(), repo, &APIKey{ID: 1, Group: &Group{Platform: "openai"}}, time.Now().Add(-time.Hour))
+	bl, err := s.buildKeyBaseline(context.Background(), repo, &APIKey{ID: 1, Group: &Group{Platform: "openai"}}, nil, time.Now().Add(-time.Hour))
 	require.NoError(t, err)
 
 	require.Nil(t, bl.P95LatencyMs)
@@ -132,4 +132,49 @@ func TestParseKeyUsageWindow(t *testing.T) {
 
 	_, _, ok = ParseKeyUsageWindow("30d")
 	require.False(t, ok, "未知窗口必须拒绝，不能静默回落")
+}
+
+// ── 5.2 基线来源：自身样本达标必须切 personal ─────────────────
+//
+// 判据是"用了很久的 key 却回'继承自平台群体'"——那会让用户以为那是自己的表现。
+// 阈值与置信度分档同一口径（medium=200 / high=2000）。
+
+func TestBuildKeyBaseline_SwitchesToPersonalWhenOwnSamplesEnough(t *testing.T) {
+	repo := &stabilityRepoStub{
+		// 群体有大量样本，但本 key 自己也够 200 —— 必须用自身，不能继承群体
+		classRaw: &KeyStabilityRaw{SuccessCount: 5000, FailureCount: 0, P95LatencyMs: fptr(900)},
+	}
+	own := &KeyStabilityRaw{SuccessCount: 180, FailureCount: 20, P95LatencyMs: fptr(123)}
+	s := &APIKeyService{}
+	bl, err := s.buildKeyBaseline(context.Background(), repo, &APIKey{ID: 1, Group: &Group{Platform: "openai"}}, own, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, "personal", bl.Source, "自身样本达阈值时必须切 personal")
+	require.Equal(t, "medium", bl.Confidence)
+	require.EqualValues(t, 200, bl.SampleRequests)
+	require.NotNil(t, bl.P95LatencyMs)
+	require.InDelta(t, 123, *bl.P95LatencyMs, 0.001, "必须用自身 p95，不是群体的 900")
+	require.NotNil(t, bl.ErrorRatio)
+	require.InDelta(t, 0.1, *bl.ErrorRatio, 0.001, "错误率来自自身：20/200")
+}
+
+func TestBuildKeyBaseline_HighConfidenceAtHighThreshold(t *testing.T) {
+	s := &APIKeyService{}
+	own := &KeyStabilityRaw{SuccessCount: 2000, FailureCount: 0}
+	bl, err := s.buildKeyBaseline(context.Background(), &stabilityRepoStub{}, &APIKey{ID: 1}, own, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, "personal", bl.Source)
+	require.Equal(t, "high", bl.Confidence)
+}
+
+func TestBuildKeyBaseline_FallsBackToPopulationBelowThreshold(t *testing.T) {
+	repo := &stabilityRepoStub{
+		classRaw: &KeyStabilityRaw{SuccessCount: 500, FailureCount: 0, P95LatencyMs: fptr(777)},
+	}
+	own := &KeyStabilityRaw{SuccessCount: 100, FailureCount: 0} // 不足 200
+	s := &APIKeyService{}
+	bl, err := s.buildKeyBaseline(context.Background(), repo, &APIKey{ID: 1, Group: &Group{Platform: "openai"}}, own, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, "population", bl.Source, "自身不足阈值时继承群体")
+	require.EqualValues(t, 500, bl.SampleRequests)
+	require.InDelta(t, 777, *bl.P95LatencyMs, 0.001)
 }

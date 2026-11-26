@@ -45,7 +45,7 @@ func (s *APIKeyService) GetKeyStability(ctx context.Context, apiKey *APIKey, win
 	}
 	st := buildKeyStability(window, raw)
 
-	baseline, berr := s.buildKeyBaseline(ctx, repo, apiKey, since)
+	baseline, berr := s.buildKeyBaseline(ctx, repo, apiKey, raw, since)
 	if berr != nil {
 		return nil, berr
 	}
@@ -80,11 +80,40 @@ func buildKeyStability(window KeyUsageWindow, raw *KeyStabilityRaw) KeyStability
 }
 
 // buildKeyBaseline 决定基线来源与置信度。
-func (s *APIKeyService) buildKeyBaseline(ctx context.Context, repo KeyStabilityRepository, apiKey *APIKey, since time.Time) (*KeyBaseline, error) {
-	own := &KeyBaseline{Source: "personal", Confidence: "low", Note: "自身样本不足，且群体统计不可用"}
+func (s *APIKeyService) buildKeyBaseline(ctx context.Context, repo KeyStabilityRepository, apiKey *APIKey, ownRaw *KeyStabilityRaw, since time.Time) (*KeyBaseline, error) {
 	if apiKey == nil {
-		return own, nil
+		return &KeyBaseline{Source: "personal", Confidence: "low", Note: "无 key 上下文"}, nil
 	}
+
+	// 自身样本达标 ⇒ 用自身数据，不继承群体。
+	//
+	// 为什么必须先判：一个用了几个月的 key 却回"继承自平台群体"是误导——用户会以为
+	// 那是自己的表现。阈值复用 medium 档（baselineClassMediumRequests），与置信度分档同一口径。
+	if ownRaw != nil {
+		ownTotal := ownRaw.SuccessCount + ownRaw.FailureCount
+		if ownTotal >= baselineClassMediumRequests {
+			conf := "medium"
+			if ownTotal >= baselineClassHighRequests {
+				conf = "high"
+			}
+			bl := &KeyBaseline{
+				Source:         "personal",
+				Confidence:     conf,
+				SampleRequests: ownTotal,
+				P95LatencyMs:   ownRaw.P95LatencyMs,
+				Note:           fmt.Sprintf("基于本 key 自身 %d 次样本", ownTotal),
+			}
+			if ownTotal > 0 {
+				er := float64(ownRaw.FailureCount) / float64(ownTotal)
+				bl.ErrorRatio = &er
+			}
+			rps := float64(ownRaw.SuccessCount) / sinceDurationSeconds(since)
+			bl.SustainableRPS = &rps
+			return bl, nil
+		}
+	}
+
+	own := &KeyBaseline{Source: "personal", Confidence: "low", Note: "自身样本不足，且群体统计不可用"}
 
 	platform := ""
 	if apiKey.Group != nil {
