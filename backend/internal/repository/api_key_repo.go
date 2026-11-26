@@ -60,7 +60,11 @@ func (r *apiKeyRepository) activeQuery(ctx context.Context) *dbent.APIKeyQuery {
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) error {
-	builder := r.client.APIKey.Create().
+	// 必须走事务连接：容量分配在 WithUserRowLock 内调用本方法，那里已持有
+	// users 行的 FOR UPDATE；若这里用 r.client 另开一条连接执行 INSERT，
+	// 外键检查要取父行的 FOR KEY SHARE，会被自己外层事务的 FOR UPDATE 挡住
+	// —— 外层等 fn 返回、fn 等外层放锁，应用层自死锁（2026-11-26 生产实证）。
+	builder := clientFromContext(ctx, r.client).APIKey.Create().
 		SetUserID(key.UserID).
 		SetName(key.Name).
 		SetStatus(key.Status).
