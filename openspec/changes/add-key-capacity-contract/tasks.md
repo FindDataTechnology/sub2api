@@ -1,5 +1,20 @@
 > **延后（2026-11-21 治理复核）**：4/31 是**低报**——代码已落一大半：
 
+> **2026-11-26 真机验收（sha-3883789 已在生产）**：用真实用户材料签 JWT 调生产
+> `https://router.finddatatech.cloud`，四条结果：
+> - **6.3-② 通过**：`concurrency_limit=1` 并发两发，第 2 发 `429` +
+>   `limit_kind:"concurrency"` + `limit_scope:"key"` + `retry_after:5`，第 1 发 200（12.5s）
+> - **6.3-③ 通过**：未来 `effective_at` 返 `403 KEY_NOT_YET_EFFECTIVE` 并回传该时刻（不是 401）
+> - **6.3-④ 通过**：`stability` 端点 `throttle_ratio=0.25` / `failure_count=3` / `success_ratio=0.25`
+>   —— 2.4 的修复真的生效（容量 429 以前不入 `ops_error_logs`，throttle_count 恒 0）
+> - **6.3-① 未完全通过**：存量 key（容量字段全 0）请求行为正常，但**列表**回
+>   `limit_source:"unlimited"` 而该用户池是 5 —— 真 bug，已修（`ListByUserID`/
+>   `ListAllByUserID` 只 `WithGroup()` 不带 `WithUser()` ⇒ `k.User==nil` ⇒ 池容量读成 0）。
+>   修法 `434f5eea3`，CI 45750122327 全绿，合入 main `15428a81f`。
+> - **6.3-① 待复验**：新片部署后列表应回 `5/user`。
+>
+> 附注：验收用临时 key 两把（已在验收后删除）；未改任何存量 key。
+
 > **2026-11-26 接线进展（14/31 → 约 17/31）**：`2f2d3d66b` + `1936a9bcc` 接通了三处断线，
 > 直击 2026-11-25 复核列的四处优先缺口里的三处：
 >   - **4.1 产品路径通了**：`POST/PUT /keys` 现在真的收 `concurrency_request`/`concurrency_limit`/
