@@ -135,6 +135,9 @@ type UserRepository interface {
 	// 服务层的前置查重会同时通过，必须由这里串行化兜底。管理员建号仍走 Create，不受限制。
 	CreateWithEmailAliasGuard(ctx context.Context, user *User) error
 	GetByID(ctx context.Context, id int64) (*User, error)
+	// WithUserRowLock 在该用户的行锁事务内执行 fn（add-key-capacity-contract 2b.3）。
+	// 用于把"读其他 key 的请求之和 → 判定 → 写本 key"串成一笔，防并发超卖。
+	WithUserRowLock(ctx context.Context, userID int64, fn func(context.Context) error) error
 	// GetByIDIncludeDeleted 绕过软删除过滤按 ID 取用户（含已删）。仅供管理员审计/usage 点击使用。
 	GetByIDIncludeDeleted(ctx context.Context, id int64) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)

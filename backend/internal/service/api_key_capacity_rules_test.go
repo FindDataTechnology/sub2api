@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -102,4 +104,94 @@ func TestCheckCapacityAllocation_InactiveKeysDoNotCount(t *testing.T) {
 	)
 	require.NoError(t, s.checkCapacityAllocation(context.Background(), 1, 5, 0, 2, 0),
 		"停用的 key 不占额度，3 + 2(=新) 仍 ≤ 5")
+}
+
+// ── 2b.3 并发超卖：分配不变量必须串行 ──────────────────────────────
+//
+// 这是容量契约里最容易"看起来对、实际错"的一处：校验读的是"其他 key 的 request 之和"，
+// 写的是"本 key 的 request"。两个并发请求各自读到旧和、各自判定合法、各自写入
+// ⇒ 合计超池。锁 user 行把它们串成一条队才能真正防住。
+//
+// 本测试用内存桩模拟"加锁 = 串行执行"，断言 20 个并发分配后 Σrequest 仍 ≤ 池。
+
+type serializedUserRepoStub struct {
+	UserRepository
+	mu     sync.Mutex
+	locked bool
+	// violations 记录观察到"同时有两个 fn 在跑"的次数；锁生效时应恒为 0。
+	violations int32
+}
+
+func (s *serializedUserRepoStub) GetByID(_ context.Context, _ int64) (*User, error) {
+	return &User{ID: 1, Concurrency: 5}, nil
+}
+
+func (s *serializedUserRepoStub) WithUserRowLock(ctx context.Context, _ int64, fn func(context.Context) error) error {
+	s.mu.Lock()
+	if s.locked {
+		atomic.AddInt32(&s.violations, 1)
+	}
+	s.locked = true
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.locked = false
+		s.mu.Unlock()
+	}()
+	return fn(ctx)
+}
+
+// capacityAllocRepo 记录已被"分配"的 request 总量，模拟库中 Σrequest。
+type capacityAllocRepo struct {
+	APIKeyRepository
+	mu        sync.Mutex
+	allocated int
+}
+
+func (r *capacityAllocRepo) ListByUserID(_ context.Context, _ int64, _ pagination.PaginationParams, _ APIKeyListFilters) ([]APIKey, *pagination.PaginationResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// 把已分配量摊成若干把 key 返回
+	keys := make([]APIKey, 0, r.allocated)
+	for i := 0; i < r.allocated; i++ {
+		keys = append(keys, APIKey{ID: int64(i + 1), Status: StatusActive, ConcurrencyRequest: 1})
+	}
+	return keys, nil, nil
+}
+
+func (r *capacityAllocRepo) Create(_ context.Context, _ *APIKey) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.allocated++
+	return nil
+}
+
+func TestCheckCapacityAllocation_ConcurrentCreateDoesNotOversell(t *testing.T) {
+	userRepo := &serializedUserRepoStub{}
+	keyRepo := &capacityAllocRepo{}
+	svc := &APIKeyService{apiKeyRepo: keyRepo, userRepo: userRepo}
+
+	const workers = 20 // 池只有 5，必然绝大多数被拒
+	var wg sync.WaitGroup
+	var granted int32
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := svc.userRepo.WithUserRowLock(context.Background(), 1, func(txCtx context.Context) error {
+				if aerr := svc.checkCapacityAllocation(txCtx, 1, 5, 0, 1, 0); aerr != nil {
+					return aerr
+				}
+				return svc.apiKeyRepo.Create(txCtx, &APIKey{ID: 1, Status: StatusActive, ConcurrencyRequest: 1})
+			})
+			if err == nil {
+				atomic.AddInt32(&granted, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	require.Equal(t, int32(5), atomic.LoadInt32(&granted), "池 5 只能放行 5 个分配")
+	require.Equal(t, 5, keyRepo.allocated, "写入数必须等于放行数")
+	require.Zero(t, atomic.LoadInt32(&userRepo.violations), "锁生效时不应观察到最后两个 fn 并发")
 }

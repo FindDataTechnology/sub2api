@@ -538,6 +538,8 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 	if user != nil {
 		poolCapacity = user.Concurrency
 	}
+	// 这里是**快速失败**：容量字段非法时不必先做分组查询。它不是权威判定——
+	// 权威判定在下面的行锁事务里重做，否则并发创建会各自读到同一个旧和而超卖（2b.3）。
 	if err := s.checkCapacityAllocation(ctx, userID, poolCapacity, 0, req.ConcurrencyRequest, req.ConcurrencyLimit); err != nil {
 		return nil, err
 	}
@@ -621,8 +623,23 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 		apiKey.ExpiresAt = &expiresAt
 	}
 
-	if err := s.apiKeyRepo.Create(ctx, apiKey); err != nil {
-		return nil, fmt.Errorf("create api key: %w", err)
+	// 校验与写入必须同事务且串行（add-key-capacity-contract 2b.3）：
+	// 锁 user 行把同一用户的并发分配排成队，锁内重做聚合判定，再写。
+	// 不加锁时两个请求各自读到旧的 Σrequest、各自判定合法、各自写入 ⇒ 合计超池。
+	if err := s.userRepo.WithUserRowLock(ctx, userID, func(txCtx context.Context) error {
+		freshPool := 0
+		if u, uerr := s.userRepo.GetByID(txCtx, userID); uerr == nil && u != nil {
+			freshPool = u.Concurrency
+		}
+		if aerr := s.checkCapacityAllocation(txCtx, userID, freshPool, 0, req.ConcurrencyRequest, req.ConcurrencyLimit); aerr != nil {
+			return aerr
+		}
+		if cerr := s.apiKeyRepo.Create(txCtx, apiKey); cerr != nil {
+			return fmt.Errorf("create api key: %w", cerr)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	s.InvalidateAuthCacheByKey(ctx, apiKey.Key)
@@ -969,7 +986,8 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		if u, uerr := s.userRepo.GetByID(ctx, apiKey.UserID); uerr == nil && u != nil {
 			poolCapacity = u.Concurrency
 		}
-		// 排除自身：它旧的 request 不该与新的叠加
+		// 排除自身：它旧的 request 不该与新的叠加。
+		// 同 Create：这里的判定也会在下面写库前于行锁事务内重做一遍。
 		if err := s.checkCapacityAllocation(ctx, apiKey.UserID, poolCapacity, apiKey.ID, nextRequest, nextLimit); err != nil {
 			return nil, err
 		}
@@ -1003,8 +1021,29 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		fields.Status = true
 	}
 
-	if err := s.apiKeyRepo.Update(ctx, apiKey, fields); err != nil {
-		return nil, fmt.Errorf("update api key: %w", err)
+	// 容量字段有变时，校验与写入同事务串行（2b.3）；不变时走原路径，不加锁。
+	updateFn := func(wctx context.Context) error {
+		if fields.RateLimits {
+			freshPool := 0
+			if u, uerr := s.userRepo.GetByID(wctx, apiKey.UserID); uerr == nil && u != nil {
+				freshPool = u.Concurrency
+			}
+			if aerr := s.checkCapacityAllocation(wctx, apiKey.UserID, freshPool, apiKey.ID, apiKey.ConcurrencyRequest, apiKey.ConcurrencyLimit); aerr != nil {
+				return aerr
+			}
+		}
+		if uerr := s.apiKeyRepo.Update(wctx, apiKey, fields); uerr != nil {
+			return fmt.Errorf("update api key: %w", uerr)
+		}
+		return nil
+	}
+	// 只在真的动了时加锁：改名字/状态不需要串行化。
+	if req.ConcurrencyRequest != nil || req.ConcurrencyLimit != nil {
+		if err := s.userRepo.WithUserRowLock(ctx, apiKey.UserID, updateFn); err != nil {
+			return nil, err
+		}
+	} else if err := updateFn(ctx); err != nil {
+		return nil, err
 	}
 
 	s.InvalidateAuthCacheByKey(ctx, apiKey.Key)

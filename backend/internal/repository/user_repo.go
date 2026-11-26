@@ -176,6 +176,49 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 	return nil
 }
 
+// WithUserRowLock 在该用户的行锁事务内执行 fn，并且**先锁住 user 行**再执行。
+//
+// 为什么需要它（add-key-capacity-contract 2b.3）：key 容量分配的不变量是
+// "Σ concurrency_request ≤ 池容量"，校验读的是"其他 key 的 request 之和"，
+// 写的是"本 key 的 request"。两个并发请求各自读到旧和、各自判定合法、
+// 各自写入 ⇒ 合计超池。校验与写入必须在同一事务内、且彼此串行。
+//
+// 锁的是 **user 行**而不是 key 行：池容量记在 users.concurrency 上，同一用户的
+// 所有 key 分配都竞争这一行，锁它就把该用户的分配天然串成一条队。
+// 已有事务（ctx 带 tx）时直接复用，不嵌套。
+func (r *userRepository) WithUserRowLock(ctx context.Context, userID int64, fn func(context.Context) error) error {
+	if fn == nil {
+		return nil
+	}
+	if dbent.TxFromContext(ctx) != nil {
+		return fn(ctx)
+	}
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		if errors.Is(err, dbent.ErrTxStarted) {
+			return fn(ctx)
+		}
+		return fmt.Errorf("begin user row lock tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	txCtx := dbent.NewTxContext(ctx, tx)
+	// 行锁必须真的取到行；用户不存在时返回 ErrUserNotFound 而不是静默继续。
+	if _, qerr := tx.Client().User.Query().
+		Where(dbuser.IDEQ(userID)).
+		ForUpdate().
+		Only(txCtx); qerr != nil {
+		return translatePersistenceError(qerr, service.ErrUserNotFound, nil)
+	}
+	if ferr := fn(txCtx); ferr != nil {
+		return ferr
+	}
+	if cerr := tx.Commit(); cerr != nil {
+		return fmt.Errorf("commit user row lock tx: %w", cerr)
+	}
+	return nil
+}
+
 func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, error) {
 	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
 	if err != nil {
