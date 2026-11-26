@@ -127,6 +127,11 @@ type stubUserRepo struct {
 	getByID func(ctx context.Context, id int64) (*service.User, error)
 }
 
+// WithUserRowLock 测试桩无需真锁：直接跑 fn（add-key-capacity-contract 2b.3）。
+func (s *stubUserRepo) WithUserRowLock(ctx context.Context, _ int64, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
 func (s *stubUserRepo) Create(ctx context.Context, user *service.User) error {
 	panic("unexpected Create call")
 }

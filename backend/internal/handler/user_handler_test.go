@@ -26,6 +26,11 @@ type userHandlerRepoStub struct {
 	unbound    []string
 }
 
+// WithUserRowLock 测试桩无需真锁：直接跑 fn（add-key-capacity-contract 2b.3）。
+func (s *userHandlerRepoStub) WithUserRowLock(ctx context.Context, _ int64, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
 func (s *userHandlerRepoStub) Create(context.Context, *service.User) error { return nil }
 func (s *userHandlerRepoStub) CreateWithEmailAliasGuard(context.Context, *service.User) error {
 	return nil
