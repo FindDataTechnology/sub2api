@@ -637,8 +637,10 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 	// 不加锁时两个请求各自读到旧的 Σrequest、各自判定合法、各自写入 ⇒ 合计超池。
 	if err := s.withUserRowLock(ctx, userID, func(txCtx context.Context) error {
 		freshPool := 0
-		if u, uerr := s.userRepo.GetByID(txCtx, userID); uerr == nil && u != nil {
-			freshPool = u.Concurrency
+		if s.userRepo != nil {
+			if u, uerr := s.userRepo.GetByID(txCtx, userID); uerr == nil && u != nil {
+				freshPool = u.Concurrency
+			}
 		}
 		if aerr := s.checkCapacityAllocation(txCtx, userID, freshPool, 0, req.ConcurrencyRequest, req.ConcurrencyLimit); aerr != nil {
 			return aerr
@@ -1031,11 +1033,17 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	}
 
 	// 容量字段有变时，校验与写入同事务串行（2b.3）；不变时走原路径，不加锁。
+	//
+	// 判据必须只看**容量字段**：fields.RateLimits 是共用的位（rate_limit_5h 等也置它），
+	// 用它守卫会误伤只改限速的请求，把没注入 userRepo 的场景拖进 nil 解引用。
+	capacityChanged := req.ConcurrencyRequest != nil || req.ConcurrencyLimit != nil
 	updateFn := func(wctx context.Context) error {
-		if fields.RateLimits {
+		if capacityChanged {
 			freshPool := 0
-			if u, uerr := s.userRepo.GetByID(wctx, apiKey.UserID); uerr == nil && u != nil {
-				freshPool = u.Concurrency
+			if s.userRepo != nil {
+				if u, uerr := s.userRepo.GetByID(wctx, apiKey.UserID); uerr == nil && u != nil {
+					freshPool = u.Concurrency
+				}
 			}
 			if aerr := s.checkCapacityAllocation(wctx, apiKey.UserID, freshPool, apiKey.ID, apiKey.ConcurrencyRequest, apiKey.ConcurrencyLimit); aerr != nil {
 				return aerr
@@ -1046,8 +1054,7 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		}
 		return nil
 	}
-	// 只在真的动了时加锁：改名字/状态不需要串行化。
-	if req.ConcurrencyRequest != nil || req.ConcurrencyLimit != nil {
+	if capacityChanged {
 		if err := s.withUserRowLock(ctx, apiKey.UserID, updateFn); err != nil {
 			return nil, err
 		}
