@@ -950,7 +950,9 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, apiKey *
 				"Warning: rpm increment (key=%d) failed for user=%d: %v",
 				apiKey.ID, user.ID, err,
 			)
-			// fail-open：计数后端故障不得变成全站 429
+			// fail-open：计数后端故障不得变成全站 429。
+			// 这行 warning 是**唯一的可观测出口**——tools/key-health.sql 第 5 段
+			// 从日志聚合它（2.3）。改日志文案会让该段失效，改前先同步报表。
 		} else if count > apiKey.RPMLimit {
 			return ErrAPIKeyRPMExceeded
 		}

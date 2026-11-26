@@ -132,3 +132,17 @@ SELECT count(*) FILTER (WHERE err > 0)                       AS keys_with_failur
        'max_ratio_among_failing 必须 < 1（=1 说明分母漏了失败）'      AS note
 FROM joined
 WHERE ok + err > 0;
+\echo '══════ 5. key 级 RPM 的 fail-open 可见性（2.3）══════'
+-- fail-open 本身是对的：计数后端（Redis）故障时放行，不让限流器把全站变成 429。
+-- 但**静默失效比故障更危险**——限流一旦不生效，外部只会看到"额度突然不管用了"。
+--
+-- 口径与限制（必须一起读）：
+--   · 计数在**日志**里，不在 DB：`Warning: rpm increment (key=%d) failed for user=%d`
+--     （internal/service/billing_cache_service.go）。所以本段查不到任何东西**不代表没发生**，
+--     只代表 `kubectl logs` 里没有这一行。
+--   · 该日志写在 pod stdout，容器重启即失。要长期曲线必须先把日志收进聚合器；
+--     我们没有，故这里只给「当前 pod 生命周期内」的读法。
+--   · 改那条日志的文案会让本段失效——改前先同步本文件。
+\echo '  查询命令（本段故意不写 SQL，因为它不在 DB 里）：'
+\echo '    kubectl --context cheap -n sub2api logs -l app=sub2api --since=24h | grep -c "rpm increment (key="'
+\echo '  判读：> 0 说明有过 fail-open（限流静默失效）；配合 --since 看首次出现时间定位 Redis 故障窗口。'
