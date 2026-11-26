@@ -183,7 +183,7 @@
 - [x] 1.3 `capabilities.limits` 增 `concurrency_limit` / `rpm_limit` / `effective_at`
   ——验证：真实 key 调用返回三字段；默认值为 0/0/null 时不误报为"受限"
 - [x] 1.3b **有效上限与来源**：`effective_concurrency_limit` / `effective_rpm_limit` /
-  `limit_source`（`key|user|group|unlimited`）——验证：构造「key=0 但 user=5」的用例，
+  `limit_source`（`key|user|unlimited`；**无 `group`**——分组限额走 rpm 的独立分支，不进 effective 取值链）——验证：构造「key=0 但 user=5」的用例，
   断言 `effective=5` 且 `limit_source=user`，且响应中**不出现"不限"**（这是最容易骗到人的一处）
 
 ## M2 key 级准入（默认不限，存量零影响）
