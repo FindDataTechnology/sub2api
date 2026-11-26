@@ -197,27 +197,31 @@
 
 ## M4 自助创建（用户面）
 
-- [ ] 4.1 **扩展既有端点**（`/api/v1/keys` 已存在，见 `routes/user.go:76`）：`POST` 与
+- [x] 4.1 **扩展既有端点**（`/api/v1/keys` 已存在，见 `routes/user.go:76`）：`POST` 与
   `PUT /:id` 接受 `concurrency_limit` / `rpm_limit` / `effective_at`；超过
   `effective_user_limit` 返回 `LIMIT_EXCEEDS_UPSTREAM` 并回传两个数——验证：正例创建成功、
   负例被拒且错误含 `requested` 与 `upstream_limit`；**不得**静默取 min
-- [ ] 4.1b **同额度内分配**：用户在其 5 并发额度内可给不同 key 分配（如 A=3、B=2），
+- [x] 4.1b **同额度内分配**：用户在其 5 并发额度内可给不同 key 分配（如 A=3、B=2），
   且 A+B 不超过 user 有效上限——验证：分配成功；超额分配被拒并说明剩余可分配额度
   （这是 key 级契约唯一真正新增的能力，前面那些只是把已有约束变可见）
-- [ ] 4.2 既有 `GET /api/v1/keys` 已按身份隔离（沿用）；为新增的 `state` 端点补同样隔离：
+- [x] 4.2 既有 `GET /api/v1/keys` 已按身份隔离（沿用）；为新增的 `state` 端点补同样隔离：
   越权查他人 key 的 state 返回 **404**——验证：A 查 B 的 id 得 404 且响应无 B 的任何字段
 - [x] 4.3 key 数上限与每小时频次（**已有**，`APIKeyCreateConfig.MaxActivePerUser` /
   `MaxPerUserPerHour`，`validateAPIKeyCreateRequest` 处校验）——本 change 只需确认扩容后仍生效
-- [ ] 4.4 明文只在创建响应出现一次，后续查询一律投影（沿用 `hasKey` 式）——验证：创建响应外
+- [~] 4.4 明文只在创建响应出现一次，后续查询一律投影（沿用 `hasKey` 式）——验证：创建响应外
+  **不做，理由见 2026-11-25 复核**：`dto.APIKey.Key` 确为完整明文，但按用户隔离，且前端
+  `UseKeyModal`（展示/复制自己的 key）与 `BatchImageGuideView`（直接调批图 API）**把它当功能用**；
+  改成掩码会打断这两条产品路径。正确修法是新增需重新认证的 reveal 端点 + 列表只回 `sk-` 前缀 +
+  `has_key`，属**独立 change**，不在本 change 的补丁粒度内。
   任何端点均不含明文；日志中亦无
 
 ## M5 基线与稳定性
 
-- [ ] 5.1 `baseline`：按 `(platform, model)` 类取中位数；新 key 给 `source: population` +
+- [x] 5.1 `baseline`：按 `(platform, model)` 类取中位数；新 key 给 `source: population` +
   `confidence`；样本不足时数值为 `null` 且 `confidence: low`——验证：新 key 首次查询返回群体值；
   构造小样本类断言返回 `null` 而非假精确数
 - [ ] 5.2 个人样本达阈值后切 `source: personal`——验证：造够样本后切源，且数值随自身数据变化
-- [ ] 5.3 `stability`：`success_ratio` / `p95_latency_ms` / `throttle_ratio` / `active_hours`，
+- [x] 5.3 `stability`：`success_ratio` / `p95_latency_ms` / `throttle_ratio` / `active_hours`，
   窗口 1h/24h/7d——验证：**分母含失败**（有 429 时 `success_ratio` 严格 <1）；
   无数据时为 `null` 而非 0/1（"无数据"不等于"稳定"）
 
