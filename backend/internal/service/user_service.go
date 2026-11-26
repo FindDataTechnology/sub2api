@@ -135,8 +135,8 @@ func (f UserUpdateFields) IsEmpty() bool {
 //   - 生产实现（userRepository）实现了它 ⇒ 分配走真锁；
 //   - 桩没实现 ⇒ 退回不加锁（桩本身单 goroutine，行为等价）。
 //
-// 代价：**生产实现漏实现时不会编译失败**，只会静默降级。故 userRepository 上有
-// 编译期断言 `var _ UserRowLocker = (*userRepository)(nil)`（见 repository 包）。
+// 生产实现漏掉这个方法会静默降级为不加锁，所以 repository 包里有编译期断言
+// `var _ service.UserRowLocker = (*userRepository)(nil)` —— 漏了直接编译失败。
 type UserRowLocker interface {
 	WithUserRowLock(ctx context.Context, userID int64, fn func(context.Context) error) error
 }
